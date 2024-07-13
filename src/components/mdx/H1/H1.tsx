@@ -2,7 +2,7 @@ import React from 'react'
 
 import styled from '@emotion/styled'
 
-export default function H1({ children }: { children?: React.ReactNode }) {
+export const H1 = ({ children }: { children?: React.ReactNode }) => {
   return <StyledH1 className="mdx-h1">{children}</StyledH1>
 }
 
