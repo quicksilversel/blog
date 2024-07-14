@@ -58,9 +58,11 @@ export default function Index({
       <Box>
         <Box.Title>Articles</Box.Title>
         <Grid>
-          {articles.map((article) => {
-            return <Card key={article.slug} {...article} />
-          })}
+          {articles
+            .filter((article) => !!article.published)
+            .map((article) => {
+              return <Card key={article.slug} {...article} />
+            })}
         </Grid>
       </Box>
     </>

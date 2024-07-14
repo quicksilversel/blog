@@ -1,48 +1,15 @@
-import { ReactNode, isValidElement } from 'react'
+import { ReactNode } from 'react'
 
 import styled from '@emotion/styled'
-import { Highlight } from 'prism-react-renderer'
 
-type Props = {
-  children?: ReactNode
+export const Code = ({ children }: { children?: ReactNode }) => {
+  return <StyledCode>{children}</StyledCode>
 }
 
-export const Code = ({ children }: Props) => {
-  if (
-    !isValidElement(children) ||
-    typeof children.props.children !== 'string'
-  ) {
-    return null
-  }
-
-  const code = children.props.children
-
-  if (!code) return null
-
-  const language = children?.props.className?.replace('language-', '').trim()
-
-  return (
-    <Highlight code={code} language={language}>
-      {({ tokens, getLineProps, getTokenProps }) => (
-        <pre>
-          <CodeWrapper>
-            {tokens.map((line, index) => (
-              <div key={`token-${index}`} {...getLineProps({ line })}>
-                {line.map((token, index) => (
-                  <span key={`line-${index}`} {...getTokenProps({ token })} />
-                ))}
-              </div>
-            ))}
-          </CodeWrapper>
-        </pre>
-      )}
-    </Highlight>
-  )
-}
-
-const CodeWrapper = styled.div`
-  padding: 16px;
-  margin-top: 16px;
-  background-color: hsl(var(--color-syntax-background));
-  border-radius: 8px;
+const StyledCode = styled.code`
+  padding: 4px;
+  font-size: 0.9rem;
+  font-family: var(--font-family-mono);
+  background: hsl(var(--color-syntax-background));
+  border-radius: 4px;
 `
