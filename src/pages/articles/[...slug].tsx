@@ -7,26 +7,13 @@ import Head from 'next/head'
 import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
 
-import { H1 } from '@/components/mdx/H1'
+import { GlobalStyles } from '@/components/Styles'
+import { ArticleBody } from '@/components/UI/Article/Body'
+import { ArticleHeader } from '@/components/UI/Article/Header'
+import { Header } from '@/components/UI/Header'
+import { H1, H2, P } from '@/components/UI/mdx'
 import { ARTICLE_PATH } from '@/utils/constants'
 
-export default function Article({
-  source,
-}: InferGetStaticPropsType<typeof getStaticProps>) {
-  return (
-    <>
-      <Head>
-        <title>{source.frontmatter.title as string}</title>
-      </Head>
-      <MDXRemote
-        {...source}
-        components={{
-          h1: H1,
-        }}
-      />
-    </>
-  )
-}
 export async function getStaticPaths() {
   return { paths: [], fallback: 'blocking' }
 }
@@ -47,4 +34,33 @@ export async function getStaticProps(
     },
     revalidate: 60,
   }
+}
+
+export default function Article({
+  source,
+}: InferGetStaticPropsType<typeof getStaticProps>) {
+  return (
+    <>
+      <Head>
+        <title>{String(source.frontmatter.title)}</title>
+      </Head>
+      <main>
+        <GlobalStyles />
+        <Header />
+        <article>
+          <ArticleHeader title={String(source.frontmatter.title)} />
+          <ArticleBody>
+            <MDXRemote
+              {...source}
+              components={{
+                h1: H1,
+                h2: H2,
+                p: P,
+              }}
+            />
+          </ArticleBody>
+        </article>
+      </main>
+    </>
+  )
 }

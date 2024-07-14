@@ -3,14 +3,16 @@
 import fs from 'fs'
 import path from 'path'
 
-import styled from '@emotion/styled'
 import { InferGetStaticPropsType } from 'next'
-import Link from 'next/link'
 import { serialize } from 'next-mdx-remote/serialize'
 
-import type { ArticlePreview } from '@/utils/types/article'
-import type { Metadata } from 'next'
+import type { Article } from '@/utils/types/article'
 
+import { Box } from '@/components/Layout/Box'
+import { Grid } from '@/components/Layout/Grid'
+import { GlobalStyles } from '@/components/Styles'
+import { Card } from '@/components/UI/Card'
+import { Header } from '@/components/UI/Header'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticProps() {
@@ -20,7 +22,7 @@ export async function getStaticProps() {
       return path.extname(articleFilePath).toLowerCase() === '.mdx'
     })
 
-  const articles: ArticlePreview[] = []
+  const articles: Article[] = []
 
   for (const articleFilePath of articleFilePaths) {
     const articleFile = fs.readFileSync(
@@ -35,7 +37,7 @@ export async function getStaticProps() {
     articles.push({
       ...serializedArticle.frontmatter,
       slug: articleFilePath.replace('.mdx', ''),
-    } as ArticlePreview)
+    } as Article)
   }
 
   return {
@@ -50,20 +52,17 @@ export default function Index({
   articles,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
-    <DefaultLayout>
-      {articles.map((article) => {
-        return (
-          <Link key={article.slug} href={`/articles/${article.slug}`}>
-            <h2>{article.title}</h2>
-            <p>{article.description}</p>
-          </Link>
-        )
-      })}
-    </DefaultLayout>
+    <>
+      <GlobalStyles />
+      <Header />
+      <Box>
+        <Box.Title>Articles</Box.Title>
+        <Grid>
+          {articles.map((article) => {
+            return <Card key={article.slug} {...article} />
+          })}
+        </Grid>
+      </Box>
+    </>
   )
 }
-
-const DefaultLayout = styled.main`
-  max-width: 1000px;
-  margin: 0 auto;
-`

@@ -1,6 +1,6 @@
-export type ArticlePreview = {
+export type Article = {
   title: string
-  description: string
-  previewImage: string
+  description?: string
+  topics?: string[]
   slug: string
 }
