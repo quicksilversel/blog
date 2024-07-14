@@ -14,7 +14,7 @@ export const ArticleHeader = ({ title }: Props) => {
 
 const Container = styled.header`
   padding: 36px;
-  background: hsl(var(--color-floating));
+  text-align: center;
 `
 
 const Title = styled.h1`

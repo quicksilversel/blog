@@ -10,7 +10,7 @@ const StyledH2 = styled.h2`
   color: hsl(var(--color-secondary));
   font-size: var(--font-size-medium);
 
-  &:not(:first-of-type) {
+  * + & {
     margin-top: 16px;
   }
 `

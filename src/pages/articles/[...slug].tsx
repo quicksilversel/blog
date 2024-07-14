@@ -2,6 +2,7 @@ import fs from 'fs'
 
 import React from 'react'
 
+import styled from '@emotion/styled'
 import { GetStaticPropsContext, InferGetStaticPropsType } from 'next'
 import Head from 'next/head'
 import { MDXRemote } from 'next-mdx-remote'
@@ -11,7 +12,16 @@ import { GlobalStyles } from '@/components/Styles'
 import { ArticleBody } from '@/components/UI/Article/Body'
 import { ArticleHeader } from '@/components/UI/Article/Header'
 import { Header } from '@/components/UI/Header'
-import { H1, H2, P, Code, HighlightedCode } from '@/components/UI/mdx'
+import {
+  H1,
+  H2,
+  P,
+  Code,
+  HighlightedCode,
+  Blockquote,
+  Li,
+  Anchor,
+} from '@/components/UI/mdx'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticPaths() {
@@ -47,7 +57,7 @@ export default function Article({
       <main>
         <GlobalStyles />
         <Header />
-        <article>
+        <Container>
           <ArticleHeader title={String(source.frontmatter.title)} />
           <ArticleBody>
             <MDXRemote
@@ -58,11 +68,19 @@ export default function Article({
                 p: P,
                 pre: HighlightedCode,
                 code: Code,
+                blockquote: Blockquote,
+                li: Li,
+                a: Anchor,
               }}
             />
           </ArticleBody>
-        </article>
+        </Container>
       </main>
     </>
   )
 }
+
+const Container = styled.article`
+  max-width: 1000px;
+  margin: 0 auto;
+`

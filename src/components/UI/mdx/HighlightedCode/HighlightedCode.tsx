@@ -19,7 +19,7 @@ export const HighlightedCode = ({ children }: Props) => {
 
   if (!code) return null
 
-  const language = children?.props.className?.replace('language-', '').trim()
+  const language = children.props.className?.replace('language-', '').trim()
 
   return (
     <Highlight code={code} language={language}>
@@ -41,6 +41,7 @@ export const HighlightedCode = ({ children }: Props) => {
 }
 
 const CodeWrapper = styled.div`
+  position: relative;
   padding: 16px;
   margin-top: 16px;
   background-color: hsl(var(--color-syntax-background));
