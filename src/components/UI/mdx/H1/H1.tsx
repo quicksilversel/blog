@@ -3,7 +3,7 @@ import { ReactNode } from 'react'
 import styled from '@emotion/styled'
 
 export const H1 = ({ children }: { children?: ReactNode }) => {
-  return <StyledH1 className="mdx-h1">{children}</StyledH1>
+  return <StyledH1>{children}</StyledH1>
 }
 
 const StyledH1 = styled.h1`

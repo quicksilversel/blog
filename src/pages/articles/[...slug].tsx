@@ -11,7 +11,7 @@ import { GlobalStyles } from '@/components/Styles'
 import { ArticleBody } from '@/components/UI/Article/Body'
 import { ArticleHeader } from '@/components/UI/Article/Header'
 import { Header } from '@/components/UI/Header'
-import { H1, H2, P } from '@/components/UI/mdx'
+import { H1, H2, P, Code } from '@/components/UI/mdx'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticPaths() {
@@ -56,6 +56,7 @@ export default function Article({
                 h1: H1,
                 h2: H2,
                 p: P,
+                pre: Code,
               }}
             />
           </ArticleBody>

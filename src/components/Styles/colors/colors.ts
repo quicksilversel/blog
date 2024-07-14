@@ -7,6 +7,7 @@ export const colors = css`
     --color-floating: 0deg, 0%, 100%;
     --color-primary: 245deg, 100%, 60%;
     --color-secondary: 333deg, 100%, 45%;
+    --color-syntax-background: 225deg, 25%, 97%;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -14,6 +15,7 @@ export const colors = css`
       --color-background: 210deg, 30%, 8%;
       --color-text: 0deg, 0%, 100%;
       --color-floating: 210deg, 22%, 15%;
+      --color-syntax-background: 210deg, 30%, 12%;
     }
 
     html {
