@@ -1,1 +1,1 @@
-export const ARTICLE_PATH = 'article'
+export const ARTICLE_PATH = 'articles/articles'
