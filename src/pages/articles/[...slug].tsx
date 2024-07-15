@@ -26,7 +26,7 @@ import {
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticPaths() {
-  return { paths: [], fallback: 'blocking' }
+  return { paths: [], fallback: true }
 }
 
 export async function getStaticProps(
