@@ -20,6 +20,7 @@ import {
   Blockquote,
   Li,
   Anchor,
+  Img,
 } from '@/components/UI/mdx'
 import { ARTICLE_PATH } from '@/utils/constants'
 
@@ -82,6 +83,7 @@ export default function Article({
                 blockquote: Blockquote,
                 li: Li,
                 a: Anchor,
+                img: Img,
               }}
             />
           </ArticleBody>
