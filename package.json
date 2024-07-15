@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:js": "eslint \"./src/**/*.{ts,tsx}\"",
+    "lint:js:fix": "eslint --fix \"./src/**/*.{ts,tsx}\""
   },
   "dependencies": {
     "@emotion/css": "^11.11.2",

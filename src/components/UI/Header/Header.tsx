@@ -21,7 +21,7 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
   )
 }
 
-const Container = styled.nav`
+const Container = styled.header`
   position: sticky;
   top: 0;
   left: 0;

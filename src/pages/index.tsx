@@ -57,16 +57,18 @@ export default function Index({
         <title>{metadata.title}</title>
         <meta name="description" content={metadata.description} />
       </Head>
-      <Box>
-        <Box.Title>Articles</Box.Title>
-        <Grid>
-          {articles
-            .filter((article) => !!article.published)
-            .map((article) => {
-              return <Card key={article.slug} {...article} />
-            })}
-        </Grid>
-      </Box>
+      <main>
+        <Box>
+          <Box.Title>Articles</Box.Title>
+          <Grid>
+            {articles
+              .filter((article) => !!article.published)
+              .map((article) => {
+                return <Card key={article.slug} {...article} />
+              })}
+          </Grid>
+        </Box>
+      </main>
     </>
   )
 }

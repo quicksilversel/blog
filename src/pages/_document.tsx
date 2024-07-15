@@ -11,6 +11,8 @@ import Document, {
   DocumentContext,
 } from 'next/document'
 
+import { GoogleAnalytics } from '@/components/Functional/GoogleAnalytics'
+
 export default class MyDocument extends Document {
   static async getInitialProps(ctx: DocumentContext) {
     const originalRenderPage = ctx.renderPage
@@ -48,7 +50,10 @@ export default class MyDocument extends Document {
   render() {
     return (
       <Html lang="en">
-        <Head />
+        <Head>
+          <GoogleAnalytics />
+        </Head>
+
         <body>
           <Main />
           <NextScript />
