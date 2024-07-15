@@ -15,7 +15,7 @@ export const HighlightedCode = ({ children }: Props) => {
     return null
   }
 
-  const code = children.props.children
+  const code = children.props.children.trim()
 
   if (!code) return null
 

@@ -15,6 +15,7 @@ import { Header } from '@/components/UI/Header'
 import {
   H1,
   H2,
+  H3,
   P,
   Code,
   HighlightedCode,
@@ -65,6 +66,7 @@ export default function Article({
               components={{
                 h1: H1,
                 h2: H2,
+                h3: H3,
                 p: P,
                 pre: HighlightedCode,
                 code: Code,
