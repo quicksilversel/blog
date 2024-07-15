@@ -25,8 +25,21 @@ import {
 } from '@/components/UI/mdx'
 import { ARTICLE_PATH } from '@/utils/constants'
 
+const getAllPages = () => {
+  const pages = fs.readdirSync(ARTICLE_PATH).map((page) => {
+    return {
+      params: {
+        slug: page.replace('.mdx', '').split('/'),
+      },
+    }
+  })
+
+  return pages
+}
+
 export async function getStaticPaths() {
-  return { paths: [], fallback: true }
+  const paths = getAllPages()
+  return { paths, fallback: false }
 }
 
 export async function getStaticProps(
