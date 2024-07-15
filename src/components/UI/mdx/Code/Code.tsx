@@ -10,6 +10,6 @@ const StyledCode = styled.code`
   padding: 4px;
   font-size: 0.9rem;
   font-family: var(--font-family-mono);
-  background: hsl(var(--color-syntax-background));
+  background: ${({ theme }) => theme.muted};
   border-radius: 4px;
 `

@@ -11,7 +11,7 @@ export const Anchor = ({ children, ...rest }: { children?: ReactNode }) => {
 }
 
 const StyledAnchor = styled.a`
-  color: hsl(var(--color-primary));
+  color: ${({ theme }) => theme.primary};
   text-underline-offset: 4px;
   font-weight: bold;
 

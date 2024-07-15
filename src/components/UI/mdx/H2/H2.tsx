@@ -7,7 +7,7 @@ export const H2 = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledH2 = styled.h2`
-  color: hsl(var(--color-secondary));
+  color: ${({ theme }) => theme.primary};
   font-size: var(--font-size-medium);
 
   * + & {

@@ -29,7 +29,7 @@ const Title = styled.h2`
   font-size: var(--font-size-small);
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: hsl(var(--color-secondary));
+  color: ${({ theme }) => theme.primary};
 `
 
 Box.Title = Title

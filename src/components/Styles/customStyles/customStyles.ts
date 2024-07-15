@@ -1,13 +1,17 @@
 import { css } from '@emotion/react'
 
-export const customStyles = css`
+import type { Theme } from '@emotion/react'
+export const customStyles = (theme: Theme) => css`
   body {
-    color: hsl(var(--color-text));
-    background: hsl(var(--color-background));
+    color: ${theme.text};
+    background: ${theme.background};
     font-family: var(--font-family);
+    transition:
+      background 0.2s ease-in,
+      color 0.2s ease-in;
   }
 
   a:hover {
-    color: hsl(var(--color-primary));
+    color: ${theme.primary};
   }
 `

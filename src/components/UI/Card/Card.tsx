@@ -19,7 +19,7 @@ export const Card = ({ title, description, topics, slug }: Article) => {
 }
 const Container = styled.article`
   padding: 24px;
-  background-color: hsl(var(--color-floating));
+  background-color: ${({ theme }) => theme.floating};
   border-radius: 8px;
 `
 
@@ -43,7 +43,7 @@ const TopicList = styled.div`
 const Topic = styled.span`
   padding: 8px;
   font-size: 0.875rem;
-  background-color: hsl(var(--color-primary));
-  color: hsl(var(--color-text));
+  background-color: ${({ theme }) => theme.muted};
+  color: ${({ theme }) => theme.text};
   border-radius: 4px;
 `

@@ -4,16 +4,16 @@ import fs from 'fs'
 import path from 'path'
 
 import { InferGetStaticPropsType } from 'next'
+import Head from 'next/head'
 import { serialize } from 'next-mdx-remote/serialize'
 
 import type { Article } from '@/utils/types/article'
 
 import { Box } from '@/components/Layout/Box'
 import { Grid } from '@/components/Layout/Grid'
-import { GlobalStyles } from '@/components/Styles'
 import { Card } from '@/components/UI/Card'
-import { Header } from '@/components/UI/Header'
 import { ARTICLE_PATH } from '@/utils/constants'
+import { metadata } from '@/utils/constants/meta'
 
 export async function getStaticProps() {
   const articleFilePaths = fs
@@ -53,8 +53,10 @@ export default function Index({
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
     <>
-      <GlobalStyles />
-      <Header />
+      <Head>
+        <title>{metadata.title}</title>
+        <meta name="description" content={metadata.description} />
+      </Head>
       <Box>
         <Box.Title>Articles</Box.Title>
         <Grid>

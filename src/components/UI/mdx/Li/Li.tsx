@@ -14,7 +14,7 @@ const StyledLi = styled.li`
     content: counter(counts) '.';
     font-feature-settings: 'tnum';
     font-weight: bold;
-    color: hsl(var(--color-primary));
+    color: ${({ theme }) => theme.primary};
     padding-right: 8px;
   }
 

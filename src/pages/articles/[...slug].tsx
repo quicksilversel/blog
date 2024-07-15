@@ -8,10 +8,8 @@ import Head from 'next/head'
 import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
 
-import { GlobalStyles } from '@/components/Styles'
 import { ArticleBody } from '@/components/UI/Article/Body'
 import { ArticleHeader } from '@/components/UI/Article/Header'
-import { Header } from '@/components/UI/Header'
 import {
   H1,
   H2,
@@ -69,8 +67,6 @@ export default function Article({
         <title>{String(source.frontmatter.title)}</title>
       </Head>
       <main>
-        <GlobalStyles />
-        <Header />
         <Container>
           <ArticleHeader title={String(source.frontmatter.title)} />
           <ArticleBody>

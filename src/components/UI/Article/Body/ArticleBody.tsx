@@ -8,4 +8,8 @@ export const ArticleBody = ({ children }: { children: ReactNode }) => {
 
 const Container = styled.section`
   padding: 32px;
+
+  *::selection {
+    background: ${({ theme }) => theme.secondary};
+  }
 `

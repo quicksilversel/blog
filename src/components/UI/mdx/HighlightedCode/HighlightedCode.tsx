@@ -44,6 +44,6 @@ const CodeWrapper = styled.div`
   position: relative;
   padding: 16px;
   margin-top: 16px;
-  background-color: hsl(var(--color-syntax-background));
+  background-color: ${({ theme }) => theme.syntaxBackground};
   border-radius: 8px;
 `
