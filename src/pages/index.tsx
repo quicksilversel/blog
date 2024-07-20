@@ -11,6 +11,7 @@ import type { Article } from '@/utils/types/article'
 
 import { Box } from '@/components/Layout/Box'
 import { Grid } from '@/components/Layout/Grid'
+import { About } from '@/components/UI/About'
 import { Card } from '@/components/UI/Card'
 import { ARTICLE_PATH } from '@/utils/constants'
 import { metadata } from '@/utils/constants/meta'
@@ -58,6 +59,9 @@ export default function Index({
         <meta name="description" content={metadata.description} />
       </Head>
       <main>
+        <Box>
+          <About />
+        </Box>
         <Box>
           <Box.Title>Articles</Box.Title>
           <Grid>

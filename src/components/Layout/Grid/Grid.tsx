@@ -12,6 +12,7 @@ const Container = styled.div`
   gap: 32px;
 
   @media (max-width: 35.1875rem) {
+    grid-template-columns: 1fr;
     gap: 16px;
   }
 `
