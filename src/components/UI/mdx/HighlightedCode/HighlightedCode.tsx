@@ -46,4 +46,5 @@ const CodeWrapper = styled.div`
   margin-top: 16px;
   background-color: ${({ theme }) => theme.syntaxBackground};
   border-radius: 8px;
+  overflow-x: scroll;
 `

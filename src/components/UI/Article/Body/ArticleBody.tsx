@@ -12,4 +12,8 @@ const Container = styled.section`
   *::selection {
     background: ${({ theme }) => theme.secondary};
   }
+
+  @media (max-width: 35.1875rem) {
+    padding: 16px;
+  }
 `

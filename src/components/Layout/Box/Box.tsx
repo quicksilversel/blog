@@ -11,15 +11,11 @@ const Container = styled.div`
   z-index: 2;
   width: 100%;
   max-width: 1000px;
-  padding-inline: 32px;
+  padding: 32px;
   margin-inline: auto;
 
   @media (max-width: 35.1875rem) {
     padding-inline: 16px;
-  }
-
-  &:not(:first-of-type) {
-    margin-top: 64px;
   }
 `
 
