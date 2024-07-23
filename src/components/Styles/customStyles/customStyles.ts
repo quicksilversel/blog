@@ -5,6 +5,7 @@ export const customStyles = (theme: Theme) => css`
   body {
     color: ${theme.text};
     background: ${theme.background};
+    accent-color: ${theme.primary};
     font-family: var(--font-family);
     transition:
       background 0.2s ease-in,

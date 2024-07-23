@@ -1,6 +1,6 @@
 const commonTheme = {
-  primary: 'hsl(245deg, 100%, 60%)',
-  secondary: 'hsl(174deg, 97%, 43%)',
+  primary: 'hsl(320deg 100% 40%)',
+  secondary: 'hsl(230deg, 100%, 69%)',
   syntaxBackground: 'hsl(210deg, 30%, 12%)',
 }
 

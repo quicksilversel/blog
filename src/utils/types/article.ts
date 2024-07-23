@@ -3,5 +3,6 @@ export type Article = {
   description?: string
   topics?: string[]
   published?: boolean
+  date: string
   slug: string
 }

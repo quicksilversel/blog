@@ -8,7 +8,7 @@ import type { ThemeContext } from '@/pages/_app'
 export const Header = ({ theme, setTheme }: ThemeContext) => {
   const toggleTheme = () => {
     setTheme(theme === 'light' ? 'dark' : 'light')
-    localStorage.setItem('theme', theme)
+    localStorage.setItem('theme', theme === 'light' ? 'dark' : 'light')
   }
 
   return (

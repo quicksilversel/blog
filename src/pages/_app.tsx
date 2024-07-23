@@ -17,9 +17,14 @@ function MyApp({ Component, pageProps }: AppProps) {
   const [theme, setTheme] = useState<ThemeContext['theme']>('dark')
 
   useEffect(() => {
+    const savedTheme = localStorage.getItem('theme')
     const prefersLight =
       window.matchMedia &&
       window.matchMedia('(prefers-color-scheme: light)').matches
+
+    if (savedTheme) {
+      setTheme(savedTheme === 'dark' ? 'dark' : 'light')
+    }
 
     if (prefersLight) {
       setTheme('light')
