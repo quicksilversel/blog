@@ -14,7 +14,13 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
   return (
     <Container>
       <Link href="/">Home</Link>
-      <Button type="button" onClick={toggleTheme}>
+      <Button
+        type="button"
+        onClick={toggleTheme}
+        aria-label={
+          theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'
+        }
+      >
         {theme === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
       </Button>
     </Container>

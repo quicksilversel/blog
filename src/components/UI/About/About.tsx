@@ -14,6 +14,7 @@ export const About = () => {
             href="https://github.com/quicksilversel"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="GitHub"
           >
             <GitHubIcon />
           </Link>
@@ -21,6 +22,7 @@ export const About = () => {
             href="https://codepen.io/quicksilversel"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="CodePen"
           >
             <CodePenIcon
               fill="currentColor"
