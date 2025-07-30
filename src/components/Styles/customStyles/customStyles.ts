@@ -1,6 +1,7 @@
 import { css } from '@emotion/react'
 
 import type { Theme } from '@emotion/react'
+
 export const customStyles = (theme: Theme) => css`
   body {
     color: ${theme.text};

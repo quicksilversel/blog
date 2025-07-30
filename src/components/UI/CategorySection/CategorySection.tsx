@@ -18,30 +18,30 @@ type Props = {
   articles: Article[]
 }
 
+const ARTICLE_LIMIT = 4
+
 export const CategorySection = ({ category, articles }: Props) => {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
-  
-  const availableTopics = useMemo(
-    () => extractAllTopics(articles),
-    [articles]
-  )
-  
+
+  const availableTopics = useMemo(() => extractAllTopics(articles), [articles])
+
   const filteredArticles = useMemo(
     () => filterArticlesByTopic(articles, selectedTopic),
-    [articles, selectedTopic]
+    [articles, selectedTopic],
   )
-  
-  const displayedArticles = filteredArticles.slice(0, 2)
-  const hasMore = filteredArticles.length > 2
-  
+
+  const displayedArticles = filteredArticles.slice(0, ARTICLE_LIMIT)
+  const hasMore = filteredArticles.length > ARTICLE_LIMIT
+
   return (
     <Box>
-      <CategoryTitle>{getCategoryDisplayName(category)}</CategoryTitle>
+      <Box.Title>{getCategoryDisplayName(category)}</Box.Title>
       <TopicFilter
         topics={availableTopics}
         selectedTopic={selectedTopic}
         onTopicSelect={setSelectedTopic}
       />
+
       <Grid>
         {displayedArticles.map((article) => (
           <Card key={article.slug} {...article} />
@@ -51,7 +51,8 @@ export const CategorySection = ({ category, articles }: Props) => {
         <ShowMoreContainer>
           <Link href={`/categories/${category}`}>
             <ShowMoreButton>
-              Show more {getCategoryDisplayName(category).toLowerCase()} articles →
+              Show more {getCategoryDisplayName(category).toLowerCase()}{' '}
+              articles →
             </ShowMoreButton>
           </Link>
         </ShowMoreContainer>
@@ -60,12 +61,6 @@ export const CategorySection = ({ category, articles }: Props) => {
   )
 }
 
-const CategoryTitle = styled.h2`
-  font-size: 1.8rem;
-  margin-bottom: 1.5rem;
-  font-weight: 700;
-`
-
 const ShowMoreContainer = styled.div`
   display: flex;
   justify-content: center;
@@ -73,15 +68,12 @@ const ShowMoreContainer = styled.div`
 `
 
 const ShowMoreButton = styled.button`
-  padding: 0.75rem 1.5rem;
-  background: ${({ theme }) => theme.colors.primary};
-  color: white;
+  color: ${({ theme }) => theme.primary};
   border: none;
-  border-radius: 8px;
-  font-size: 1rem;
+  font-size: var(--font-size-extra-small);
   cursor: pointer;
   transition: all 0.2s ease;
-  
+
   &:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);

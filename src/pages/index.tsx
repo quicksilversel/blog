@@ -12,7 +12,7 @@ import { serialize } from 'next-mdx-remote/serialize'
 import type { Article, Category } from '@/utils/types/article'
 
 import { Box } from '@/components/Layout/Box'
-import { About } from '@/components/UI/About'
+import { Hero } from '@/components/Pages/Home/Hero'
 import { CategorySection } from '@/components/UI/CategorySection'
 import { groupArticlesByCategory } from '@/modules/categories'
 import { ARTICLE_PATH } from '@/utils/constants'
@@ -40,7 +40,7 @@ export async function getStaticProps() {
         ...serializedArticle.frontmatter,
         slug: articleFilePath.replace('.mdx', ''),
       } as Article
-    })
+    }),
   )
 
   articles.sort((a, b) => Number(new Date(b.date)) - Number(new Date(a.date)))
@@ -58,14 +58,14 @@ export default function Index({
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   const publishedArticles = useMemo(
     () => articles.filter((article) => !!article.published),
-    [articles]
+    [articles],
   )
-  
+
   const articlesByCategory = useMemo(
     () => groupArticlesByCategory(publishedArticles),
-    [publishedArticles]
+    [publishedArticles],
   )
-  
+
   return (
     <>
       <Head>
@@ -74,15 +74,17 @@ export default function Index({
       </Head>
       <main>
         <Box>
-          <About />
+          <Hero />
         </Box>
-        {Object.entries(articlesByCategory).map(([category, categoryArticles]) => (
-          <CategorySection
-            key={category}
-            category={category as Category}
-            articles={categoryArticles}
-          />
-        ))}
+        {Object.entries(articlesByCategory).map(
+          ([category, categoryArticles]) => (
+            <CategorySection
+              key={category}
+              category={category as Category}
+              articles={categoryArticles}
+            />
+          ),
+        )}
       </main>
     </>
   )

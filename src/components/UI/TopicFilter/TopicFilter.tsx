@@ -14,7 +14,6 @@ export const TopicFilter = ({
 }: Props) => {
   return (
     <Container>
-      <Title>Filter by topic</Title>
       <TagContainer>
         <Tag isActive={!selectedTopic} onClick={() => onTopicSelect(null)}>
           All
@@ -34,13 +33,11 @@ export const TopicFilter = ({
 }
 
 const Container = styled.div`
-  margin-bottom: 2rem;
-`
+  margin-bottom: 24px;
 
-const Title = styled.h3`
-  font-size: 1.2rem;
-  margin-bottom: 1rem;
-  font-weight: 600;
+  @media (max-width: 35.1875rem) {
+    margin-bottom: 16px;
+  }
 `
 
 const TagContainer = styled.div`
@@ -56,7 +53,7 @@ const Tag = styled.button<{ isActive: boolean }>`
   background: ${({ theme, isActive }) =>
     isActive ? theme.colors.primary : 'transparent'};
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--font-size-extra-small);
   transition: all 0.2s ease;
   color: ${({ theme, isActive }) => (isActive ? 'white' : theme.colors.text)};
   border-color: ${({ theme, isActive }) =>

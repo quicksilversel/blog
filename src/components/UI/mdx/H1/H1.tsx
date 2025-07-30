@@ -7,7 +7,7 @@ export const H1 = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledH1 = styled.h1`
-  font-size: 2rem;
+  font-size: var(--font-size-extra-large);
   font-weight: 700;
   margin: 1rem 0;
 `

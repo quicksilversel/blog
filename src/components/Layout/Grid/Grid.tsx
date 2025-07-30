@@ -2,8 +2,14 @@ import { ReactNode } from 'react'
 
 import styled from '@emotion/styled'
 
-export const Grid = ({ children }: { children: ReactNode }) => {
-  return <Container>{children}</Container>
+export const Grid = ({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) => {
+  return <Container {...(className && { className })}>{children}</Container>
 }
 
 const Container = styled.div`
