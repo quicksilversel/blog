@@ -7,6 +7,7 @@ export const Li = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledLi = styled.li`
+  font-size: var(--font-size-small);
   margin-top: 16px;
   counter-increment: counts;
 

@@ -1,3 +1,4 @@
+import { css } from '@emotion/react'
 import styled from '@emotion/styled'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
@@ -13,7 +14,9 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
 
   return (
     <Container>
-      <Link href="/">Home</Link>
+      <Link href="/">
+        <StyledImage src="/logo.png" alt="Logo" isLight={theme === 'light'} />
+      </Link>
       <Button
         type="button"
         onClick={toggleTheme}
@@ -38,8 +41,20 @@ const Container = styled.header`
   z-index: 10;
   padding: 16px;
   font-size: 24px;
-  background: hsl(${({ theme }) => theme.backgroundhsl} / 65%);
+  background: linear-gradient(
+    to top,
+    transparent 0%,
+    ${({ theme }) => theme.background} 100%
+  );
   backdrop-filter: blur(4px);
+`
+
+const StyledImage = styled.img<{ isLight: boolean }>`
+  ${({ isLight }) =>
+    isLight &&
+    css`
+      filter: brightness(1) invert(1);
+    `}
 `
 
 const Button = styled.button`

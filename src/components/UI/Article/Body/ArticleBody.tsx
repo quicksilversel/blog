@@ -9,10 +9,6 @@ export const ArticleBody = ({ children }: { children: ReactNode }) => {
 const Container = styled.section`
   padding: 32px;
 
-  *::selection {
-    background: ${({ theme }) => theme.primary};
-  }
-
   @media (max-width: 35.1875rem) {
     padding: 16px;
   }

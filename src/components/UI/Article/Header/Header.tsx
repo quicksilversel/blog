@@ -15,6 +15,10 @@ export const ArticleHeader = ({ title }: Props) => {
 const Container = styled.header`
   padding: 36px;
   text-align: center;
+
+  @media (max-width: 35.1875rem) {
+    padding: 16px;
+  }
 `
 
 const Title = styled.h1`

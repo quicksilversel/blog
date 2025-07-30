@@ -15,12 +15,11 @@ const Container = styled.div`
   margin-inline: auto;
 
   @media (max-width: 35.1875rem) {
-    padding-inline: 16px;
+    padding: 24px;
   }
 `
 
 const Title = styled.h2`
-  padding-left: 16px;
   padding-bottom: 16px;
   font-size: var(--font-size-small);
   text-transform: uppercase;
