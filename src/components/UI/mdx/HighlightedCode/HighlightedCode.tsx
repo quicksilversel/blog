@@ -140,4 +140,6 @@ const LineContent = styled.span`
   word-wrap: break-word;
   overflow-wrap: break-word;
   width: 100%;
+  font-size: inherit;
+  -webkit-text-size-adjust: none;
 `
