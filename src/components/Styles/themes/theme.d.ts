@@ -10,5 +10,15 @@ declare module '@emotion/react' {
     secondary: string
     syntaxBackground: string
     backgroundhsl: string
+    colors: {
+      background: string
+      text: string
+      muted: string
+      floating: string
+      primary: string
+      secondary: string
+      syntaxBackground: string
+      backgroundhsl: string
+    }
   }
 }

@@ -66,6 +66,15 @@ export default function Article({
     <>
       <Head>
         <title>{String(source.frontmatter.title)}</title>
+        <meta
+          name="description"
+          content={String(source.frontmatter.description)}
+        />
+        <meta property="og:title" content={String(source.frontmatter.title)} />
+        <meta
+          property="og:description"
+          content={String(source.frontmatter.description)}
+        />
       </Head>
       <main>
         <Container>

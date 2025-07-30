@@ -8,7 +8,9 @@ export const About = () => {
       <StyledImage src="/icon.jpg" alt="Zoe" />
       <Information>
         <Name>Zoe</Name>
-        <Description>Frontend Developer</Description>
+        <Description>
+          Frontend x SRE. Learning in public, debugging in private.
+        </Description>
         <Links>
           <Link
             href="https://github.com/quicksilversel"
