@@ -3,16 +3,18 @@
 import fs from 'fs'
 import path from 'path'
 
+import { useState, useMemo } from 'react'
+
 import { InferGetStaticPropsType } from 'next'
 import Head from 'next/head'
 import { serialize } from 'next-mdx-remote/serialize'
 
-import type { Article } from '@/utils/types/article'
+import type { Article, Category } from '@/utils/types/article'
 
 import { Box } from '@/components/Layout/Box'
-import { Grid } from '@/components/Layout/Grid'
 import { About } from '@/components/UI/About'
-import { Card } from '@/components/UI/Card'
+import { CategorySection } from '@/components/UI/CategorySection'
+import { groupArticlesByCategory } from '@/modules/categories'
 import { ARTICLE_PATH } from '@/utils/constants'
 import { metadata } from '@/utils/constants/meta'
 
@@ -23,23 +25,25 @@ export async function getStaticProps() {
       return path.extname(articleFilePath).toLowerCase() === '.mdx'
     })
 
-  const articles: Article[] = []
+  const articles: Article[] = await Promise.all(
+    articleFilePaths.map(async (articleFilePath) => {
+      const articleFile = fs.readFileSync(
+        `${ARTICLE_PATH}/${articleFilePath}`,
+        'utf8',
+      )
 
-  for (const articleFilePath of articleFilePaths) {
-    const articleFile = fs.readFileSync(
-      `${ARTICLE_PATH}/${articleFilePath}`,
-      'utf8',
-    )
+      const serializedArticle = await serialize(articleFile, {
+        parseFrontmatter: true,
+      })
 
-    const serializedArticle = await serialize(articleFile, {
-      parseFrontmatter: true,
+      return {
+        ...serializedArticle.frontmatter,
+        slug: articleFilePath.replace('.mdx', ''),
+      } as Article
     })
+  )
 
-    articles.push({
-      ...serializedArticle.frontmatter,
-      slug: articleFilePath.replace('.mdx', ''),
-    } as Article)
-  }
+  articles.sort((a, b) => Number(new Date(b.date)) - Number(new Date(a.date)))
 
   return {
     props: {
@@ -52,6 +56,16 @@ export async function getStaticProps() {
 export default function Index({
   articles,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
+  const publishedArticles = useMemo(
+    () => articles.filter((article) => !!article.published),
+    [articles]
+  )
+  
+  const articlesByCategory = useMemo(
+    () => groupArticlesByCategory(publishedArticles),
+    [publishedArticles]
+  )
+  
   return (
     <>
       <Head>
@@ -62,16 +76,13 @@ export default function Index({
         <Box>
           <About />
         </Box>
-        <Box>
-          <Box.Title>Articles</Box.Title>
-          <Grid>
-            {articles
-              .filter((article) => !!article.published)
-              .map((article) => {
-                return <Card key={article.slug} {...article} />
-              })}
-          </Grid>
-        </Box>
+        {Object.entries(articlesByCategory).map(([category, categoryArticles]) => (
+          <CategorySection
+            key={category}
+            category={category as Category}
+            articles={categoryArticles}
+          />
+        ))}
       </main>
     </>
   )

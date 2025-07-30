@@ -1,0 +1,1 @@
+export { extractAllTopics, filterArticlesByTopic } from './extractTopics'

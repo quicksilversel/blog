@@ -6,6 +6,7 @@ import { AppProps } from 'next/app'
 
 import { GlobalStyles } from '@/components/Styles'
 import { lightTheme, darkTheme } from '@/components/Styles/themes'
+import { Footer } from '@/components/UI/Footer'
 import { Header } from '@/components/UI/Header'
 
 export type ThemeContext = {
@@ -37,6 +38,7 @@ function MyApp({ Component, pageProps }: AppProps) {
         <GlobalStyles />
         <Header theme={theme} setTheme={setTheme} />
         <Component {...pageProps} />
+        <Footer />
       </ThemeProvider>
     </CacheProvider>
   )
