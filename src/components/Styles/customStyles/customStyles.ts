@@ -15,5 +15,6 @@ export const customStyles = (theme: Theme) => css`
 
   a:hover {
     color: ${theme.primary};
+    transition: color 0.2s ease-in;
   }
 `

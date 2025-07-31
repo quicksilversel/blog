@@ -13,36 +13,36 @@ import { serialize } from 'next-mdx-remote/serialize'
 
 import type { Article, Category } from '@/utils/types/article'
 
-import { Box } from '@/components/Layout/Box'
-import { Grid } from '@/components/Layout/Grid'
-import { Card } from '@/components/UI/Card'
-import { TopicFilter } from '@/components/UI/TopicFilter'
+import { ArticleCard } from '@/components/Pages/Home/Articles/ArticleCard'
+import { TopicFilter } from '@/components/Pages/Home/Articles/TopicFilter'
+import { Box } from '@/components/UI/Box'
+import { Grid } from '@/components/UI/Grid'
 import { normalizeCategory, getCategoryDisplayName } from '@/modules/categories'
 import { extractAllTopics, filterArticlesByTopic } from '@/modules/topics'
+import { CATEGORY_LIST } from '@/utils/constants'
 import { ARTICLE_PATH } from '@/utils/constants'
 import { metadata } from '@/utils/constants/meta'
 
 export const getStaticPaths: GetStaticPaths = async () => {
-  const categories: Category[] = ['sre', 'frontend', 'other']
-  
-  const paths = categories.map(category => ({
-    params: { category: [category] }
+  const paths = CATEGORY_LIST.map((category) => ({
+    params: { category: [category.value] },
   }))
-  
+
   return {
     paths,
-    fallback: false
+    fallback: false,
   }
 }
 
 export const getStaticProps: GetStaticProps = async ({ params }) => {
   const categoryParam = params?.category?.[0] as string
-  const category = categoryParam as Category
   
-  if (!['sre', 'frontend', 'other'].includes(category)) {
+  if (!categoryParam || !CATEGORY_LIST.some((cat) => cat.value === categoryParam)) {
     return { notFound: true }
   }
   
+  const category = categoryParam as Category
+
   const articleFilePaths = fs
     .readdirSync(ARTICLE_PATH)
     .filter((articleFilePath) => {
@@ -64,11 +64,14 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
         ...serializedArticle.frontmatter,
         slug: articleFilePath.replace('.mdx', ''),
       } as Article
-    })
+    }),
   )
 
   const articles = allArticles
-    .filter(article => article.published && normalizeCategory(article.category) === category)
+    .filter(
+      (article) =>
+        article.published && normalizeCategory(article.category) === category,
+    )
     .sort((a, b) => Number(new Date(b.date)) - Number(new Date(a.date)))
 
   return {
@@ -86,24 +89,36 @@ export default function CategoryPage({
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   const router = useRouter()
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
-  
-  const availableTopics = useMemo(
-    () => extractAllTopics(articles),
-    [articles]
-  )
-  
+
+  const availableTopics = useMemo(() => extractAllTopics(articles), [articles])
+
   const filteredArticles = useMemo(
     () => filterArticlesByTopic(articles, selectedTopic),
-    [articles, selectedTopic]
+    [articles, selectedTopic],
   )
-  
+
   const categoryName = getCategoryDisplayName(category)
-  
+
+  if (!categoryName) {
+    return (
+      <main>
+        <Box>
+          <NoArticlesMessage>Category not found</NoArticlesMessage>
+        </Box>
+      </main>
+    )
+  }
+
   return (
     <>
       <Head>
-        <title>{categoryName} Articles - {metadata.title}</title>
-        <meta name="description" content={`${categoryName} articles from ${metadata.description}`} />
+        <title>
+          {categoryName} Articles - {metadata.title}
+        </title>
+        <meta
+          name="description"
+          content={`${categoryName} articles from ${metadata.description}`}
+        />
       </Head>
       <main>
         <Box>
@@ -115,7 +130,7 @@ export default function CategoryPage({
           />
           <Grid>
             {filteredArticles.map((article) => (
-              <Card key={article.slug} {...article} />
+              <ArticleCard key={article.slug} {...article} />
             ))}
           </Grid>
           {filteredArticles.length === 0 && (

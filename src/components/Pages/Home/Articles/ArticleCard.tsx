@@ -3,17 +3,20 @@ import Link from 'next/link'
 
 import type { Article } from '@/utils/types/article'
 
-export const Card = ({ title, description, topics, slug }: Article) => {
+export const ArticleCard = ({ title, description, topics, slug }: Article) => {
   return (
     <Container>
       <Link href={`/articles/${slug}`}>
         <Title>{title}</Title>
         <Description>{description}</Description>
       </Link>
-      <TopicList>
-        {topics?.length &&
-          topics.map((topic) => <Topic key={topic}>{topic}</Topic>)}
-      </TopicList>
+      {topics?.length && (
+        <TopicList>
+          {topics.map((topic) => (
+            <Topic key={topic}>{topic}</Topic>
+          ))}
+        </TopicList>
+      )}
     </Container>
   )
 }

@@ -6,12 +6,13 @@ import Link from 'next/link'
 
 import type { Article, Category } from '@/utils/types/article'
 
-import { Box } from '@/components/Layout/Box'
-import { Grid } from '@/components/Layout/Grid'
-import { Card } from '@/components/UI/Card'
-import { TopicFilter } from '@/components/UI/TopicFilter'
+import { Box } from '@/components/UI/Box'
+import { Grid } from '@/components/UI/Grid'
 import { getCategoryDisplayName } from '@/modules/categories'
 import { extractAllTopics, filterArticlesByTopic } from '@/modules/topics'
+
+import { ArticleCard } from './ArticleCard'
+import { TopicFilter } from './TopicFilter'
 
 type Props = {
   category: Category
@@ -20,7 +21,7 @@ type Props = {
 
 const ARTICLE_LIMIT = 4
 
-export const CategorySection = ({ category, articles }: Props) => {
+export const ArticleSection = ({ category, articles }: Props) => {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
 
   const availableTopics = useMemo(() => extractAllTopics(articles), [articles])
@@ -30,8 +31,7 @@ export const CategorySection = ({ category, articles }: Props) => {
     [articles, selectedTopic],
   )
 
-  const displayedArticles = filteredArticles.slice(0, ARTICLE_LIMIT)
-  const hasMore = filteredArticles.length > ARTICLE_LIMIT
+  const shouldShowMoreContents = filteredArticles.length > ARTICLE_LIMIT
 
   return (
     <Box>
@@ -41,13 +41,12 @@ export const CategorySection = ({ category, articles }: Props) => {
         selectedTopic={selectedTopic}
         onTopicSelect={setSelectedTopic}
       />
-
       <Grid>
-        {displayedArticles.map((article) => (
-          <Card key={article.slug} {...article} />
+        {filteredArticles.slice(0, ARTICLE_LIMIT).map((article) => (
+          <ArticleCard key={article.slug} {...article} />
         ))}
       </Grid>
-      {hasMore && (
+      {shouldShowMoreContents && (
         <ShowMoreContainer>
           <Link href={`/categories/${category}`}>
             <ShowMoreButton>
@@ -72,7 +71,7 @@ const ShowMoreButton = styled.button`
   border: none;
   font-size: var(--font-size-extra-small);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: transform 0.2s ease;
 
   &:hover {
     transform: translateY(-2px);
