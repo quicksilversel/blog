@@ -23,7 +23,7 @@ export const HighlightedCode = ({ children }: Props) => {
 
   if (!code) return null
 
-  const language = children.props.className?.replace('language-', '').trim()
+  const language = children.props.className?.replace('language-', '').trim() || 'text'
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(code)

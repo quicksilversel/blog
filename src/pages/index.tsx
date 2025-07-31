@@ -11,9 +11,9 @@ import { serialize } from 'next-mdx-remote/serialize'
 
 import type { Article, Category } from '@/utils/types/article'
 
-import { Box } from '@/components/Layout/Box'
+import { ArticleSection } from '@/components/Pages/Home/Articles'
 import { Hero } from '@/components/Pages/Home/Hero'
-import { CategorySection } from '@/components/UI/CategorySection'
+import { Box } from '@/components/UI/Box'
 import { groupArticlesByCategory } from '@/modules/categories'
 import { ARTICLE_PATH } from '@/utils/constants'
 import { metadata } from '@/utils/constants/meta'
@@ -78,7 +78,7 @@ export default function Index({
         </Box>
         {Object.entries(articlesByCategory).map(
           ([category, categoryArticles]) => (
-            <CategorySection
+            <ArticleSection
               key={category}
               category={category as Category}
               articles={categoryArticles}

@@ -8,8 +8,8 @@ import Head from 'next/head'
 import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
 
-import { ArticleBody } from '@/components/UI/Article/Body'
-import { ArticleHeader } from '@/components/UI/Article/Header'
+import { ArticleBody } from '@/components/Pages/Article/Body'
+import { ArticleHeader } from '@/components/Pages/Article/Header'
 import {
   H1,
   H2,
