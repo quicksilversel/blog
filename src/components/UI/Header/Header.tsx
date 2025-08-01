@@ -1,6 +1,7 @@
 import { css } from '@emotion/react'
 import styled from '@emotion/styled'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
+import InventoryIcon from '@mui/icons-material/Inventory'
 import LightModeIcon from '@mui/icons-material/LightMode'
 import Link from 'next/link'
 
@@ -17,15 +18,20 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
       <Link href="/">
         <StyledImage src="/logo.png" alt="Logo" isLight={theme === 'light'} />
       </Link>
-      <Button
-        type="button"
-        onClick={toggleTheme}
-        aria-label={
-          theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'
-        }
-      >
-        {theme === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
-      </Button>
+      <ButtonContainer>
+        <Link href="/archive">
+          <InventoryIcon />
+        </Link>
+        <Button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={
+            theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'
+          }
+        >
+          {theme === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
+        </Button>
+      </ButtonContainer>
     </Container>
   )
 }
@@ -55,6 +61,12 @@ const StyledImage = styled.img<{ isLight: boolean }>`
     css`
       filter: brightness(1) invert(1);
     `}
+`
+
+const ButtonContainer = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
 `
 
 const Button = styled.button`

@@ -104,6 +104,6 @@ export default function Article({
 }
 
 const Container = styled.article`
-  max-width: 1000px;
+  max-width: 900px;
   margin: 0 auto;
 `
