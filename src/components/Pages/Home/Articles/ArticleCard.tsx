@@ -1,7 +1,7 @@
 import styled from '@emotion/styled'
 import Link from 'next/link'
 
-import type { Article } from '@/utils/types/article'
+import type { Article } from '@/libs/getArticles/types'
 
 export const ArticleCard = ({ title, description, topics, slug }: Article) => {
   return (

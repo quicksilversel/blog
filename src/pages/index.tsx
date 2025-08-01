@@ -1,18 +1,24 @@
-import { useMemo } from 'react'
-
 import { InferGetStaticPropsType } from 'next'
 import Head from 'next/head'
+
+import type { Article } from '@/libs/getArticles/types'
 
 import { ArticleSection } from '@/components/Pages/Home/Articles'
 import { Hero } from '@/components/Pages/Home/Hero'
 import { Box } from '@/components/UI/Box'
-import { getPublishedArticles } from '@/modules/articles/server'
-import { groupArticlesByCategory } from '@/modules/articles/shared'
-import { metadata } from '@/utils/constants/meta'
+import { getArticles } from '@/libs/getArticles'
 
 export async function getStaticProps() {
-  const allArticles = await getPublishedArticles()
-  const articles = groupArticlesByCategory(allArticles)
+  const allArticles = await getArticles()
+  const articles: Record<string, Article[]> = {}
+
+  allArticles.forEach((article) => {
+    const category = article.category || 'other'
+    if (!articles[category]) {
+      articles[category] = []
+    }
+    articles[category].push(article)
+  })
 
   return {
     props: {
@@ -25,31 +31,30 @@ export async function getStaticProps() {
 export default function Index({
   articles,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
-  const categoryEntries = useMemo(() => Object.entries(articles), [articles])
-
-  const articleSections = useMemo(
-    () =>
-      categoryEntries.map(([category, categoryArticles]) => (
-        <ArticleSection
-          key={category}
-          category={category}
-          articles={categoryArticles}
-        />
-      )),
-    [categoryEntries],
-  )
+  const categoryEntries = Object.entries(articles)
 
   return (
     <>
       <Head>
-        <title>{metadata.title}</title>
-        <meta name="description" content={metadata.description} />
+        <title>Zoe.log()</title>
+        <meta
+          name="description"
+          content={
+            'A space to document thoughts, technical musings, and creative ideas for future reference by Zoe.'
+          }
+        />
       </Head>
       <main>
         <Box>
           <Hero />
         </Box>
-        {articleSections}
+        {categoryEntries.map(([category, categoryArticles]) => (
+          <ArticleSection
+            key={category}
+            category={category}
+            articles={categoryArticles}
+          />
+        ))}
       </main>
     </>
   )

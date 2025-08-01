@@ -1,61 +1,61 @@
-'use client'
-
-import { useState, useMemo } from 'react'
-
-import styled from '@emotion/styled'
 import Head from 'next/head'
 
+import type { Article } from '@/libs/getArticles/types'
 import type {
   GetStaticPaths,
   GetStaticProps,
   InferGetStaticPropsType,
 } from 'next'
 
-import { ArticleCard } from '@/components/Pages/Home/Articles/ArticleCard'
-import { TopicFilter } from '@/components/Pages/Home/Articles/TopicFilter'
-import { Box } from '@/components/UI/Box'
-import { Grid } from '@/components/UI/Grid'
-import {
-  getCategoryDisplayName,
-  extractAllTopics,
-  filterArticlesByTopic,
-} from '@/modules/articles'
-import { getCategories } from '@/modules/articles/server'
-import { metadata } from '@/utils/constants/meta'
+import { ArticleSection } from '@/components/Pages/Home/Articles'
+import { getArticles } from '@/libs/getArticles'
 
-export const getStaticPaths: GetStaticPaths = async () => {
-  const categoryList = getCategories()
-  const paths = categoryList.map((category) => ({
-    params: { category: [category.value] },
-  }))
-
-  return {
-    paths,
-    fallback: false,
-  }
+// Cache articles to avoid duplicate file reads/serializations
+let cachedArticles: Article[] | null = null
+async function fetchAllArticles(): Promise<Article[]> {
+  if (cachedArticles) return cachedArticles
+  cachedArticles = await getArticles()
+  return cachedArticles
 }
 
-export const getStaticProps: GetStaticProps = async ({ params }) => {
-  const categoryParam = params?.category?.[0] as string
-  const { getCategories, getArticlesByCategory } = await import(
-    '@/modules/articles/server'
-  )
-  const categoryList = getCategories()
+async function getCategories(): Promise<string[]> {
+  const articles = await fetchAllArticles()
+  return Array.from(
+    new Set(articles.map((a) => a.category).filter(Boolean)),
+  ).sort()
+}
 
-  if (
-    !categoryParam ||
-    !categoryList.some((cat) => cat.value === categoryParam)
-  ) {
+async function getArticlesByCategory(category: string): Promise<Article[]> {
+  const articles = await fetchAllArticles()
+  return articles.filter((a) => a.category === category)
+}
+
+export const getStaticPaths: GetStaticPaths = async () => {
+  const categories = await getCategories()
+  const paths = categories.map((category) => ({
+    params: { category: [category] },
+  }))
+
+  return { paths, fallback: false }
+}
+
+export const getStaticProps: GetStaticProps<{
+  articles: Article[]
+  category: string
+}> = async ({ params }) => {
+  const categoryParam = Array.isArray(params?.category)
+    ? params.category[0]
+    : (params?.category as string)
+
+  const categories = await getCategories()
+  if (!categoryParam || !categories.includes(categoryParam)) {
     return { notFound: true }
   }
 
   const articles = await getArticlesByCategory(categoryParam)
 
   return {
-    props: {
-      articles,
-      category: categoryParam,
-    },
+    props: { articles, category: categoryParam },
     revalidate: 60,
   }
 }
@@ -64,66 +64,21 @@ export default function CategoryPage({
   articles,
   category,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
-  const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
-
-  const availableTopics = useMemo(() => extractAllTopics(articles), [articles])
-
-  const filteredArticles = useMemo(
-    () => filterArticlesByTopic(articles, selectedTopic),
-    [articles, selectedTopic],
-  )
-
-  const categoryName = getCategoryDisplayName(category)
-
-  if (!categoryName) {
-    return (
-      <main>
-        <Box>
-          <NoArticlesMessage>Category not found</NoArticlesMessage>
-        </Box>
-      </main>
-    )
-  }
-
   return (
     <>
       <Head>
         <title>
-          {categoryName} Articles - {metadata.title}
+          {category} Articles - {category}
         </title>
-        <meta
-          name="description"
-          content={`${categoryName} articles from ${metadata.description}`}
-        />
+        <meta name="description" content={`${category} articles`} />
       </Head>
       <main>
-        <Box>
-          <Box.Title>{categoryName} Articles</Box.Title>
-          <TopicFilter
-            topics={availableTopics}
-            selectedTopic={selectedTopic}
-            onTopicSelect={setSelectedTopic}
-          />
-          <Grid>
-            {filteredArticles.map((article) => (
-              <ArticleCard key={article.slug} {...article} />
-            ))}
-          </Grid>
-          {filteredArticles.length === 0 && (
-            <NoArticlesMessage>
-              No {categoryName.toLowerCase()} articles found
-              {selectedTopic && ` with topic "${selectedTopic}"`}.
-            </NoArticlesMessage>
-          )}
-        </Box>
+        <ArticleSection
+          articles={articles}
+          category={category}
+          isCategoryPage
+        />
       </main>
     </>
   )
 }
-
-const NoArticlesMessage = styled.p`
-  text-align: center;
-  color: ${({ theme }) => theme.colors.muted};
-  font-size: 1.1rem;
-  margin-top: 3rem;
-`

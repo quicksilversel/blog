@@ -5,8 +5,7 @@ export type Article = {
   published?: boolean
   date: string
   slug: string
-}
-
-export type ArticleWithCategory = Article & {
+  fileName: string
+  fullPath: string
   category: string
 }
