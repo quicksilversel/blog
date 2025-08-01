@@ -10,7 +10,7 @@ const Container = styled.div`
   position: relative;
   z-index: 2;
   width: 100%;
-  max-width: 1000px;
+  max-width: 900px;
   padding: 32px;
   margin-inline: auto;
 
