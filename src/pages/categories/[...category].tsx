@@ -56,7 +56,6 @@ export const getStaticProps: GetStaticProps<{
 
   return {
     props: { articles, category: categoryParam },
-    revalidate: 60,
   }
 }
 

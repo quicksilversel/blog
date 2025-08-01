@@ -27,7 +27,7 @@ export async function getStaticPaths() {
     }
   })
 
-  return { paths, fallback: 'blocking' }
+  return { paths, fallback: false }
 }
 
 export const getStaticProps: GetStaticProps = async ({ params }) => {
@@ -51,7 +51,6 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
         source: mdxSource,
         category,
       },
-      revalidate: 60,
     }
   } catch (error) {
     return {

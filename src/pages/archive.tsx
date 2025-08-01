@@ -36,7 +36,6 @@ export const getStaticProps: GetStaticProps<{
     props: {
       groupedArticles,
     },
-    revalidate: 60,
   }
 }
 
