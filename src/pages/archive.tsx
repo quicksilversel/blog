@@ -3,7 +3,7 @@ import Head from 'next/head'
 import type { Article } from '@/libs/getArticles/types'
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
-import { ArchiveClient } from '@/components/Pages/Archive'
+import { Archive } from '@/components/Pages/Archive'
 import { getArticles } from '@/libs/getArticles'
 
 interface GroupedArticles {
@@ -50,7 +50,7 @@ export default function ArchivePage({
         <meta name="description" content="Archive of all blog posts" />
       </Head>
       <main>
-        <ArchiveClient groupedArticles={groupedArticles} />
+        <Archive groupedArticles={groupedArticles} />
       </main>
     </>
   )
