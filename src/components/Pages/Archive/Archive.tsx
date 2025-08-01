@@ -1,5 +1,3 @@
-'use client'
-
 import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
@@ -49,7 +47,6 @@ export function Archive({ groupedArticles }: Props) {
         <Title>Archive</Title>
         <TotalCount>{totalArticles} posts</TotalCount>
       </Header>
-
       <Timeline>
         {Object.entries(groupedArticles).map(([monthKey, articles]) => {
           const [year, month] = monthKey.split('-')
@@ -148,7 +145,7 @@ const Timeline = styled.div`
   }
 `
 
-const MonthSection = styled.div`
+const MonthSection = styled.section`
   margin-bottom: 2rem;
   position: relative;
 
