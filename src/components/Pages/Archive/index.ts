@@ -1,1 +1,1 @@
-export { ArchiveClient } from './ArchiveClient'
+export { Archive } from './Archive'

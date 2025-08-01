@@ -3,19 +3,20 @@
 import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
+import ExpandCircleDownIcon from '@mui/icons-material/ExpandCircleDown'
 import Link from 'next/link'
 
 import type { Article } from '@/libs/getArticles/types'
 
-interface GroupedArticles {
+type GroupedArticles = {
   [key: string]: Article[]
 }
 
-interface ArchiveClientProps {
+type Props = {
   groupedArticles: GroupedArticles
 }
 
-export function ArchiveClient({ groupedArticles }: ArchiveClientProps) {
+export function Archive({ groupedArticles }: Props) {
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(
     new Set(Object.keys(groupedArticles)),
   )
@@ -193,12 +194,12 @@ const MonthTitle = styled.h2`
   color: ${({ theme }) => theme.colors.primary};
 `
 
-const ToggleIcon = styled.span<{ isExpanded: boolean }>`
+const ToggleIcon = styled(ExpandCircleDownIcon)<{ isExpanded: boolean }>`
   display: inline-block;
   transform: ${({ isExpanded }) =>
-    isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};
+    !isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)'};
   transition: transform 0.2s ease;
-  font-size: 0.75rem;
+  font-size: var(--font-size-medium);
 `
 
 const PostCount = styled.span`
