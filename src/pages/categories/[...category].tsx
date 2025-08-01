@@ -1,84 +1,61 @@
-'use client'
-
-import fs from 'fs'
-import path from 'path'
-
-import { useState, useMemo } from 'react'
-
-import styled from '@emotion/styled'
-import { GetStaticPaths, GetStaticProps, InferGetStaticPropsType } from 'next'
 import Head from 'next/head'
-import { useRouter } from 'next/router'
-import { serialize } from 'next-mdx-remote/serialize'
 
-import type { Article, Category } from '@/utils/types/article'
+import type { Article } from '@/libs/getArticles/types'
+import type {
+  GetStaticPaths,
+  GetStaticProps,
+  InferGetStaticPropsType,
+} from 'next'
 
-import { ArticleCard } from '@/components/Pages/Home/Articles/ArticleCard'
-import { TopicFilter } from '@/components/Pages/Home/Articles/TopicFilter'
-import { Box } from '@/components/UI/Box'
-import { Grid } from '@/components/UI/Grid'
-import { normalizeCategory, getCategoryDisplayName } from '@/modules/categories'
-import { extractAllTopics, filterArticlesByTopic } from '@/modules/topics'
-import { CATEGORY_LIST } from '@/utils/constants'
-import { ARTICLE_PATH } from '@/utils/constants'
-import { metadata } from '@/utils/constants/meta'
+import { ArticleSection } from '@/components/Pages/Home/Articles'
+import { getArticles } from '@/libs/getArticles'
 
-export const getStaticPaths: GetStaticPaths = async () => {
-  const paths = CATEGORY_LIST.map((category) => ({
-    params: { category: [category.value] },
-  }))
-
-  return {
-    paths,
-    fallback: false,
-  }
+// Cache articles to avoid duplicate file reads/serializations
+let cachedArticles: Article[] | null = null
+async function fetchAllArticles(): Promise<Article[]> {
+  if (cachedArticles) return cachedArticles
+  cachedArticles = await getArticles()
+  return cachedArticles
 }
 
-export const getStaticProps: GetStaticProps = async ({ params }) => {
-  const categoryParam = params?.category?.[0] as string
-  
-  if (!categoryParam || !CATEGORY_LIST.some((cat) => cat.value === categoryParam)) {
+async function getCategories(): Promise<string[]> {
+  const articles = await fetchAllArticles()
+  return Array.from(
+    new Set(articles.map((a) => a.category).filter(Boolean)),
+  ).sort()
+}
+
+async function getArticlesByCategory(category: string): Promise<Article[]> {
+  const articles = await fetchAllArticles()
+  return articles.filter((a) => a.category === category)
+}
+
+export const getStaticPaths: GetStaticPaths = async () => {
+  const categories = await getCategories()
+  const paths = categories.map((category) => ({
+    params: { category: [category] },
+  }))
+
+  return { paths, fallback: false }
+}
+
+export const getStaticProps: GetStaticProps<{
+  articles: Article[]
+  category: string
+}> = async ({ params }) => {
+  const categoryParam = Array.isArray(params?.category)
+    ? params.category[0]
+    : (params?.category as string)
+
+  const categories = await getCategories()
+  if (!categoryParam || !categories.includes(categoryParam)) {
     return { notFound: true }
   }
-  
-  const category = categoryParam as Category
 
-  const articleFilePaths = fs
-    .readdirSync(ARTICLE_PATH)
-    .filter((articleFilePath) => {
-      return path.extname(articleFilePath).toLowerCase() === '.mdx'
-    })
-
-  const allArticles: Article[] = await Promise.all(
-    articleFilePaths.map(async (articleFilePath) => {
-      const articleFile = fs.readFileSync(
-        `${ARTICLE_PATH}/${articleFilePath}`,
-        'utf8',
-      )
-
-      const serializedArticle = await serialize(articleFile, {
-        parseFrontmatter: true,
-      })
-
-      return {
-        ...serializedArticle.frontmatter,
-        slug: articleFilePath.replace('.mdx', ''),
-      } as Article
-    }),
-  )
-
-  const articles = allArticles
-    .filter(
-      (article) =>
-        article.published && normalizeCategory(article.category) === category,
-    )
-    .sort((a, b) => Number(new Date(b.date)) - Number(new Date(a.date)))
+  const articles = await getArticlesByCategory(categoryParam)
 
   return {
-    props: {
-      articles,
-      category,
-    },
+    props: { articles, category: categoryParam },
     revalidate: 60,
   }
 }
@@ -87,67 +64,21 @@ export default function CategoryPage({
   articles,
   category,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
-  const router = useRouter()
-  const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
-
-  const availableTopics = useMemo(() => extractAllTopics(articles), [articles])
-
-  const filteredArticles = useMemo(
-    () => filterArticlesByTopic(articles, selectedTopic),
-    [articles, selectedTopic],
-  )
-
-  const categoryName = getCategoryDisplayName(category)
-
-  if (!categoryName) {
-    return (
-      <main>
-        <Box>
-          <NoArticlesMessage>Category not found</NoArticlesMessage>
-        </Box>
-      </main>
-    )
-  }
-
   return (
     <>
       <Head>
         <title>
-          {categoryName} Articles - {metadata.title}
+          {category} Articles - {category}
         </title>
-        <meta
-          name="description"
-          content={`${categoryName} articles from ${metadata.description}`}
-        />
+        <meta name="description" content={`${category} articles`} />
       </Head>
       <main>
-        <Box>
-          <Box.Title>{categoryName} Articles</Box.Title>
-          <TopicFilter
-            topics={availableTopics}
-            selectedTopic={selectedTopic}
-            onTopicSelect={setSelectedTopic}
-          />
-          <Grid>
-            {filteredArticles.map((article) => (
-              <ArticleCard key={article.slug} {...article} />
-            ))}
-          </Grid>
-          {filteredArticles.length === 0 && (
-            <NoArticlesMessage>
-              No {categoryName.toLowerCase()} articles found
-              {selectedTopic && ` with topic "${selectedTopic}"`}.
-            </NoArticlesMessage>
-          )}
-        </Box>
+        <ArticleSection
+          articles={articles}
+          category={category}
+          isCategoryPage
+        />
       </main>
     </>
   )
 }
-
-const NoArticlesMessage = styled.p`
-  text-align: center;
-  color: ${({ theme }) => theme.colors.muted};
-  font-size: 1.1rem;
-  margin-top: 3rem;
-`

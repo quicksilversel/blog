@@ -1,67 +1,62 @@
 import fs from 'fs'
+import path from 'path'
 
 import React from 'react'
 
 import styled from '@emotion/styled'
-import { GetStaticPropsContext, InferGetStaticPropsType } from 'next'
 import Head from 'next/head'
 import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
 
+import type { GetStaticProps, InferGetStaticPropsType } from 'next'
+
 import { ArticleBody } from '@/components/Pages/Article/Body'
 import { ArticleHeader } from '@/components/Pages/Article/Header'
-import {
-  H1,
-  H2,
-  H3,
-  P,
-  Code,
-  HighlightedCode,
-  Blockquote,
-  Li,
-  Anchor,
-  Img,
-} from '@/components/UI/mdx'
+import * as Markup from '@/components/Pages/Article/Markup'
+import { getArticles } from '@/libs/getArticles'
 import { ARTICLE_PATH } from '@/utils/constants'
 
-const getAllPages = () => {
-  const pages = fs.readdirSync(ARTICLE_PATH).map((page) => {
+export async function getStaticPaths() {
+  const articleFiles = await getArticles()
+
+  const paths = articleFiles.map(({ category, fileName }) => {
     return {
       params: {
-        slug: page.replace('.mdx', '').split('/'),
+        slug: [category, fileName.replace('.mdx', '')],
       },
     }
   })
 
-  return pages
-}
-
-export async function getStaticPaths() {
-  const paths = getAllPages()
   return { paths, fallback: false }
 }
 
-export async function getStaticProps(
-  ctx: GetStaticPropsContext<{
-    slug: string
-  }>,
-) {
-  const slug = ctx.params?.slug
+export const getStaticProps: GetStaticProps = async ({ params }) => {
+  const slug = params?.slug as string[]
 
-  if (!slug) {
+  if (!slug || slug.length !== 2) {
     return {
       notFound: true,
     }
   }
 
-  const postFile = fs.readFileSync(`${ARTICLE_PATH}/${slug}.mdx`, 'utf8')
+  const [category, fileName] = slug
+  const filePath = path.join(ARTICLE_PATH, category, `${fileName}.mdx`)
 
-  const mdxSource = await serialize(postFile, { parseFrontmatter: true })
-  return {
-    props: {
-      source: mdxSource,
-    },
-    revalidate: 60,
+  try {
+    const postFile = fs.readFileSync(filePath, 'utf8')
+
+    const mdxSource = await serialize(postFile, { parseFrontmatter: true })
+    return {
+      props: {
+        source: mdxSource,
+        category,
+      },
+      revalidate: 60,
+    }
+  } catch (error) {
+    return {
+      notFound: true,
+    }
   }
 }
 
@@ -89,16 +84,16 @@ export default function Article({
             <MDXRemote
               {...source}
               components={{
-                h1: H1,
-                h2: H2,
-                h3: H3,
-                p: P,
-                pre: HighlightedCode,
-                code: Code,
-                blockquote: Blockquote,
-                li: Li,
-                a: Anchor,
-                img: Img,
+                h1: Markup.H1,
+                h2: Markup.H2,
+                h3: Markup.H3,
+                p: Markup.P,
+                pre: Markup.HighlightedCode,
+                code: Markup.Code,
+                blockquote: Markup.Blockquote,
+                li: Markup.Li,
+                a: Markup.Anchor,
+                img: Markup.Img,
               }}
             />
           </ArticleBody>

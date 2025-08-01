@@ -1,11 +1,13 @@
 {
   "extends": ["next/core-web-vitals"],
+  "plugins": ["unused-imports"],
   "rules": {
     "no-console": ["error", { "allow": ["warn", "dir"] }],
     "no-restricted-syntax": ["error", "TSEnumDeclaration", "WithStatement"],
     "@typescript-eslint/interface-name-prefix": "off",
     "@typescript-eslint/member-delimiter-style": "off",
     "@typescript-eslint/no-empty-interface": "off",
+    "unused-imports/no-unused-imports": "error",
     "react/self-closing-comp": [
       "error",
       {
