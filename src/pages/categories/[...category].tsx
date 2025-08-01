@@ -1,30 +1,31 @@
 'use client'
 
-import fs from 'fs'
-import path from 'path'
-
 import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
-import { GetStaticPaths, GetStaticProps, InferGetStaticPropsType } from 'next'
 import Head from 'next/head'
-import { useRouter } from 'next/router'
-import { serialize } from 'next-mdx-remote/serialize'
 
-import type { Article, Category } from '@/utils/types/article'
+import type {
+  GetStaticPaths,
+  GetStaticProps,
+  InferGetStaticPropsType,
+} from 'next'
 
 import { ArticleCard } from '@/components/Pages/Home/Articles/ArticleCard'
 import { TopicFilter } from '@/components/Pages/Home/Articles/TopicFilter'
 import { Box } from '@/components/UI/Box'
 import { Grid } from '@/components/UI/Grid'
-import { normalizeCategory, getCategoryDisplayName } from '@/modules/categories'
-import { extractAllTopics, filterArticlesByTopic } from '@/modules/topics'
-import { CATEGORY_LIST } from '@/utils/constants'
-import { ARTICLE_PATH } from '@/utils/constants'
+import {
+  getCategoryDisplayName,
+  extractAllTopics,
+  filterArticlesByTopic,
+} from '@/modules/articles'
+import { getCategories } from '@/modules/articles/server'
 import { metadata } from '@/utils/constants/meta'
 
 export const getStaticPaths: GetStaticPaths = async () => {
-  const paths = CATEGORY_LIST.map((category) => ({
+  const categoryList = getCategories()
+  const paths = categoryList.map((category) => ({
     params: { category: [category.value] },
   }))
 
@@ -36,48 +37,24 @@ export const getStaticPaths: GetStaticPaths = async () => {
 
 export const getStaticProps: GetStaticProps = async ({ params }) => {
   const categoryParam = params?.category?.[0] as string
-  
-  if (!categoryParam || !CATEGORY_LIST.some((cat) => cat.value === categoryParam)) {
+  const { getCategories, getArticlesByCategory } = await import(
+    '@/modules/articles/server'
+  )
+  const categoryList = getCategories()
+
+  if (
+    !categoryParam ||
+    !categoryList.some((cat) => cat.value === categoryParam)
+  ) {
     return { notFound: true }
   }
-  
-  const category = categoryParam as Category
 
-  const articleFilePaths = fs
-    .readdirSync(ARTICLE_PATH)
-    .filter((articleFilePath) => {
-      return path.extname(articleFilePath).toLowerCase() === '.mdx'
-    })
-
-  const allArticles: Article[] = await Promise.all(
-    articleFilePaths.map(async (articleFilePath) => {
-      const articleFile = fs.readFileSync(
-        `${ARTICLE_PATH}/${articleFilePath}`,
-        'utf8',
-      )
-
-      const serializedArticle = await serialize(articleFile, {
-        parseFrontmatter: true,
-      })
-
-      return {
-        ...serializedArticle.frontmatter,
-        slug: articleFilePath.replace('.mdx', ''),
-      } as Article
-    }),
-  )
-
-  const articles = allArticles
-    .filter(
-      (article) =>
-        article.published && normalizeCategory(article.category) === category,
-    )
-    .sort((a, b) => Number(new Date(b.date)) - Number(new Date(a.date)))
+  const articles = await getArticlesByCategory(categoryParam)
 
   return {
     props: {
       articles,
-      category,
+      category: categoryParam,
     },
     revalidate: 60,
   }
@@ -87,7 +64,6 @@ export default function CategoryPage({
   articles,
   category,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
-  const router = useRouter()
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null)
 
   const availableTopics = useMemo(() => extractAllTopics(articles), [articles])

@@ -4,18 +4,17 @@ import { useState, useMemo } from 'react'
 import styled from '@emotion/styled'
 import Link from 'next/link'
 
-import type { Article, Category } from '@/utils/types/article'
+import type { Article } from '@/utils/types/article'
 
 import { Box } from '@/components/UI/Box'
 import { Grid } from '@/components/UI/Grid'
-import { getCategoryDisplayName } from '@/modules/categories'
-import { extractAllTopics, filterArticlesByTopic } from '@/modules/topics'
+import { getCategoryDisplayName, extractAllTopics, filterArticlesByTopic } from '@/modules/articles'
 
 import { ArticleCard } from './ArticleCard'
 import { TopicFilter } from './TopicFilter'
 
 type Props = {
-  category: Category
+  category: string
   articles: Article[]
 }
 

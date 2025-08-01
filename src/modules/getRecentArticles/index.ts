@@ -1,1 +1,0 @@
-export { getRecentArticles } from './getRecentArticles'

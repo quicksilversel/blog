@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 
 import React from 'react'
 
@@ -22,46 +23,54 @@ import {
   Anchor,
   Img,
 } from '@/components/UI/mdx'
+import { getArticleFiles } from '@/modules/articles/server'
 import { ARTICLE_PATH } from '@/utils/constants'
 
-const getAllPages = () => {
-  const pages = fs.readdirSync(ARTICLE_PATH).map((page) => {
+export async function getStaticPaths() {
+  const articleFiles = getArticleFiles()
+
+  const paths = articleFiles.map(({ category, fileName }) => {
     return {
       params: {
-        slug: page.replace('.mdx', '').split('/'),
+        slug: [category, fileName.replace('.mdx', '')],
       },
     }
   })
 
-  return pages
-}
-
-export async function getStaticPaths() {
-  const paths = getAllPages()
   return { paths, fallback: false }
 }
 
 export async function getStaticProps(
   ctx: GetStaticPropsContext<{
-    slug: string
+    slug: string[]
   }>,
 ) {
   const slug = ctx.params?.slug
 
-  if (!slug) {
+  if (!slug || slug.length !== 2) {
     return {
       notFound: true,
     }
   }
 
-  const postFile = fs.readFileSync(`${ARTICLE_PATH}/${slug}.mdx`, 'utf8')
+  const [category, fileName] = slug
+  const filePath = path.join(ARTICLE_PATH, category, `${fileName}.mdx`)
 
-  const mdxSource = await serialize(postFile, { parseFrontmatter: true })
-  return {
-    props: {
-      source: mdxSource,
-    },
-    revalidate: 60,
+  try {
+    const postFile = fs.readFileSync(filePath, 'utf8')
+
+    const mdxSource = await serialize(postFile, { parseFrontmatter: true })
+    return {
+      props: {
+        source: mdxSource,
+        category,
+      },
+      revalidate: 60,
+    }
+  } catch (error) {
+    return {
+      notFound: true,
+    }
   }
 }
 
