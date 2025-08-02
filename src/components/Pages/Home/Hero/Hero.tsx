@@ -1,11 +1,20 @@
 import styled from '@emotion/styled'
 import GitHubIcon from '@mui/icons-material/GitHub'
+import Image from 'next/image'
 import Link from 'next/link'
 
 export const Hero = () => {
   return (
     <>
-      <StyledImage src="/hero.png" alt="Zoe" />
+      <ImageContainer>
+        <StyledImage
+          src="/hero.png"
+          alt="Zoe"
+          fill
+          objectFit="cover"
+          loading="eager"
+        />
+      </ImageContainer>
       <Information>
         <Wrapper>
           <Name>Zoe</Name>
@@ -44,9 +53,16 @@ export const Hero = () => {
   )
 }
 
-const StyledImage = styled.img`
+const ImageContainer = styled.div`
+  position: relative;
   width: 100%;
+  aspect-ratio: 836/557;
+  margin-bottom: 2rem;
+`
+
+const StyledImage = styled(Image)`
   border-radius: 8px;
+  object-fit: cover;
 `
 
 const Information = styled.div`

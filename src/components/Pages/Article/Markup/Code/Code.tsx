@@ -7,9 +7,10 @@ export const Code = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledCode = styled.code`
-  padding: 6px;
-  font-size: var(--font-size-extra-small);
+  padding: 0.12rem 0.25rem;
+  font-size: inherit;
   font-family: var(--font-family-mono);
+  line-height: 1.2;
   color: ${({ theme }) => theme.text};
   background: ${({ theme }) => theme.muted};
   border-radius: 8px;

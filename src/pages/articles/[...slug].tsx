@@ -78,7 +78,19 @@ export default function Article({
       </Head>
       <main>
         <Container>
-          <ArticleHeader title={String(source.frontmatter.title)} />
+          <ArticleHeader
+            title={String(source.frontmatter.title)}
+            date={
+              source.frontmatter.date
+                ? String(source.frontmatter.date)
+                : undefined
+            }
+            topics={
+              source.frontmatter.topics
+                ? (source.frontmatter.topics as string[])
+                : undefined
+            }
+          />
           <ArticleBody>
             <MDXRemote
               {...source}

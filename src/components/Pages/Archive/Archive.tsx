@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
 import ExpandCircleDownIcon from '@mui/icons-material/ExpandCircleDown'
+import Image from 'next/image'
 import Link from 'next/link'
 
 import type { Article } from '@/libs/getArticles/types'
@@ -42,7 +43,15 @@ export function Archive({ groupedArticles }: Props) {
 
   return (
     <Container>
-      <StyledImage src="/hero-lofi.png" alt="Zoe" />
+      <ImageContainer>
+        <StyledImage
+          src="/hero-lofi.png"
+          alt="Archive Hero Image"
+          fill
+          objectFit="cover"
+          loading="eager"
+        />
+      </ImageContainer>
       <Header>
         <Title>Archive</Title>
         <TotalCount>{totalArticles} posts</TotalCount>
@@ -99,14 +108,20 @@ const Container = styled.div`
   padding: 1rem;
 `
 
-const StyledImage = styled.img`
+const ImageContainer = styled.div`
+  position: relative;
   width: 100%;
-  border-radius: 8px;
+  aspect-ratio: 836/557;
   margin-bottom: 2rem;
 
   @media (max-width: 35.1875rem) {
     margin-bottom: 1rem;
   }
+`
+
+const StyledImage = styled(Image)`
+  border-radius: 8px;
+  object-fit: cover;
 `
 
 const Header = styled.div`

@@ -6,10 +6,11 @@ export const ArticleBody = ({ children }: { children: ReactNode }) => {
   return <Container>{children}</Container>
 }
 
-const Container = styled.section`
-  padding: 32px;
+const Container = styled.div`
+  margin-top: 2rem;
+  padding: 0 1rem;
 
   @media (max-width: 35.1875rem) {
-    padding: 16px;
+    margin-top: 1rem;
   }
 `

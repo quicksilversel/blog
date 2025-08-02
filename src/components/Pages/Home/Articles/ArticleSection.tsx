@@ -102,10 +102,10 @@ const ShowMoreButton = styled.button`
   border: none;
   font-size: var(--font-size-extra-small);
   cursor: pointer;
-  transition: transform 0.2s ease;
+  transition: opacity 0.2s ease;
 
   &:hover {
-    transform: translateY(-2px);
+    opacity: 0.8;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
 `

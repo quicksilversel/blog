@@ -13,7 +13,8 @@ export const customStyles = (theme: Theme) => css`
       color 0.2s ease-in;
   }
 
-  a:hover {
+  a:hover,
+  button:hover {
     color: ${theme.primary};
     transition: color 0.2s ease-in;
   }
