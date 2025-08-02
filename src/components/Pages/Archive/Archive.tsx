@@ -48,8 +48,8 @@ export function Archive({ groupedArticles }: Props) {
           src="/hero-lofi.png"
           alt="Archive Hero Image"
           fill
-          objectFit="cover"
           loading="eager"
+          priority
         />
       </ImageContainer>
       <Header>

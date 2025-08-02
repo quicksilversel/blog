@@ -7,13 +7,7 @@ export const Hero = () => {
   return (
     <>
       <ImageContainer>
-        <StyledImage
-          src="/hero.png"
-          alt="Zoe"
-          fill
-          objectFit="cover"
-          loading="eager"
-        />
+        <StyledImage src="/hero.png" alt="Zoe" fill loading="eager" priority />
       </ImageContainer>
       <Information>
         <Wrapper>

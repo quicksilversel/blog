@@ -19,7 +19,15 @@ export const ArticleHeader = ({ title, date, topics }: Props) => {
   return (
     <Container>
       <ImageContainer>
-        <Image src="/cat.png" alt="" width={80} height={80} aria-hidden />
+        <Image
+          src="/cat.png"
+          alt=""
+          width={80}
+          height={80}
+          aria-hidden
+          priority
+          loading="eager"
+        />
       </ImageContainer>
       <Title>{title}</Title>
       <MetaInfo>

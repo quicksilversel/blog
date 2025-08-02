@@ -30,7 +30,9 @@ export async function getStaticProps() {
 export default function Index({
   articles,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
-  const categoryEntries = Object.entries(articles)
+  const categories = Object.entries(articles).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )
 
   return (
     <>
@@ -47,11 +49,11 @@ export default function Index({
         <Box>
           <Hero />
         </Box>
-        {categoryEntries.map(([category, categoryArticles]) => (
+        {categories.map(([category, articles]) => (
           <ArticleSection
             key={category}
             category={category}
-            articles={categoryArticles}
+            articles={articles}
           />
         ))}
       </main>
