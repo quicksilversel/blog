@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --turbo",
+    "dev:regular": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "lint:js": "eslint \"./src/**/*.{ts,tsx}\"",
-    "lint:js:fix": "eslint --fix \"./src/**/*.{ts,tsx}\""
+    "lint:js:fix": "eslint --fix \"./src/**/*.{ts,tsx}\"",
+    "clean": "rm -rf .next .turbo node_modules/.cache",
+    "clean:cache": "rm -rf .next/cache"
   },
   "dependencies": {
     "@emotion/css": "^11.11.2",

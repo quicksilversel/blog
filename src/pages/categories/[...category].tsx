@@ -9,12 +9,13 @@ import type {
 
 import { ArticleSection } from '@/components/Pages/Home/Articles'
 import { getArticles } from '@/libs/getArticles'
+import { ARTICLE_PATH } from '@/utils/constants'
 
 // Cache articles to avoid duplicate file reads/serializations
 let cachedArticles: Article[] | null = null
 async function fetchAllArticles(): Promise<Article[]> {
   if (cachedArticles) return cachedArticles
-  cachedArticles = await getArticles()
+  cachedArticles = await getArticles(ARTICLE_PATH)
   return cachedArticles
 }
 

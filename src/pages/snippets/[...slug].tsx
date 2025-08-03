@@ -5,6 +5,7 @@ import React from 'react'
 
 import styled from '@emotion/styled'
 import Head from 'next/head'
+import Link from 'next/link'
 import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
 
@@ -14,12 +15,12 @@ import { ArticleBody } from '@/components/Pages/Article/Body'
 import { ArticleHeader } from '@/components/Pages/Article/Header'
 import * as Markup from '@/components/Pages/Article/Markup'
 import { getArticles } from '@/libs/getArticles'
-import { ARTICLE_PATH } from '@/utils/constants'
+import { SNIPPETS_PATH } from '@/utils/constants'
 
 export async function getStaticPaths() {
-  const articleFiles = await getArticles(ARTICLE_PATH)
+  const snippetFiles = await getArticles(SNIPPETS_PATH)
 
-  const paths = articleFiles.map(({ category, fileName }) => {
+  const paths = snippetFiles.map(({ category, fileName }) => {
     return {
       params: {
         slug: [category, fileName.replace('.mdx', '')],
@@ -40,7 +41,7 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
   }
 
   const [category, fileName] = slug
-  const filePath = path.join(ARTICLE_PATH, category, `${fileName}.mdx`)
+  const filePath = path.join(SNIPPETS_PATH, category, `${fileName}.mdx`)
 
   try {
     const postFile = fs.readFileSync(filePath, 'utf8')
@@ -59,13 +60,13 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
   }
 }
 
-export default function Article({
+export default function Snippet({
   source,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
     <>
       <Head>
-        <title>{String(source.frontmatter.title)}</title>
+        <title>{String(source.frontmatter.title)} - Code Snippet</title>
         <meta
           name="description"
           content={String(source.frontmatter.description)}
@@ -78,6 +79,9 @@ export default function Article({
       </Head>
       <main>
         <Container>
+          <Link href="/snippets" passHref legacyBehavior>
+            <BackLink>← Back to all snippets</BackLink>
+          </Link>
           <ArticleHeader
             title={String(source.frontmatter.title)}
             date={
@@ -117,4 +121,17 @@ export default function Article({
 const Container = styled.article`
   max-width: 900px;
   margin: 0 auto;
+`
+
+const BackLink = styled.a`
+  display: inline-block;
+  margin: 0 1rem;
+  color: ${({ theme }) => theme.colors.primary};
+  text-decoration: none;
+  font-size: var(--font-size-extra-small);
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
 `

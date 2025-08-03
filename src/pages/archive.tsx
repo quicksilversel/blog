@@ -5,6 +5,7 @@ import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
 import { Archive } from '@/components/Pages/Archive'
 import { getArticles } from '@/libs/getArticles'
+import { ARTICLE_PATH } from '@/utils/constants'
 
 interface GroupedArticles {
   [key: string]: Article[]
@@ -13,7 +14,7 @@ interface GroupedArticles {
 export const getStaticProps: GetStaticProps<{
   groupedArticles: GroupedArticles
 }> = async () => {
-  const allArticles = await getArticles()
+  const allArticles = await getArticles(ARTICLE_PATH)
 
   const sortedArticles = allArticles
     .filter((article) => article.published !== false)

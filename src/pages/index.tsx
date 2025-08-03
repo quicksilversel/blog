@@ -7,9 +7,10 @@ import { ArticleSection } from '@/components/Pages/Home/Articles'
 import { Hero } from '@/components/Pages/Home/Hero'
 import { Box } from '@/components/UI/Box'
 import { getArticles } from '@/libs/getArticles'
+import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticProps() {
-  const allArticles = await getArticles()
+  const allArticles = await getArticles(ARTICLE_PATH)
   const articles: Record<string, Article[]> = {}
 
   allArticles.forEach((article) => {

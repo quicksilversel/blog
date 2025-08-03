@@ -1,5 +1,5 @@
-import { css } from '@emotion/react'
 import styled from '@emotion/styled'
+import CodeIcon from '@mui/icons-material/Code'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import InventoryIcon from '@mui/icons-material/Inventory'
 import LightModeIcon from '@mui/icons-material/LightMode'
@@ -15,13 +15,16 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
 
   return (
     <Container>
-      <Link href="/">
-        <StyledImage src="/logo.png" alt="Logo" isLight={theme === 'light'} />
-      </Link>
+      <StyledLink href="/">
+        <StyledImage src="/icon.png" alt="Logo" isLight={theme === 'light'} />
+      </StyledLink>
       <ButtonContainer>
-        <Link href="/archive">
+        <StyledLink href="/snippets">
+          <CodeIcon />
+        </StyledLink>
+        <StyledLink href="/archive">
           <InventoryIcon />
-        </Link>
+        </StyledLink>
         <Button
           type="button"
           onClick={toggleTheme}
@@ -56,11 +59,8 @@ const Container = styled.header`
 `
 
 const StyledImage = styled.img<{ isLight: boolean }>`
-  ${({ isLight }) =>
-    isLight &&
-    css`
-      filter: brightness(1) invert(1);
-    `}
+  object-fit: cover;
+  height: 36px;
 `
 
 const ButtonContainer = styled.div`
@@ -70,5 +70,14 @@ const ButtonContainer = styled.div`
 `
 
 const Button = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+`
+
+const StyledLink = styled(Link)`
+  display: flex;
+  align-items: center;
+  justify-content: center;
 `
