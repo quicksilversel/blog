@@ -54,7 +54,6 @@ export const Td = styled.td`
     font-size: 0.85rem;
   }
 
-  /* Style checkmarks and X marks */
   &:has(> :only-child:is(✅, ❌)) {
     text-align: center;
   }
@@ -69,7 +68,6 @@ export const TableWrapper = styled.div`
     margin: 1.5rem -1rem;
     padding: 0 1rem;
 
-    /* Add scroll hint shadow */
     background: linear-gradient(
         to right,
         ${({ theme }) => theme.colors.background} 30%,
@@ -85,7 +83,6 @@ export const TableWrapper = styled.div`
     background-size: 20px 100%;
   }
 
-  /* Custom scrollbar */
   &::-webkit-scrollbar {
     height: 8px;
   }
