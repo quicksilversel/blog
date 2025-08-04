@@ -8,6 +8,7 @@ import Head from 'next/head'
 import Link from 'next/link'
 import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
+import remarkGfm from 'remark-gfm'
 
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
@@ -46,7 +47,12 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
   try {
     const postFile = fs.readFileSync(filePath, 'utf8')
 
-    const mdxSource = await serialize(postFile, { parseFrontmatter: true })
+    const mdxSource = await serialize(postFile, { 
+      parseFrontmatter: true,
+      mdxOptions: {
+        remarkPlugins: [remarkGfm]
+      }
+    })
     return {
       props: {
         source: mdxSource,
@@ -109,6 +115,12 @@ export default function Snippet({
                 li: Markup.Li,
                 a: Markup.Anchor,
                 img: Markup.Img,
+                table: Markup.Table,
+                thead: Markup.Thead,
+                tbody: Markup.Tbody,
+                tr: Markup.Tr,
+                th: Markup.Th,
+                td: Markup.Td,
               }}
             />
           </ArticleBody>

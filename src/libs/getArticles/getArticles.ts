@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 
 import { serialize } from 'next-mdx-remote/serialize'
+import remarkGfm from 'remark-gfm'
 
 import type { Article } from './types'
 
@@ -27,6 +28,9 @@ export async function getArticles(basePath: string = ARTICLE_PATH): Promise<Arti
           const source = await fs.readFile(fullPath, 'utf8')
           const { frontmatter } = await serialize(source, {
             parseFrontmatter: true,
+            mdxOptions: {
+              remarkPlugins: [remarkGfm]
+            }
           })
 
           const slug = `${category}/${path.basename(fileName, '.mdx')}`

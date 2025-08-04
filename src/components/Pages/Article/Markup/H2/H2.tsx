@@ -13,4 +13,8 @@ const StyledH2 = styled.h2`
   padding-top: 2rem;
   margin-block: 2rem 1rem;
   text-transform: capitalize;
+
+  table + & {
+    border-top: none;
+  }
 `
