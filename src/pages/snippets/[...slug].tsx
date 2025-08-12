@@ -5,16 +5,12 @@ import React from 'react'
 
 import styled from '@emotion/styled'
 import Head from 'next/head'
-import Link from 'next/link'
-import { MDXRemote } from 'next-mdx-remote'
 import { serialize } from 'next-mdx-remote/serialize'
 import remarkGfm from 'remark-gfm'
 
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
-import { ArticleBody } from '@/components/Pages/Article/Body'
-import { ArticleHeader } from '@/components/Pages/Article/Header'
-import * as Markup from '@/components/Pages/Article/Markup'
+import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
 import { getArticles } from '@/libs/getArticles'
 import { SNIPPETS_PATH } from '@/utils/constants'
 
@@ -47,11 +43,11 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
   try {
     const postFile = fs.readFileSync(filePath, 'utf8')
 
-    const mdxSource = await serialize(postFile, { 
+    const mdxSource = await serialize(postFile, {
       parseFrontmatter: true,
       mdxOptions: {
-        remarkPlugins: [remarkGfm]
-      }
+        remarkPlugins: [remarkGfm],
+      },
     })
     return {
       props: {
@@ -85,45 +81,14 @@ export default function Snippet({
       </Head>
       <main>
         <Container>
-          <Link href="/snippets" passHref legacyBehavior>
-            <BackLink>← Back to all snippets</BackLink>
-          </Link>
-          <ArticleHeader
-            title={String(source.frontmatter.title)}
-            date={
-              source.frontmatter.date
-                ? String(source.frontmatter.date)
-                : undefined
-            }
-            topics={
-              source.frontmatter.topics
-                ? (source.frontmatter.topics as string[])
-                : undefined
-            }
+          <ArticleDetail
+            source={source}
+            breadcrumbItems={[
+              { label: 'Home', href: '/' },
+              { label: 'Snippets', href: '/snippets' },
+              { label: String(source.frontmatter.title) },
+            ]}
           />
-          <ArticleBody>
-            <MDXRemote
-              {...source}
-              components={{
-                h1: Markup.H1,
-                h2: Markup.H2,
-                h3: Markup.H3,
-                p: Markup.P,
-                pre: Markup.HighlightedCode,
-                code: Markup.Code,
-                blockquote: Markup.Blockquote,
-                li: Markup.Li,
-                a: Markup.Anchor,
-                img: Markup.Img,
-                table: Markup.Table,
-                thead: Markup.Thead,
-                tbody: Markup.Tbody,
-                tr: Markup.Tr,
-                th: Markup.Th,
-                td: Markup.Td,
-              }}
-            />
-          </ArticleBody>
         </Container>
       </main>
     </>
@@ -133,17 +98,4 @@ export default function Snippet({
 const Container = styled.article`
   max-width: 900px;
   margin: 0 auto;
-`
-
-const BackLink = styled.a`
-  display: inline-block;
-  margin: 0 1rem;
-  color: ${({ theme }) => theme.colors.primary};
-  text-decoration: none;
-  font-size: var(--font-size-extra-small);
-  transition: opacity 0.2s ease;
-
-  &:hover {
-    opacity: 0.8;
-  }
 `

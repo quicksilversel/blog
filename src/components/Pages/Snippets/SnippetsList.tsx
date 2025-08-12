@@ -56,7 +56,7 @@ export function SnippetsList({ snippets }: SnippetsListProps) {
 const Container = styled.div`
   max-width: 900px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 24px;
 `
 
 const ImageContainer = styled.div`
