@@ -5,43 +5,38 @@ import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
 import { Archive } from '@/components/Pages/Archive'
 import { getArticles } from '@/libs/getArticles'
-import { ARTICLE_PATH } from '@/utils/constants'
+import { getProjects } from '@/libs/getProjects'
 
-interface GroupedArticles {
-  [key: string]: Article[]
-}
+type ArchiveItem = Article & { isProject: boolean }
 
-export const getStaticProps: GetStaticProps<{
-  groupedArticles: GroupedArticles
-}> = async () => {
-  const allArticles = await getArticles(ARTICLE_PATH)
+const ym = (d: string | Date) => new Date(d).toISOString().slice(0, 7)
 
-  const sortedArticles = allArticles
+const groupByMonth = (items: ArchiveItem[]) =>
+  items.reduce(
+    (acc, it) => ((acc[ym(it.date)] ??= []).push(it), acc),
+    {} as Record<string, ArchiveItem[]>,
+  )
+
+export const getStaticProps: GetStaticProps = async () => {
+  const [articles, projects] = await Promise.all([getArticles(), getProjects()])
+
+  const allArticles: ArchiveItem[] = [
+    ...articles.map((article) => ({ ...article, isProject: false })),
+    ...projects.flatMap((project) =>
+      project.articles.map((article) => ({
+        ...article,
+        isProject: true,
+      })),
+    ),
+  ]
     .filter((article) => article.published !== false)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .sort((a, b) => +new Date(b.date) - +new Date(a.date))
 
-  const groupedArticles: GroupedArticles = {}
-
-  sortedArticles.forEach((article) => {
-    const date = new Date(article.date)
-    const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-
-    if (!groupedArticles[monthKey]) {
-      groupedArticles[monthKey] = []
-    }
-
-    groupedArticles[monthKey].push(article)
-  })
-
-  return {
-    props: {
-      groupedArticles,
-    },
-  }
+  return { props: { articles: groupByMonth(allArticles) } }
 }
 
 export default function ArchivePage({
-  groupedArticles,
+  articles,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
     <>
@@ -50,7 +45,7 @@ export default function ArchivePage({
         <meta name="description" content="Archive of all blog posts" />
       </Head>
       <main>
-        <Archive groupedArticles={groupedArticles} />
+        <Archive articles={articles} />
       </main>
     </>
   )

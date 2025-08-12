@@ -1,11 +1,14 @@
 import styled from '@emotion/styled'
 import GitHubIcon from '@mui/icons-material/GitHub'
+import LinkedInIcon from '@mui/icons-material/LinkedIn'
 import Image from 'next/image'
 import Link from 'next/link'
 
+import { Box } from '@/components/UI/Box'
+
 export const Hero = () => {
   return (
-    <>
+    <Box>
       <ImageContainer>
         <StyledImage src="/hero.png" alt="Zoe" fill loading="eager" priority />
       </ImageContainer>
@@ -20,6 +23,14 @@ export const Hero = () => {
               aria-label="GitHub"
             >
               <GitHubIcon />
+            </Link>
+            <Link
+              href="https://www.linkedin.com/in/sueun-lee"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="LinkedIn"
+            >
+              <StyledLinkedInIcon />
             </Link>
             <Link
               href="https://codepen.io/quicksilversel"
@@ -43,7 +54,7 @@ export const Hero = () => {
           Frontend x SRE. Learning in public, debugging in private.
         </Description>
       </Information>
-    </>
+    </Box>
   )
 }
 
@@ -99,4 +110,9 @@ const Links = styled.div`
 const CodePenIcon = styled.svg`
   width: 25px;
   height: 25px;
+`
+
+const StyledLinkedInIcon = styled(LinkedInIcon)`
+  font-size: 1.75rem;
+  margin-top: -2px;
 `
