@@ -10,19 +10,19 @@ import remarkGfm from 'remark-gfm'
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
-import { getArticles } from '@/libs/getArticles'
-import { ARTICLE_PATH } from '@/utils/constants'
+import { getProjects } from '@/libs/getProjects'
+import { PROJECTS_PATH } from '@/utils/constants'
 
 export async function getStaticPaths() {
-  const articleFiles = await getArticles(ARTICLE_PATH)
+  const projects = await getProjects()
 
-  const paths = articleFiles.map(({ category, fileName }) => {
-    return {
+  const paths = projects.flatMap((project) =>
+    project.articles.map((article) => ({
       params: {
-        slug: [category, fileName.replace('.mdx', '')],
+        slug: article.slug.split('/'),
       },
-    }
-  })
+    })),
+  )
 
   return { paths, fallback: false }
 }
@@ -36,22 +36,26 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
     }
   }
 
-  const [category, fileName] = slug
-  const filePath = path.join(ARTICLE_PATH, category, `${fileName}.mdx`)
+  const [projectName, fileName] = slug
+  const filePath = path.join(PROJECTS_PATH, projectName, `${fileName}.mdx`)
 
   try {
     const postFile = fs.readFileSync(filePath, 'utf8')
-
     const mdxSource = await serialize(postFile, {
       parseFrontmatter: true,
       mdxOptions: {
         remarkPlugins: [remarkGfm],
       },
     })
+
+    const projects = await getProjects()
+    const project = projects.find((p) => p.slug === projectName)
+
     return {
       props: {
         source: mdxSource,
-        category,
+        project,
+        currentSlug: slug.join('/'),
       },
     }
   } catch (error) {
@@ -61,14 +65,15 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
   }
 }
 
-export default function Articles({
+export default function ProjectArticle({
   source,
-  category,
+  project,
+  currentSlug,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
     <>
       <Head>
-        <title>{String(source.frontmatter.title)}</title>
+        <title>{String(source.frontmatter.title)} - Project</title>
         <meta
           name="description"
           content={String(source.frontmatter.description)}
@@ -79,15 +84,18 @@ export default function Articles({
           content={String(source.frontmatter.description)}
         />
       </Head>
+
       <ArticleDetail
         source={source}
+        isProject
+        project={{
+          ...project,
+          currentSlug,
+        }}
         breadcrumbItems={[
           { label: 'Home', href: '/' },
-          { label: 'Articles', href: '/articles' },
-          {
-            label: category,
-            href: `/articles/${category}`,
-          },
+          { label: 'Projects', href: '/projects' },
+          { label: project.title, href: `/projects/${project.slug}` },
           { label: String(source.frontmatter.title) },
         ]}
       />

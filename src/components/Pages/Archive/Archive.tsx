@@ -7,17 +7,18 @@ import Link from 'next/link'
 
 import type { Article } from '@/libs/getArticles/types'
 
-type GroupedArticles = {
-  [key: string]: Article[]
-}
+import { Box } from '@/components/UI/Box'
 
+type ArchiveItem = Article & {
+  isProject: boolean
+}
 type Props = {
-  groupedArticles: GroupedArticles
+  articles: Record<string, ArchiveItem[]>
 }
 
-export function Archive({ groupedArticles }: Props) {
+export function Archive({ articles }: Props) {
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(
-    new Set(Object.keys(groupedArticles)),
+    new Set(Object.keys(articles)),
   )
 
   const toggleMonth = (monthKey: string) => {
@@ -34,15 +35,15 @@ export function Archive({ groupedArticles }: Props) {
 
   const totalArticles = useMemo(
     () =>
-      Object.values(groupedArticles).reduce(
+      Object.values(articles).reduce(
         (sum, articles) => sum + articles.length,
         0,
       ),
-    [groupedArticles],
+    [articles],
   )
 
   return (
-    <Container>
+    <Box>
       <ImageContainer>
         <StyledImage
           src="/hero-lofi.png"
@@ -57,7 +58,7 @@ export function Archive({ groupedArticles }: Props) {
         <TotalCount>{totalArticles} posts</TotalCount>
       </Header>
       <Timeline>
-        {Object.entries(groupedArticles).map(([monthKey, articles]) => {
+        {Object.entries(articles).map(([monthKey, articles]) => {
           const [year, month] = monthKey.split('-')
           const monthName = new Date(`${year}-${month}-01`).toLocaleDateString(
             'en-US',
@@ -87,7 +88,13 @@ export function Archive({ groupedArticles }: Props) {
                           month: 'short',
                         })}
                       </DateLabel>
-                      <ArticleLink href={`/articles/${article.slug}`}>
+                      <ArticleLink
+                        href={
+                          article.isProject
+                            ? `/projects/${article.slug}`
+                            : `/articles/${article.slug}`
+                        }
+                      >
                         {article.title}
                       </ArticleLink>
                     </ArticleItem>
@@ -98,15 +105,9 @@ export function Archive({ groupedArticles }: Props) {
           )
         })}
       </Timeline>
-    </Container>
+    </Box>
   )
 }
-
-const Container = styled.div`
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 1rem;
-`
 
 const ImageContainer = styled.div`
   position: relative;
