@@ -84,7 +84,6 @@ export default function ProjectArticle({
           content={String(source.frontmatter.description)}
         />
       </Head>
-
       <ArticleDetail
         source={source}
         isProject

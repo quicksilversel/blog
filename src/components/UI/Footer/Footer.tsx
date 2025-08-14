@@ -1,5 +1,6 @@
 import styled from '@emotion/styled'
 import GitHubIcon from '@mui/icons-material/GitHub'
+import LinkedInIcon from '@mui/icons-material/LinkedIn'
 import Link from 'next/link'
 
 export const Footer = () => {
@@ -13,6 +14,14 @@ export const Footer = () => {
           aria-label="GitHub"
         >
           <GitHubIcon />
+        </Link>
+        <Link
+          href="https://www.linkedin.com/in/sueun-lee"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="LinkedIn"
+        >
+          <StyledLinkedInIcon />
         </Link>
         <Link
           href="https://codepen.io/quicksilversel"
@@ -64,4 +73,9 @@ const Copyright = styled.span`
   font-size: 12px;
   margin-top: 16px;
   color: ${({ theme }) => theme.text};
+`
+
+const StyledLinkedInIcon = styled(LinkedInIcon)`
+  font-size: 1.75rem;
+  margin-top: -2px;
 `

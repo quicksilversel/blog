@@ -24,7 +24,6 @@ const SectionHeader = styled.div`
   align-items: flex-end;
   justify-content: space-between;
   padding-bottom: 1rem;
-  font-size: var(--font-size-small);
 `
 
 const Title = styled.h2`
@@ -35,7 +34,7 @@ const Title = styled.h2`
 `
 
 const StyledLink = styled(Link)`
-  font-size: var(--font-size-small);
+  font-size: var(--font-size-extra-small);
   color: ${({ theme }) => theme.colors.primary};
   text-decoration: none;
   transition: opacity 0.2s ease;

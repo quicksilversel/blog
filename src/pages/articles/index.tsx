@@ -29,10 +29,6 @@ export async function getStaticProps() {
 export default function Articles({
   articles,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
-  const categories = Object.entries(articles).sort(([a], [b]) =>
-    a.localeCompare(b),
-  )
-
   return (
     <>
       <Head>
@@ -44,11 +40,7 @@ export default function Articles({
           }
         />
       </Head>
-      <main>
-        {categories.map(([category, articles]) => (
-          <ArticleHome key={category} category={category} articles={articles} />
-        ))}
-      </main>
+      <ArticleHome articles={articles} />
     </>
   )
 }
