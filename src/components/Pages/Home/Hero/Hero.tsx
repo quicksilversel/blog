@@ -53,6 +53,7 @@ export const Hero = () => {
         <Description>
           Frontend x SRE. Learning in public, debugging in private.
         </Description>
+        <AboutLink href="/about">About me →</AboutLink>
       </Information>
     </Box>
   )
@@ -115,4 +116,15 @@ const CodePenIcon = styled.svg`
 const StyledLinkedInIcon = styled(LinkedInIcon)`
   font-size: 1.75rem;
   margin-top: -2px;
+`
+
+const AboutLink = styled(Link)`
+  font-size: var(--font-size-small);
+  color: ${({ theme }) => theme.colors.primary};
+  margin-top: 16px;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
 `

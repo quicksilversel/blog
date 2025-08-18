@@ -3,6 +3,7 @@ import CodeIcon from '@mui/icons-material/Code'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import InventoryIcon from '@mui/icons-material/Inventory'
 import LightModeIcon from '@mui/icons-material/LightMode'
+import PetsIcon from '@mui/icons-material/Pets'
 import Link from 'next/link'
 
 import type { ThemeContext } from '@/pages/_app'
@@ -15,14 +16,17 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
 
   return (
     <Container>
-      <StyledLink href="/">
+      <StyledLink href="/" title="Home">
         <StyledImage src="/icon.png" alt="Logo" isLight={theme === 'light'} />
       </StyledLink>
       <ButtonContainer>
-        <StyledLink href="/snippets">
+        <StyledLink href="/about" title="About me">
+          <PetsIcon />
+        </StyledLink>
+        <StyledLink href="/snippets" title="Code snippets">
           <CodeIcon />
         </StyledLink>
-        <StyledLink href="/archive">
+        <StyledLink href="/archive" title="Archive">
           <InventoryIcon />
         </StyledLink>
         <Button
@@ -80,4 +84,15 @@ const StyledLink = styled(Link)`
   display: flex;
   align-items: center;
   justify-content: center;
+
+  &:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: -24px;
+    padding: 4px 8px;
+    background-color: ${({ theme }) => theme.colors.floating};
+    border-radius: 4px;
+    font-size: var(--font-size-extra-small);
+    color: ${({ theme }) => theme.colors.text};
+  }
 `

@@ -123,8 +123,6 @@ const ActivityCard = styled(Link)`
   background-color: ${({ theme }) => theme.colors.floating};
   border: 1px solid ${({ theme }) => theme.colors.muted};
   border-radius: 6px;
-  text-decoration: none;
-  color: inherit;
   transition: background-color 0.2s ease;
 
   &:hover {

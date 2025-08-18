@@ -36,7 +36,6 @@ const Title = styled.h2`
 const StyledLink = styled(Link)`
   font-size: var(--font-size-extra-small);
   color: ${({ theme }) => theme.colors.primary};
-  text-decoration: none;
   transition: opacity 0.2s ease;
 
   &:hover {

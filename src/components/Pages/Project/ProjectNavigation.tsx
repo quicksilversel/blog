@@ -101,7 +101,6 @@ const ArticleLink = styled(Link)<{ isActive: boolean }>`
   display: flex;
   align-items: center;
   padding: 0.75rem 1.5rem;
-  text-decoration: none;
   color: ${({ theme, isActive }) =>
     isActive ? theme.colors.primary : theme.colors.text};
   background-color: ${({ theme, isActive }) =>

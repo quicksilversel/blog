@@ -65,7 +65,6 @@ const BreadcrumbItem = styled.li`
 
 const BreadcrumbLink = styled(Link)`
   color: ${({ theme }) => theme.colors.primary};
-  text-decoration: none;
   transition: opacity 0.2s ease;
   text-transform: capitalize;
   white-space: nowrap;
