@@ -207,7 +207,11 @@ const MonthTitle = styled.h2`
   color: ${({ theme }) => theme.colors.primary};
 `
 
-const ToggleIcon = styled(ExpandCircleDownIcon)<{ isExpanded: boolean }>`
+const ToggleIcon = styled(ExpandCircleDownIcon, {
+  shouldForwardProp: (prop) => prop !== 'isExpanded',
+})<{
+  isExpanded: boolean
+}>`
   display: inline-block;
   transform: ${({ isExpanded }) =>
     !isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)'};
@@ -215,6 +219,7 @@ const ToggleIcon = styled(ExpandCircleDownIcon)<{ isExpanded: boolean }>`
   font-size: var(--font-size-medium);
 `
 
+export default ToggleIcon
 const PostCount = styled.span`
   font-size: 0.875rem;
   color: ${({ theme }) => theme.colors.muted};

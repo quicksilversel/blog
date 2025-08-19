@@ -75,7 +75,9 @@ const Title = styled.h3`
   text-transform: capitalize;
 `
 
-const ToggleIcon = styled(KeyboardArrowDownIcon)<{ isExpanded: boolean }>`
+const ToggleIcon = styled(KeyboardArrowDownIcon, {
+  shouldForwardProp: (prop) => prop !== 'isExpanded',
+})<{ isExpanded: boolean }>`
   color: ${({ theme }) => theme.colors.primary};
   transform: ${({ isExpanded }) =>
     isExpanded ? 'rotate(0deg)' : 'rotate(180deg)'};
@@ -97,7 +99,9 @@ const ArticleItem = styled.li<{ isActive: boolean }>`
   }
 `
 
-const ArticleLink = styled(Link)<{ isActive: boolean }>`
+const ArticleLink = styled(Link, {
+  shouldForwardProp: (prop) => prop !== 'isActive',
+})<{ isActive: boolean }>`
   display: flex;
   align-items: center;
   padding: 0.75rem 1.5rem;
