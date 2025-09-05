@@ -219,7 +219,6 @@ const ToggleIcon = styled(ExpandCircleDownIcon, {
   font-size: var(--font-size-medium);
 `
 
-export default ToggleIcon
 const PostCount = styled.span`
   font-size: 0.875rem;
   color: ${({ theme }) => theme.colors.muted};
