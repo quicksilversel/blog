@@ -7,10 +7,10 @@ export const H3 = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledH3 = styled.h3`
-  color: ${({ theme }) => theme.secondary};
   font-size: var(--font-size-medium);
+  color: ${({ theme }) => theme.colors.secondary};
 
-  * + & {
+  &:not(:first-child) {
     margin-top: 16px;
   }
 `

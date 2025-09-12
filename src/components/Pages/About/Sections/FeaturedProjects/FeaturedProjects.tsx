@@ -12,7 +12,7 @@ export const FeaturedProjects = () => {
       <Section.Content>
         <Section.Title>Featured Projects</Section.Title>
         <ProjectGrid>
-          {PROJECT_LIST.map((project, index) => (
+          {PROJECT_LIST.map((project) => (
             <ProjectLink href={project.link} key={project.title}>
               <ProjectTitle>{project.title}</ProjectTitle>
               <ProjectDescription>{project.description}</ProjectDescription>
@@ -34,34 +34,34 @@ const ProjectGrid = styled.div`
 `
 
 const ProjectTitle = styled.h3`
+  margin: 0 0 0.75rem;
   font-size: var(--font-size-normal);
-  color: ${({ theme }) => theme.colors.text};
-  margin: 0 0 0.75rem 0;
   font-weight: 600;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const ProjectDescription = styled.p`
-  font-size: var(--font-size-small);
-  color: ${({ theme }) => theme.colors.text};
-  line-height: 1.5;
   margin-bottom: 1rem;
+  font-size: var(--font-size-small);
+  line-height: 1.5;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const ProjectTech = styled.p`
-  font-size: var(--font-size-extra-small);
   margin-bottom: 1rem;
+  font-size: var(--font-size-extra-small);
 `
 
 const ProjectLink = styled(Link)`
   display: block;
   padding: 1.5rem;
   font-size: var(--font-size-small);
-  color: ${({ theme }) => theme.colors.primary};
   font-weight: 500;
-  transition: background-color 0.2s ease;
+  color: ${({ theme }) => theme.colors.primary};
   background-color: ${({ theme }) => theme.colors.floating};
   border: 1px solid ${({ theme }) => theme.colors.muted};
   border-radius: 8px;
+  transition: background-color 0.2s ease;
 
   &:hover {
     background-color: ${({ theme }) => theme.colors.muted};

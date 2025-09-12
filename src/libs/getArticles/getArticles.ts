@@ -8,7 +8,9 @@ import type { Article } from './types'
 
 import { ARTICLE_PATH } from '@/utils/constants'
 
-export async function getArticles(basePath: string = ARTICLE_PATH): Promise<Article[]> {
+export async function getArticles(
+  basePath: string = ARTICLE_PATH,
+): Promise<Article[]> {
   const entries = await fs.readdir(basePath, { withFileTypes: true })
   const categories = entries
     .filter((entry) => entry.isDirectory())
@@ -29,8 +31,8 @@ export async function getArticles(basePath: string = ARTICLE_PATH): Promise<Arti
           const { frontmatter } = await serialize(source, {
             parseFrontmatter: true,
             mdxOptions: {
-              remarkPlugins: [remarkGfm]
-            }
+              remarkPlugins: [remarkGfm],
+            },
           })
 
           const slug = `${category}/${path.basename(fileName, '.mdx')}`

@@ -19,25 +19,25 @@ export const Section = ({ id, children, className }: Props) => {
 export const Container = styled.section`
   display: flex;
   gap: 3rem;
-  margin-bottom: 6rem;
   align-items: flex-start;
+  margin-bottom: 6rem;
 
-  @media (max-width: 768px) {
+  @media (width <= 768px) {
     gap: 1.5rem;
     margin-bottom: 4rem;
   }
 `
 
 const SectionNumber = styled.div`
-  font-size: 4rem;
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.primary};
-  opacity: 0.2;
-  line-height: 1;
   position: sticky;
   top: 68px;
+  font-size: 4rem;
+  font-weight: 700;
+  line-height: 1;
+  color: ${({ theme }) => theme.colors.primary};
+  opacity: 0.2;
 
-  @media (max-width: 768px) {
+  @media (width <= 768px) {
     font-size: 2.5rem;
   }
 `
@@ -48,17 +48,17 @@ const SectionContent = styled.div`
 `
 
 const SectionTitle = styled.h2`
+  margin: 0 0 2rem;
   font-size: var(--font-size-extra-large);
-  color: ${({ theme }) => theme.colors.text};
-  margin: 0 0 2rem 0;
   font-weight: 700;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const Paragraph = styled.p`
-  font-size: var(--font-size-normal);
-  color: ${({ theme }) => theme.colors.text};
-  line-height: 1.8;
   margin-bottom: 1.5rem;
+  font-size: var(--font-size-normal);
+  line-height: 1.8;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 Section.Number = SectionNumber

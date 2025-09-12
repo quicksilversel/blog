@@ -7,12 +7,12 @@ export const H2 = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledH2 = styled.h2`
-  color: ${({ theme }) => theme.primary};
-  font-size: var(--font-size-large);
-  border-top: 1px solid ${({ theme }) => theme.colors.muted};
   padding-top: 2rem;
   margin-block: 2rem 1rem;
+  font-size: var(--font-size-large);
+  color: ${({ theme }) => theme.colors.primary};
   text-transform: capitalize;
+  border-top: 1px solid ${({ theme }) => theme.colors.muted};
 
   table + & {
     border-top: none;

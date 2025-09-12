@@ -7,13 +7,6 @@ import { Experience } from './Sections/Experience/Experience'
 import { FeaturedProjects } from './Sections/FeaturedProjects'
 import { Skills } from './Sections/Skills'
 
-const sections = [
-  { id: 'about', label: 'About', icon: '01' },
-  { id: 'experience', label: 'Experience', icon: '02' },
-  { id: 'projects', label: 'Projects', icon: '03' },
-  { id: 'skills', label: 'Skills', icon: '04' },
-]
-
 export const About = () => {
   return (
     <Container>
@@ -28,20 +21,20 @@ export const About = () => {
 }
 
 const Container = styled.main`
-  display: flex;
-  min-height: calc(100vh - 68px);
-  max-width: 900px;
-  margin: 0 auto;
   position: relative;
+  display: flex;
+  max-width: 900px;
+  min-height: calc(100vh - 68px);
+  margin: 0 auto;
 `
 
 const Content = styled.div`
   flex: 1;
-  margin-left: 200px;
   padding: 4rem 2rem;
+  margin-left: 200px;
 
-  @media (max-width: 1024px) {
-    margin-left: 0;
+  @media (width <= 1024px) {
     padding: 2rem 1rem;
+    margin-left: 0;
   }
 `

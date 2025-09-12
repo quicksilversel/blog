@@ -67,17 +67,17 @@ const ImageContainer = styled.div`
 `
 
 const StyledImage = styled(Image)`
-  border-radius: 8px;
   object-fit: cover;
+  border-radius: 8px;
 `
 
 const Information = styled.div`
   display: flex;
   flex-direction: column;
-  margin-top: 32px;
   gap: 8px;
+  margin-top: 32px;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-top: 24px;
   }
 `
@@ -98,8 +98,8 @@ const Description = styled.p`
 
 const Links = styled.div`
   display: flex;
-  margin-top: 4px;
   gap: 16px;
+  margin-top: 4px;
   font-size: var(--font-size-small);
 
   a:hover {
@@ -114,14 +114,14 @@ const CodePenIcon = styled.svg`
 `
 
 const StyledLinkedInIcon = styled(LinkedInIcon)`
-  font-size: 1.75rem;
   margin-top: -2px;
+  font-size: 1.75rem;
 `
 
 const AboutLink = styled(Link)`
+  margin-top: 16px;
   font-size: var(--font-size-small);
   color: ${({ theme }) => theme.colors.primary};
-  margin-top: 16px;
   transition: opacity 0.2s ease;
 
   &:hover {

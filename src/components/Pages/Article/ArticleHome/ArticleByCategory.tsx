@@ -93,10 +93,10 @@ const ShowMoreContainer = styled.div`
   display: flex;
   justify-content: center;
   margin-top: 2rem;
-  color: ${({ theme }) => theme.primary};
   font-size: var(--font-size-extra-small);
-  transition: opacity 0.2s ease;
   line-height: 1;
+  color: ${({ theme }) => theme.colors.primary};
+  transition: opacity 0.2s ease;
 
   &:hover {
     opacity: 0.8;

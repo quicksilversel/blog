@@ -2,7 +2,6 @@ const GA_TRACKING_ID = 'G-WJEXDK6XH9'
 
 export const GoogleAnalytics = () => {
   return (
-    // eslint-disable-next-line @next/next/next-script-for-ga
     <>
       <script
         async

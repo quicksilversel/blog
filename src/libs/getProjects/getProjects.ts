@@ -44,7 +44,7 @@ export async function getProjects(
         }
       } catch (error) {
         console.warn(
-          `No index.mdx found for project ${projectName}, using default metadata.`,
+          `No index.mdx found for project ${projectName}, using default metadata: ${error}`,
         )
       }
 

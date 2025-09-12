@@ -41,15 +41,14 @@ export function Breadcrumb({ items }: Props) {
 
 const BreadcrumbList = styled.ol`
   display: flex;
-  align-items: center;
   flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  list-style: none;
-  margin: 0;
+  align-items: center;
   padding: 0;
+  margin: 0;
+  overflow: auto hidden;
   font-size: var(--font-size-extra-small);
   white-space: nowrap;
+  list-style: none;
 
   &::-webkit-scrollbar {
     display: none;
@@ -58,16 +57,16 @@ const BreadcrumbList = styled.ol`
 
 const BreadcrumbItem = styled.li`
   display: inline-flex;
-  align-items: center;
   flex-shrink: 0;
+  align-items: center;
   white-space: nowrap;
 `
 
 const BreadcrumbLink = styled(Link)`
   color: ${({ theme }) => theme.colors.primary};
-  transition: opacity 0.2s ease;
   text-transform: capitalize;
   white-space: nowrap;
+  transition: opacity 0.2s ease;
 
   &:hover {
     opacity: 0.8;
@@ -81,7 +80,7 @@ const BreadcrumbCurrent = styled.span`
 `
 
 const Separator = styled.span`
+  flex-shrink: 0; /* Prevent separator from shrinking */
   margin: 0 0.5rem;
   color: ${({ theme }) => theme.colors.muted};
-  flex-shrink: 0; /* Prevent separator from shrinking */
 `

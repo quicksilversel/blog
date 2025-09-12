@@ -61,14 +61,14 @@ const TimelineContainer = styled.div`
 `
 
 const TimelineList = styled.ol`
-  list-style: none;
   padding: 0;
   margin: 0;
+  list-style: none;
 `
 
 const TimelineItem = styled.li`
-  display: flex;
   position: relative;
+  display: flex;
   margin-bottom: 1rem;
 
   &:last-child {
@@ -81,18 +81,18 @@ const TimelineMarker = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-right: 1rem;
   width: 32px;
+  margin-right: 1rem;
 `
 
 const MarkerDot = styled.div`
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background-color: ${({ theme }) => theme.colors.background};
-  border: 2px solid ${({ theme }) => theme.colors.muted};
   z-index: 1;
   flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  background-color: ${({ theme }) => theme.colors.background};
+  border: 2px solid ${({ theme }) => theme.colors.muted};
+  border-radius: 50%;
 `
 
 const TimelineLine = styled.div`
@@ -111,10 +111,10 @@ const TimelineContent = styled.div`
 
 const TimelineDate = styled.time`
   display: block;
-  font-size: var(--font-size-extra-small);
-  color: ${({ theme }) => theme.colors.muted};
   margin-bottom: 0.5rem;
+  font-size: var(--font-size-extra-small);
   font-weight: 500;
+  color: ${({ theme }) => theme.colors.muted};
 `
 
 const ActivityCard = styled(Link)`
@@ -132,26 +132,26 @@ const ActivityCard = styled(Link)`
 
 const CardHeader = styled.div`
   display: flex;
-  align-items: baseline;
   gap: 0.75rem;
+  align-items: baseline;
   margin-bottom: 0.5rem;
 `
 
 const PartLabel = styled.span`
   display: inline-block;
   padding: 0.125rem 0.5rem;
-  background-color: ${({ theme }) => theme.colors.primary};
-  color: white;
-  border-radius: 12px;
   font-size: var(--font-size-extra-small);
   font-weight: 600;
+  color: white;
   white-space: nowrap;
+  background-color: ${({ theme }) => theme.colors.primary};
+  border-radius: 12px;
 `
 
 const CardTitle = styled.h3`
-  font-size: var(--font-size-normal);
-  color: ${({ theme }) => theme.colors.text};
   margin: 0;
+  font-size: var(--font-size-normal);
   font-weight: 600;
   line-height: 1.3;
+  color: ${({ theme }) => theme.colors.text};
 `

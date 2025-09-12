@@ -47,7 +47,7 @@ export const ArticleHeader = ({ title, date, topics }: Props) => {
 const Container = styled.div`
   margin-top: 2rem;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-top: 1rem;
   }
 `
@@ -58,15 +58,15 @@ const ImageContainer = styled.div`
 `
 
 const Title = styled.h1`
-  font-size: var(--font-size-extra-large);
   margin-bottom: 1rem;
+  font-size: var(--font-size-extra-large);
 `
 
 const MetaInfo = styled.div`
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 1rem;
+  align-items: center;
   font-size: 0.9rem;
   color: ${({ theme }) => theme.colors.muted};
 `
@@ -78,15 +78,15 @@ const Date = styled.time`
 
 const Topics = styled.div`
   display: flex;
-  gap: 0.5rem;
   flex-wrap: wrap;
+  gap: 0.5rem;
 `
 
 const Topic = styled.span`
   padding: 0.25rem 0.75rem;
-  background: ${({ theme }) => theme.colors.primary};
-  color: ${({ theme }) => theme.colors.text};
-  border-radius: 1rem;
   font-size: var(--font-size-extra-small);
   font-weight: 500;
+  color: ${({ theme }) => theme.colors.text};
+  background: ${({ theme }) => theme.colors.primary};
+  border-radius: 1rem;
 `

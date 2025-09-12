@@ -47,30 +47,30 @@ const Container = styled.header`
   position: sticky;
   top: 0;
   left: 0;
-  width: 100%;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  z-index: 10;
+  width: 100%;
   padding: 16px;
   font-size: 24px;
   background: linear-gradient(
     to top,
     transparent 0%,
-    ${({ theme }) => theme.background} 100%
+    ${({ theme }) => theme.colors.background} 100%
   );
   backdrop-filter: blur(4px);
 `
 
 const StyledImage = styled.img<{ isLight: boolean }>`
-  object-fit: cover;
   height: 36px;
+  object-fit: cover;
 `
 
 const ButtonContainer = styled.div`
   display: flex;
-  align-items: center;
   gap: 16px;
+  align-items: center;
 `
 
 const Button = styled.button`
@@ -86,13 +86,13 @@ const StyledLink = styled(Link)`
   justify-content: center;
 
   &:hover::after {
-    content: attr(title);
     position: absolute;
     bottom: -24px;
     padding: 4px 8px;
-    background-color: ${({ theme }) => theme.colors.floating};
-    border-radius: 4px;
     font-size: var(--font-size-extra-small);
     color: ${({ theme }) => theme.colors.text};
+    content: attr(title);
+    background-color: ${({ theme }) => theme.colors.floating};
+    border-radius: 4px;
   }
 `

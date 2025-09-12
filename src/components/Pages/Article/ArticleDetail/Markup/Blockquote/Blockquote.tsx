@@ -9,8 +9,8 @@ export const Blockquote = ({ children }: { children?: ReactNode }) => {
 const StyledBlockquote = styled.blockquote`
   padding: 16px;
   margin-top: 16px;
-  background: ${({ theme }) => theme.floating};
-  border-left: 3px solid ${({ theme }) => theme.skylineBlue};
+  background: ${({ theme }) => theme.colors.floating};
+  border-left: 3px solid ${({ theme }) => theme.colors.skylineBlue};
   border-radius: 4px;
 
   > p {

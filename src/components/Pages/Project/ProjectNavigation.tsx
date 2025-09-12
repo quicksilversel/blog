@@ -44,22 +44,22 @@ export function ProjectNavigation({ articles, currentSlug, title }: Props) {
 }
 
 const Container = styled.div`
+  margin: 2rem auto;
+  overflow: hidden;
   background-color: ${({ theme }) => theme.colors.floating};
   border: 1px solid ${({ theme }) => theme.colors.muted};
   border-radius: 8px;
-  margin: 2rem auto;
-  overflow: hidden;
 `
 
 const Header = styled.button`
-  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
   padding: 1rem 1.5rem;
+  cursor: pointer;
   background: none;
   border: none;
-  cursor: pointer;
   transition: background-color 0.2s ease;
 
   &:hover {
@@ -85,9 +85,9 @@ const ToggleIcon = styled(KeyboardArrowDownIcon, {
 `
 
 const ArticleList = styled.ol`
-  list-style: none;
   padding: 0;
   margin: 0;
+  list-style: none;
   border-top: 1px solid ${({ theme }) => theme.colors.muted};
 `
 
@@ -117,10 +117,10 @@ const ArticleLink = styled(Link, {
 `
 
 const ArticleNumber = styled.span`
-  font-weight: 600;
   margin-right: 0.75rem;
-  color: ${({ theme }) => theme.colors.muted};
   font-size: var(--font-size-small);
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.muted};
 `
 
 const ArticleTitle = styled.span`

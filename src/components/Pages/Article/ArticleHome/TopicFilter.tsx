@@ -35,7 +35,7 @@ export const TopicFilter = ({
 const Container = styled.div`
   margin-bottom: 24px;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-bottom: 16px;
   }
 `
@@ -48,16 +48,16 @@ const TagContainer = styled.div`
 
 const Tag = styled.button<{ isActive: boolean }>`
   padding: 0.5rem 1rem;
-  border: 1px solid ${({ theme }) => theme.colors.muted};
-  border-radius: 20px;
+  font-size: var(--font-size-extra-small);
+  color: ${({ theme, isActive }) => (isActive ? 'white' : theme.colors.text)};
+  cursor: pointer;
   background: ${({ theme, isActive }) =>
     isActive ? theme.colors.primary : 'transparent'};
-  cursor: pointer;
-  font-size: var(--font-size-extra-small);
-  transition: all 0.2s ease;
-  color: ${({ theme, isActive }) => (isActive ? 'white' : theme.colors.text)};
+  border: 1px solid ${({ theme }) => theme.colors.muted};
   border-color: ${({ theme, isActive }) =>
     isActive ? theme.colors.primary : theme.colors.muted};
+  border-radius: 20px;
+  transition: all 0.2s ease;
 
   &:hover {
     background: ${({ theme, isActive }) =>

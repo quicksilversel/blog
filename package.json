@@ -9,6 +9,10 @@
     "lint": "next lint",
     "lint:js": "eslint \"./src/**/*.{ts,tsx}\"",
     "lint:js:fix": "eslint --fix \"./src/**/*.{ts,tsx}\"",
+    "lint:css": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" 2>&1 | grep -v 'Unknown rule' || true",
+    "lint:css:fix": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" --fix",
+    "format": "prettier --check --cache --experimental-cli \"./**/*.{ts,tsx,js,jsx,mjs}\"",
+    "format:fix": "prettier --write --cache --experimental-cli --log-level error \"./**/*.{ts,tsx,js,jsx,mjs}\"",
     "clean": "rm -rf .next .turbo node_modules/.cache",
     "clean:cache": "rm -rf .next/cache"
   },
@@ -30,12 +34,20 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@typescript-eslint/eslint-plugin": "^8.43.0",
+    "@typescript-eslint/parser": "^8.43.0",
     "eslint": "^9",
     "eslint-config-next": "15.5.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-storybook": "^9.1.3",
     "eslint-plugin-unused-imports": "4.2.0",
+    "postcss-styled-syntax": "^0.7.1",
     "prettier": "3.6.2",
+    "stylelint": "^16.24.0",
+    "stylelint-config-recess-order": "^7.3.0",
+    "stylelint-config-standard": "^39.0.0",
+    "stylelint-no-unsupported-browser-features": "^8.0.4",
+    "stylelint-order": "^7.0.0",
     "typescript": "^5"
   }
 }

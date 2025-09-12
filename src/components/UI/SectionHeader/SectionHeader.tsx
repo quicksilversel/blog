@@ -43,13 +43,13 @@ const ImageContainer = styled.div`
   position: relative;
   margin-bottom: 1rem;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     max-width: 80px;
   }
 `
 
 const Title = styled.h1`
+  margin: 0 0 2rem;
   font-size: var(--font-size-large);
   color: ${({ theme }) => theme.colors.text};
-  margin: 0 0 2rem 0;
 `

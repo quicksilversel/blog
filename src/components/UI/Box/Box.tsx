@@ -14,7 +14,7 @@ const Container = styled.div`
   padding: 32px;
   margin-inline: auto;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     padding: 24px;
   }
 `
@@ -28,9 +28,9 @@ const SectionHeader = styled.div`
 
 const Title = styled.h2`
   font-size: var(--font-size-small);
+  color: ${({ theme }) => theme.colors.primary};
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: ${({ theme }) => theme.primary};
 `
 
 const StyledLink = styled(Link)`

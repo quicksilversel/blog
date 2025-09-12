@@ -7,19 +7,19 @@ export const Li = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledLi = styled.li`
-  font-size: var(--font-size-small);
-  margin-top: 0.5rem;
-  counter-increment: ol-counter;
-  list-style: none;
   position: relative;
+  margin-top: 0.5rem;
+  font-size: var(--font-size-small);
+  list-style: none;
+  counter-increment: ol-counter;
 
   &::before {
-    content: counter(ol-counter) '.';
     position: absolute;
     left: -1.5rem;
     font-weight: 600;
-    color: ${({ theme }) => theme.colors.primary};
     font-feature-settings: 'tnum';
+    color: ${({ theme }) => theme.colors.primary};
+    content: counter(ol-counter) '.';
   }
 
   &:first-child {

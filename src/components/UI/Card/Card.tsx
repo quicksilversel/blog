@@ -67,16 +67,16 @@ export const Card = ({
 }
 const Container = styled.article`
   position: relative;
-  background-color: ${({ theme }) => theme.floating};
+  background-color: ${({ theme }) => theme.colors.floating};
   border-radius: 8px;
 `
 
 const Contents = styled.div`
   position: relative;
-  padding: 24px;
   z-index: 2;
+  padding: 24px;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     padding: 16px;
   }
 `
@@ -86,21 +86,21 @@ const Title = styled.h3<{ size: Props['size'] }>`
     size === 'large' ? 'var(--font-size-medium)' : 'var(--font-size-small)'};
   font-weight: bold;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     font-size: var(--font-size-small);
   }
 `
 
 const Subtitle = styled.span`
   display: block;
+  margin-top: 8px;
   font-size: var(--font-size-extra-small);
   color: ${({ theme }) => theme.colors.primary};
-  margin-top: 8px;
 `
 
 const Description = styled.p`
-  font-size: var(--font-size-extra-small);
   margin-top: 16px;
+  font-size: var(--font-size-extra-small);
   white-space: preserve pretty;
 `
 
@@ -113,17 +113,17 @@ const TopicList = styled.div`
 const Topic = styled.span`
   padding: 8px;
   font-size: var(--font-size-extra-small);
-  background-color: ${({ theme }) => theme.muted};
-  color: ${({ theme }) => theme.text};
+  color: ${({ theme }) => theme.colors.text};
+  background-color: ${({ theme }) => theme.colors.muted};
   border-radius: 4px;
 `
 
 const ImageContainer = styled.div`
   position: absolute;
-  bottom: 0;
   right: 1rem;
+  bottom: 0;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     max-width: 80px;
   }
 `

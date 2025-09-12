@@ -48,9 +48,9 @@ const Container = styled.footer`
   display: flex;
   flex-direction: column;
   justify-content: center;
-  text-align: center;
   padding: 32px 0;
   margin: 0 auto;
+  text-align: center;
 `
 
 const Links = styled.div`
@@ -70,12 +70,12 @@ const CodePenIcon = styled.svg`
 `
 
 const Copyright = styled.span`
-  font-size: 12px;
   margin-top: 16px;
-  color: ${({ theme }) => theme.text};
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const StyledLinkedInIcon = styled(LinkedInIcon)`
-  font-size: 1.75rem;
   margin-top: -2px;
+  font-size: 1.75rem;
 `

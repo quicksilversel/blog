@@ -54,8 +54,8 @@ export const Experience = () => {
 }
 
 const ExperienceItem = styled.div`
-  margin-bottom: 3rem;
   padding-bottom: 2rem;
+  margin-bottom: 3rem;
   border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
 
   &:last-child {
@@ -64,24 +64,24 @@ const ExperienceItem = styled.div`
 `
 
 const JobTitle = styled.h3`
+  margin: 0 0 0.5rem;
   font-size: var(--font-size-large);
-  color: ${({ theme }) => theme.colors.text};
-  margin: 0 0 0.5rem 0;
   font-weight: bold;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const Company = styled.p`
+  margin: 0 0 1rem;
   font-size: var(--font-size-small);
-  color: ${({ theme }) => theme.colors.primary};
-  margin: 0 0 1rem 0;
   font-weight: 500;
+  color: ${({ theme }) => theme.colors.primary};
 `
 
 const Description = styled.p`
-  font-size: var(--font-size-normal);
-  color: ${({ theme }) => theme.colors.text};
-  line-height: 1.6;
   margin-bottom: 1rem;
+  font-size: var(--font-size-normal);
+  line-height: 1.6;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const TechList = styled.div`
@@ -92,9 +92,9 @@ const TechList = styled.div`
 
 const TechItem = styled.span`
   padding: 0.25rem 0.75rem;
-  background-color: ${({ theme }) => theme.colors.primary};
-  color: ${({ theme }) => theme.colors.text};
-  border-radius: 12px;
   font-size: var(--font-size-extra-small);
   font-weight: 500;
+  color: ${({ theme }) => theme.colors.text};
+  background-color: ${({ theme }) => theme.colors.primary};
+  border-radius: 12px;
 `

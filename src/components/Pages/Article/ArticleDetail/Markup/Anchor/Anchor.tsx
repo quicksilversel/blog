@@ -11,9 +11,9 @@ export const Anchor = ({ children, ...rest }: { children?: ReactNode }) => {
 }
 
 const StyledAnchor = styled.a`
-  color: ${({ theme }) => theme.primary};
-  text-underline-offset: 4px;
   font-weight: bold;
+  color: ${({ theme }) => theme.colors.primary};
+  text-underline-offset: 4px;
 
   &:hover {
     text-decoration: underline;

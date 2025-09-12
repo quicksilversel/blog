@@ -11,17 +11,17 @@ const StyledUl = styled.ul`
   margin: 1rem 0;
 
   li {
-    font-size: var(--font-size-small);
-    margin-top: 0.5rem;
-    list-style: none;
     position: relative;
+    margin-top: 0.5rem;
+    font-size: var(--font-size-small);
+    list-style: none;
 
     &::before {
-      content: '•';
       position: absolute;
       left: -1rem;
-      color: ${({ theme }) => theme.colors.primary};
       font-weight: bold;
+      color: ${({ theme }) => theme.colors.primary};
+      content: '•';
     }
 
     &:first-child {

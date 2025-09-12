@@ -48,6 +48,8 @@ export async function getProjectArticles(
       .filter((article) => article.published !== false)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Error getting project articles:', error)
     return []
   }
 }

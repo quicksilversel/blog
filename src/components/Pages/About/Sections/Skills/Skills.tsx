@@ -47,29 +47,29 @@ const SkillsGrid = styled.div`
 `
 
 const SkillTitle = styled.h3`
+  margin: 0 0 1rem;
   font-size: var(--font-size-normal);
-  color: ${({ theme }) => theme.colors.text};
-  margin: 0 0 1rem 0;
   font-weight: 600;
+  color: ${({ theme }) => theme.colors.text};
 `
 
 const SkillList = styled.ul`
-  list-style: none;
   padding: 0;
   margin: 0;
+  list-style: none;
 `
 
 const SkillItem = styled.li`
+  position: relative;
+  padding-left: 1rem;
+  margin-bottom: 0.5rem;
   font-size: var(--font-size-small);
   color: ${({ theme }) => theme.colors.text};
-  margin-bottom: 0.5rem;
-  padding-left: 1rem;
-  position: relative;
 
-  &:before {
-    content: '▸';
+  &::before {
     position: absolute;
     left: 0;
     color: ${({ theme }) => theme.colors.primary};
+    content: '▸';
   }
 `

@@ -85,6 +85,6 @@ export const ArticleDetail = ({
 
 const Container = styled.article`
   max-width: 900px;
-  margin: 0 auto;
   padding: 0 24px;
+  margin: 0 auto;
 `

@@ -59,6 +59,8 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
       },
     }
   } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(error)
     return {
       notFound: true,
     }

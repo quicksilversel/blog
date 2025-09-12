@@ -115,23 +115,23 @@ const ImageContainer = styled.div`
   aspect-ratio: 836/557;
   margin-bottom: 2rem;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-bottom: 1rem;
   }
 `
 
 const StyledImage = styled(Image)`
-  border-radius: 8px;
   object-fit: cover;
+  border-radius: 8px;
 `
 
 const Header = styled.div`
   display: flex;
-  align-items: baseline;
   gap: 1rem;
+  align-items: baseline;
   margin-bottom: 2rem;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-bottom: 1rem;
   }
 `
@@ -150,34 +150,34 @@ const TotalCount = styled.span`
 const Timeline = styled.div`
   position: relative;
 
-  &:before {
-    content: '';
+  &::before {
     position: absolute;
-    left: 0;
     top: 0;
     bottom: 0;
+    left: 0;
     width: 2px;
+    content: '';
     background: ${({ theme }) => theme.colors.muted};
   }
 `
 
 const MonthSection = styled.section`
-  margin-bottom: 2rem;
   position: relative;
+  margin-bottom: 2rem;
 
-  &:before {
-    content: '';
+  &::before {
     position: absolute;
-    left: -4px;
     top: 8px;
+    left: -4px;
     width: 10px;
     height: 10px;
-    border-radius: 50%;
+    content: '';
     background: ${({ theme }) => theme.colors.primary};
     border: 2px solid ${({ theme }) => theme.colors.background};
+    border-radius: 50%;
   }
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-bottom: 1rem;
   }
 `
@@ -188,10 +188,10 @@ const MonthHeader = styled.button`
   justify-content: space-between;
   width: 100%;
   padding: 0.5rem 0.5rem 0.5rem 2rem;
+  text-align: left;
+  cursor: pointer;
   background: none;
   border: none;
-  cursor: pointer;
-  text-align: left;
 
   &:hover {
     opacity: 0.8;
@@ -200,8 +200,8 @@ const MonthHeader = styled.button`
 
 const MonthTitle = styled.h2`
   display: flex;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   font-size: var(--font-size-medium);
   font-weight: 600;
   color: ${({ theme }) => theme.colors.primary};
@@ -213,10 +213,10 @@ const ToggleIcon = styled(ExpandCircleDownIcon, {
   isExpanded: boolean
 }>`
   display: inline-block;
+  font-size: var(--font-size-medium);
   transform: ${({ isExpanded }) =>
     !isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)'};
   transition: transform 0.2s ease;
-  font-size: var(--font-size-medium);
 `
 
 const PostCount = styled.span`
@@ -225,17 +225,17 @@ const PostCount = styled.span`
 `
 
 const ArticleList = styled.ul`
-  list-style: none;
   padding: 0;
   margin: 1rem 0 0 2rem;
+  list-style: none;
 `
 
 const ArticleItem = styled.li`
   display: flex;
-  align-items: baseline;
-  font-size: var(--font-size-small);
   gap: 1rem;
+  align-items: baseline;
   padding: 0.5rem 0;
+  font-size: var(--font-size-small);
   border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
 
   &:last-child {
@@ -246,9 +246,9 @@ const ArticleItem = styled.li`
 const DateLabel = styled.span`
   flex-shrink: 0;
   width: 3.5rem;
+  font-family: monospace;
   font-size: 0.875rem;
   color: ${({ theme }) => theme.colors.muted};
-  font-family: monospace;
 `
 
 const ArticleLink = styled(Link)`

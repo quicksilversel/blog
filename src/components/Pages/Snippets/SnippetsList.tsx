@@ -55,8 +55,8 @@ export function SnippetsList({ snippets }: SnippetsListProps) {
 
 const Container = styled.div`
   max-width: 900px;
-  margin: 0 auto;
   padding: 24px;
+  margin: 0 auto;
 `
 
 const ImageContainer = styled.div`
@@ -65,24 +65,23 @@ const ImageContainer = styled.div`
   aspect-ratio: 836/557;
   margin-bottom: 2rem;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-bottom: 1rem;
   }
 `
 
 const StyledImage = styled(Image)`
-  border-radius: 8px;
   object-fit: cover;
+  border-radius: 8px;
 `
 
 const Title = styled.h1`
+  margin-bottom: 2rem;
   font-size: var(--font-size-large);
   font-weight: bold;
   color: ${({ theme }) => theme.colors.primary};
 
-  margin-bottom: 2rem;
-
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-bottom: 1rem;
   }
 `
@@ -97,54 +96,54 @@ const Thead = styled.thead`
   text-transform: uppercase;
   border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     display: none;
   }
 `
 
 const Th = styled.th`
-  text-align: left;
+  padding: 0.75rem;
   font-size: var(--font-size-extra-small);
   font-weight: bold;
-  padding: 0.75rem;
+  text-align: left;
 `
 
 const Tr = styled.tr`
   cursor: pointer;
-  transition: background 0.2s ease;
   border-radius: 8px;
+  transition: background 0.2s ease;
 
   &:hover {
     background: ${({ theme }) => theme.colors.muted};
   }
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     display: block;
     margin-bottom: 1.5rem;
-    border: 1px solid ${({ theme }) => theme.colors.muted};
     overflow: hidden;
+    border: 1px solid ${({ theme }) => theme.colors.muted};
   }
 `
 
 const Td = styled.td`
   padding: 0.75rem;
 
-  @media (max-width: 35.1875rem) {
-    width: 100%;
+  @media (width <= 35.1875rem) {
     display: block;
+    width: 100%;
   }
 `
 
 const TitleCell = styled(Td)`
-  font-weight: bold;
   flex: 0 0 30%;
+  font-weight: bold;
   color: ${({ theme }) => theme.colors.primary};
 `
 
 const DescriptionCell = styled(Td)`
   flex: 1;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     border-top: 1px solid ${({ theme }) => theme.colors.muted};
   }
 `
@@ -153,7 +152,7 @@ const CategoryCell = styled(Td)`
   flex: 0 0 15%;
   text-transform: uppercase;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     display: none;
   }
 `

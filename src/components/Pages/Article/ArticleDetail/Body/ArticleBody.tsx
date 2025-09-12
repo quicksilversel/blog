@@ -9,7 +9,7 @@ export const ArticleBody = ({ children }: { children: ReactNode }) => {
 const Container = styled.div`
   margin-top: 2rem;
 
-  @media (max-width: 35.1875rem) {
+  @media (width <= 35.1875rem) {
     margin-top: 1rem;
   }
 `

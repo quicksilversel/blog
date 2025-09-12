@@ -8,8 +8,8 @@ export const resetCss = css`
   }
 
   * {
-    margin: 0;
     padding: 0;
+    margin: 0;
   }
 
   body {
@@ -32,10 +32,10 @@ export const resetCss = css`
   select {
     padding: 0;
     font: inherit;
+    vertical-align: middle;
     color: inherit;
     text-align: inherit;
     text-transform: inherit;
-    vertical-align: middle;
     background: transparent;
     border-style: none;
   }
