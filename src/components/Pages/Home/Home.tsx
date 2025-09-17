@@ -25,8 +25,8 @@ export const HomePage = ({ projects, articles }: Props) => {
       </Head>
       <main>
         <Hero />
-        <Projects projects={projects} />
         <RecentArticles articles={articles} />
+        <Projects projects={projects} />
       </main>
     </>
   )

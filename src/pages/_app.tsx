@@ -4,6 +4,7 @@ import { cache } from '@emotion/css'
 import { ThemeProvider, CacheProvider } from '@emotion/react'
 import { AppProps } from 'next/app'
 
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { GlobalStyles } from '@/components/Styles'
 import { lightTheme, darkTheme } from '@/components/Styles/themes'
 import { Footer } from '@/components/UI/Footer'
@@ -35,10 +36,12 @@ function MyApp({ Component, pageProps }: AppProps) {
   return (
     <CacheProvider value={cache}>
       <ThemeProvider theme={theme === 'dark' ? darkTheme : lightTheme}>
-        <GlobalStyles />
-        <Header theme={theme} setTheme={setTheme} />
-        <Component {...pageProps} />
-        <Footer />
+        <ErrorBoundary>
+          <GlobalStyles />
+          <Header theme={theme} setTheme={setTheme} />
+          <Component {...pageProps} />
+          <Footer />
+        </ErrorBoundary>
       </ThemeProvider>
     </CacheProvider>
   )

@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 import styled from '@emotion/styled'
 import CodeIcon from '@mui/icons-material/Code'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
@@ -14,20 +16,26 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
     localStorage.setItem('theme', theme === 'light' ? 'dark' : 'light')
   }
 
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   return (
     <Container>
       <StyledLink href="/" title="Home">
         <StyledImage src="/icon.png" alt="Logo" isLight={theme === 'light'} />
       </StyledLink>
       <ButtonContainer>
-        <StyledLink href="/about" title="About me">
-          <PetsIcon />
+        <StyledLink href="/about" title="About">
+          {mounted ? <PetsIcon /> : <IconPlaceholder />}
         </StyledLink>
         <StyledLink href="/snippets" title="Code snippets">
-          <CodeIcon />
+          {mounted ? <CodeIcon /> : <IconPlaceholder />}
         </StyledLink>
         <StyledLink href="/archive" title="Archive">
-          <InventoryIcon />
+          {mounted ? <InventoryIcon /> : <IconPlaceholder />}
         </StyledLink>
         <Button
           type="button"
@@ -36,12 +44,27 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
             theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'
           }
         >
-          {theme === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
+          {mounted ? (
+            theme === 'dark' ? (
+              <DarkModeIcon />
+            ) : (
+              <LightModeIcon />
+            )
+          ) : (
+            <IconPlaceholder />
+          )}
         </Button>
       </ButtonContainer>
     </Container>
   )
 }
+
+// Add this placeholder to prevent layout shift
+const IconPlaceholder = styled.div`
+  width: 24px;
+  height: 24px;
+  background-color: transparent;
+`
 
 const Container = styled.header`
   position: sticky;

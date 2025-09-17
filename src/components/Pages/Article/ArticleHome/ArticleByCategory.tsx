@@ -51,8 +51,6 @@ export const ArticleByCategory = ({ category, articles }: Props) => {
     [articles, selectedTopic],
   )
 
-  const shouldShowMoreContents = filteredArticles.length > ARTICLE_LIMIT
-
   return (
     <Container>
       <Box.SectionHeader>
@@ -74,13 +72,11 @@ export const ArticleByCategory = ({ category, articles }: Props) => {
           />
         ))}
       </Grid>
-      {shouldShowMoreContents && (
-        <ShowMoreContainer>
-          <Link href={`/articles/${category}`}>
-            Show more {category.toLowerCase()} articles →
-          </Link>
-        </ShowMoreContainer>
-      )}
+      <ShowMoreContainer>
+        <Link href={`/articles/${category}`}>
+          See all {category.toLowerCase()} articles →
+        </Link>
+      </ShowMoreContainer>
     </Container>
   )
 }

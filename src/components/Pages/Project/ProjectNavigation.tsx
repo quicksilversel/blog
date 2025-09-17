@@ -19,7 +19,7 @@ export function ProjectNavigation({ articles, currentSlug, title }: Props) {
     <Container>
       <Header onClick={() => setIsExpanded(!isExpanded)}>
         <Title>Series: {title}</Title>
-        <ToggleIcon isExpanded={isExpanded}>▼</ToggleIcon>
+        <ToggleIcon isExpanded={isExpanded} />
       </Header>
       {isExpanded && (
         <ArticleList>

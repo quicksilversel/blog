@@ -51,6 +51,7 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
     return {
       props: {
         source: mdxSource,
+        rawContent: postFile,
         category,
       },
     }
@@ -65,6 +66,7 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
 
 export default function Articles({
   source,
+  rawContent,
   category,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
@@ -83,6 +85,7 @@ export default function Articles({
       </Head>
       <ArticleDetail
         source={source}
+        rawContent={rawContent}
         breadcrumbItems={[
           { label: 'Home', href: '/' },
           { label: 'Articles', href: '/articles' },

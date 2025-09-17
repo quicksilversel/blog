@@ -31,7 +31,7 @@ export const Card = ({
 
   return (
     <Container>
-      <Link href={link}>
+      <Link href={link} aria-label={`Read more about ${title}`}>
         <Contents>
           <Title size={size}>{title}</Title>
           {subtitle && <Subtitle>{subtitle}</Subtitle>}

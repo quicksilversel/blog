@@ -192,9 +192,30 @@ const MonthHeader = styled.button`
   cursor: pointer;
   background: none;
   border: none;
+  transition: background-color 0.2s ease;
 
   &:hover {
-    opacity: 0.8;
+    background-color: ${({ theme }) => theme.colors.muted};
+  }
+
+  &:focus {
+    outline: 2px solid ${({ theme }) => theme.colors.primary};
+    outline-offset: 2px;
+    background-color: ${({ theme }) => theme.colors.muted};
+  }
+
+  &:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  @media (hover: none) {
+    &:hover {
+      background-color: transparent;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
   }
 `
 

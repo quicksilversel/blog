@@ -10,6 +10,7 @@ import type { MDXRemoteSerializeResult } from 'next-mdx-remote'
 import { ArticleBody } from '@/components/Pages/Article/ArticleDetail/Body'
 import { ArticleHeader } from '@/components/Pages/Article/ArticleDetail/Header'
 import * as Markup from '@/components/Pages/Article/ArticleDetail/Markup'
+import { TableOfContents } from '@/components/Pages/Article/ArticleDetail/TableOfContents'
 import { Breadcrumb } from '@/components/UI/Breadcrumb'
 
 import { ProjectNavigation } from '../../Project/ProjectNavigation'
@@ -30,11 +31,13 @@ type ArticleProps =
 
 type Props = {
   source: MDXRemoteSerializeResult
+  rawContent?: string
   breadcrumbItems?: ComponentProps<typeof Breadcrumb>['items']
 } & ArticleProps
 
 export const ArticleDetail = ({
   source,
+  rawContent,
   isProject,
   project,
   breadcrumbItems,
@@ -54,6 +57,7 @@ export const ArticleDetail = ({
         }
       />
       {isProject && project && <ProjectNavigation {...project} />}
+      {!isProject && rawContent && <TableOfContents content={rawContent} />}
       <ArticleBody>
         <MDXRemote
           {...source}

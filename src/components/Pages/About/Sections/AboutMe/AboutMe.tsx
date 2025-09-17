@@ -9,8 +9,8 @@ export const AboutMe = () => {
       <Section.Content>
         <Section.Title>About Me</Section.Title>
         <Section.Paragraph>
-          Hi! I’m Zoe — a Site Reliability Engineer with a frontend background,
-          passionate about building systems that are not only reliable but also
+          Hi! I’m Zoe — a frontend developer with SRE background, passionate
+          about building systems that are not only reliable but also
           thoughtfully designed. I love bridging the gap between infrastructure
           and user experience.
           <br />

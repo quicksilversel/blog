@@ -1,9 +1,19 @@
+import { useEffect, useState } from 'react'
+
 import styled from '@emotion/styled'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import LinkedInIcon from '@mui/icons-material/LinkedIn'
 import Link from 'next/link'
 
 export const Footer = () => {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) return null
+
   return (
     <Container>
       <Links>
@@ -56,7 +66,8 @@ const Container = styled.footer`
 const Links = styled.div`
   display: flex;
   gap: 16px;
-  margin-inline: auto;
+  margin: 4px auto 0;
+  font-size: var(--font-size-small);
 
   a:hover {
     color: inherit;
