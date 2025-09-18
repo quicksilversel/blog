@@ -8,6 +8,7 @@ import { H1 } from '@/components/Pages/Article/ArticleDetail/Markup'
 type Props = {
   title: string
   titleTag?: 'h1' | 'h2'
+  description?: string
   imageUrl?: string
   width?: number
   className?: string
@@ -16,6 +17,7 @@ type Props = {
 export const SectionHeader = ({
   title,
   titleTag = 'h1',
+  description,
   imageUrl,
   width,
   className,
@@ -39,6 +41,7 @@ export const SectionHeader = ({
         </ImageContainer>
       )}
       {titleTag === 'h1' ? <H1>{title}</H1> : <H2>{title}</H2>}
+      {description && <Description>{description}</Description>}
     </Container>
   )
 }
@@ -60,4 +63,8 @@ const H2 = styled.h2`
   margin-bottom: 1rem;
   font-size: var(--font-size-large);
   color: ${({ theme }) => theme.colors.primary};
+`
+
+const Description = styled.p`
+  font-size: var(--font-size-small);
 `

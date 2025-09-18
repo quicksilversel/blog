@@ -104,7 +104,7 @@ export const ArticleDetail = ({
 }
 
 const Container = styled.article`
-  max-width: 900px;
-  padding: 0 24px;
-  margin: 0 auto;
+  @media (width <= 768px) {
+    padding: 0 24px;
+  }
 `

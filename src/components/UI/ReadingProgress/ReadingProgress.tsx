@@ -107,11 +107,11 @@ const ProgressContainer = styled('div')<{
 }>`
   position: fixed;
   top: 0;
-  left: 0;
   right: 0;
+  left: 0;
+  z-index: 100;
   height: ${({ height }) => height}px;
   background-color: ${({ theme }) => theme.colors.floating};
-  z-index: 100;
   opacity: ${({ isVisible }) => (isVisible ? 1 : 0)};
   transition: opacity 0.3s ease;
 `
@@ -119,22 +119,22 @@ const ProgressContainer = styled('div')<{
 const ProgressBar = styled('div')<{
   $progress: number
 }>`
-  height: 100%;
   width: ${({ $progress }) => $progress}%;
+  height: 100%;
   background-color: ${({ theme }) => theme.colors.primary};
-  transition: width 0.1s ease-out;
   box-shadow: 0 0 10px ${({ theme }) => theme.colors.primary}40;
+  transition: width 0.1s ease-out;
 `
 
 const ProgressText = styled('span')`
   position: absolute;
-  right: 1rem;
   top: 50%;
-  transform: translateY(-50%);
+  right: 1rem;
   font-size: 0.7rem;
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
-  opacity: 0.6;
   pointer-events: none;
   user-select: none;
+  opacity: 0.6;
+  transform: translateY(-50%);
 `
