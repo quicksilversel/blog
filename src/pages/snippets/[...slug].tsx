@@ -3,7 +3,6 @@ import path from 'path'
 
 import React from 'react'
 
-import styled from '@emotion/styled'
 import Head from 'next/head'
 import { serialize } from 'next-mdx-remote/serialize'
 import remarkGfm from 'remark-gfm'
@@ -82,7 +81,7 @@ export default function Snippet({
         />
       </Head>
       <main>
-        <Container>
+        <article>
           <ArticleDetail
             source={source}
             breadcrumbItems={[
@@ -91,13 +90,8 @@ export default function Snippet({
               { label: String(source.frontmatter.title) },
             ]}
           />
-        </Container>
+        </article>
       </main>
     </>
   )
 }
-
-const Container = styled.article`
-  max-width: 900px;
-  margin: 0 auto;
-`

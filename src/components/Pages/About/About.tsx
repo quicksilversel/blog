@@ -23,7 +23,6 @@ export const About = () => {
 const Container = styled.main`
   position: relative;
   display: flex;
-  max-width: 900px;
   min-height: calc(100vh - 68px);
   margin: 0 auto;
 `

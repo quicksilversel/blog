@@ -10,8 +10,7 @@ export const Box = ({ children }: { children: ReactNode }) => {
 const Container = styled.div`
   position: relative;
   width: 100%;
-  max-width: 900px;
-  padding: 32px;
+  padding: 32px 0;
   margin-inline: auto;
 
   @media (width <= 35.1875rem) {

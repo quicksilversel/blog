@@ -5,9 +5,10 @@ type Props = {
   title: string
   date?: string
   topics?: string[]
+  readingTime?: string
 }
 
-export const ArticleHeader = ({ title, date, topics }: Props) => {
+export const ArticleHeader = ({ title, date, topics, readingTime }: Props) => {
   const formattedDate = date
     ? new globalThis.Date(date).toLocaleDateString('en-US', {
         year: 'numeric',
@@ -32,6 +33,7 @@ export const ArticleHeader = ({ title, date, topics }: Props) => {
       <Title>{title}</Title>
       <MetaInfo>
         {formattedDate && <Date>{formattedDate}</Date>}
+        {readingTime && <ReadingTime>☕ {readingTime}</ReadingTime>}
         {topics && topics.length > 0 && (
           <Topics>
             {topics.map((topic) => (
@@ -74,6 +76,12 @@ const MetaInfo = styled.div`
 const Date = styled.time`
   font-size: var(--font-size-extra-small);
   color: ${({ theme }) => theme.colors.text};
+`
+
+const ReadingTime = styled.span`
+  font-size: var(--font-size-extra-small);
+  color: ${({ theme }) => theme.colors.text};
+  opacity: 0.8;
 `
 
 const Topics = styled.div`

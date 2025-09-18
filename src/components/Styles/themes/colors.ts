@@ -13,6 +13,7 @@ export const darkTheme: Theme = {
   colors: {
     background: 'hsl(230deg, 30%, 8%)',
     text: 'hsl(0deg, 0%, 95%)',
+    mutedText: 'hsl(230deg, 15%, 65%)',
     muted: 'hsl(230deg, 15%, 25%)',
     floating: 'hsl(230deg, 15%, 15%)',
     backgroundhsl: '230deg, 30%, 8%',
@@ -24,6 +25,7 @@ export const lightTheme: Theme = {
   colors: {
     background: 'hsl(0deg, 0%, 100%)',
     text: 'hsl(230deg, 30%, 15%)',
+    mutedText: 'hsl(230deg, 15%, 45%)',
     muted: 'hsl(220deg, 20%, 85%)',
     floating: 'hsl(0deg, 0%, 95%)',
     backgroundhsl: '0deg, 0%, 100%',

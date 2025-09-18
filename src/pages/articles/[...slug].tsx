@@ -5,12 +5,14 @@ import React from 'react'
 
 import Head from 'next/head'
 import { serialize } from 'next-mdx-remote/serialize'
+import readingTime from 'reading-time'
 import remarkGfm from 'remark-gfm'
 
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
 import { getArticles } from '@/libs/getArticles'
+import { getRelatedArticles } from '@/libs/getArticles/getRelatedArticles'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticPaths() {
@@ -48,11 +50,23 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
         remarkPlugins: [remarkGfm],
       },
     })
+
+    const stats = readingTime(postFile)
+
+    const relatedArticles = await getRelatedArticles(
+      `${category}/${fileName}`,
+      mdxSource.frontmatter.topics as string[] | undefined,
+      category,
+      3,
+    )
+
     return {
       props: {
         source: mdxSource,
         rawContent: postFile,
         category,
+        relatedArticles,
+        readingTime: stats.text,
       },
     }
   } catch (error) {
@@ -68,6 +82,8 @@ export default function Articles({
   source,
   rawContent,
   category,
+  relatedArticles,
+  readingTime,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
     <>
@@ -86,6 +102,8 @@ export default function Articles({
       <ArticleDetail
         source={source}
         rawContent={rawContent}
+        relatedArticles={relatedArticles}
+        readingTime={readingTime}
         breadcrumbItems={[
           { label: 'Home', href: '/' },
           { label: 'Articles', href: '/articles' },
