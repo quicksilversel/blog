@@ -1,0 +1,93 @@
+---
+title: 'Zero-Noise Monitoring: Designing Meaningful Alerts'
+description: 'Designing monitors that detect only your service’s own failures, filtering out upstream noise.'
+topics: ['sre', 'datadog', 'monitoring']
+published: true
+date: '2025-08-15'
+---
+
+## Introduction
+
+When managing a complex application, it's easy to fall into the trap of “silent monitoring”—setting up alerts that don't actually help you understand your service's health.
+This leads to alert fatigue and confusion during incidents.
+Instead, we need to focus on **meaningful monitoring**—designing monitors that detect only your service's own failures, while filtering out upstream noise.
+
+## 1. If You're Monitoring ALB 5xx in Datadog, Use `elb_5xx`
+
+### Why `target_5xx` wasn't the right fit in our case
+
+There's nothing inherently wrong with `aws.applicationelb.httpcode_target_5xx`.  
+But in our setup, we already have application-level monitors. This led to double alerts for the same incident—which became noise.
+
+If you don't have app-side monitoring, then using `target_5xx` _can_ still be a valid option.
+
+On the other hand, `aws.applicationelb.httpcode_elb_5xx` detects only failures from the ALB itself (TLS, connection limits, capacity issues, misconfiguration, etc.). By separating roles, we significantly reduce alert noise.
+
+| Category                   | `httpcode_target_5xx`                                                | `httpcode_elb_5xx`                                          |
+| -------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| What it detects            | 5xx errors returned _by the app_                                     | 5xx errors returned _by the ALB itself_                     |
+| Typical root cause         | App bugs, downstream service failures                                | TLS errors, connection caps, capacity issues, ALB misconfig |
+| Relation to app monitoring | May cause double alerts if app has its own monitors                  | Detects failures independent from the app                   |
+| Best use case              | If the app doesn't have monitors, or you want a unified view via ALB | If you want to clearly separate app/infrastructure alerts   |
+| Noise level                | High (if app monitors exist)                                         | Low                                                         |
+
+**Datadog query example (ALB-only failure detection):**
+
+```hcl
+sum:aws.applicationelb.httpcode_elb_5xx{...}.as_rate() > 1
+```
+
+**In short: Let apps detect their own failures, and let the ALB monitor only its own issues. This clear role separation reduces noise dramatically and speeds up root cause identification and decision-making during incidents.**
+
+## 2. Turning "Don't Alert on Upstream Failures" into Real Monitor Logic
+
+Frontend (especially CSR mode) and Gateway apps often suffer from upstream-originating alert noise.
+
+### 2-1. CSR Soft Fallbacks: No Paging if User Experience is Preserved
+
+In a CSR setup, the frontend may return `200 OK` even if some upstream APIs fail.  
+This is by design: the error was gracefully handled, and the UI rendered a placeholder or simply hid that section. The user still had a valid experience.
+
+This means: _this is not an error_. It's expected behavior. Alerting on it just creates noise.
+
+### 2-2. Gateway: Consider Transfer Completion as “Success”
+
+**Bottom line: Only upstream monitors should page for upstream failures. The Gateway should alert _only_ on its own problems.**
+
+The Gateway's job is to _forward_ requests properly.
+If a request results in a 504 (timeout) due to upstream delay or failure—that's not the Gateway's fault, and shouldn't page.
+
+However, Gateway-side issues like misrouting, middleware errors, or rate limiting _should_ trigger alerts (502/503/500).
+
+I used APM trace metrics and filtered by `resource_name` to exclude internal Gateway endpoints and explicitly excluded `http.status_code:504`. This gave me a monitor for only _Gateway-originated_ 5xx errors.
+
+**Datadog query example:**
+
+```text
+min(last_5m):default_zero(sum:trace.http.request.errors{...,!resource_name:/internal/*,!http.status_code:504}.as_rate()) >= ${local.threshold}
+```
+
+## 3. Reducing Noise in Path-Based Monitoring (Fixing the "Small Denominator Problem")
+
+If you monitor error rate per API path, low-traffic endpoints can easily trigger false alerts.
+
+Example:
+
+- One request in 5 minutes → one failure = 100% error rate.
+- If you aggregate using `sum(last_5m)`, you'll pick up these random blips and end up paging—despite no real impact.
+
+So I switched from `sum()` to `min()` for the time aggregation.
+Using `min(last_5m)` makes the monitor more resilient to sudden spikes, reducing false positives for low-traffic endpoints.
+
+[→ Datadog Docs: Metric Monitors](https://docs.datadoghq.com/monitors/types/metric/?tab=threshold)
+
+- For high-traffic, high-impact APIs: keep using `sum()` for sensitivity.
+- But for sparse endpoints: switching to `min()` drastically reduced noise, allowing us to surface only **meaningful errors**.
+
+## TL;DR
+
+- Use `elb_5xx` to monitor ALB-level issues (not `target_5xx`, which overlaps with app errors)
+- Don't alert on upstream (outbound) failures:
+  - CSR frontend with graceful fallback = _not an error_
+  - Gateway that forwarded correctly = _not at fault for upstream 504s_
+- For low-traffic endpoints, use `min()` instead of `sum()` in path-based monitors to reduce noise

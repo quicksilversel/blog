@@ -1,0 +1,49 @@
+---
+title: 'Send Message to Slack'
+description: 'A GitHub Actions workflow to send a message to Slack'
+published: true
+date: '2024-07-08'
+---
+
+### Option 1: Send Message to Slack with slackapi/slack-github-action
+
+```yaml
+- name: Send Message To Slack
+  uses: slackapi/slack-github-action@v1.27.0
+  with:
+    payload: |
+      {
+        "color": "#ba00ff",
+        "blocks": [
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "The release was successful! :tada:"
+            }
+          }
+        ]
+      }
+  env:
+    SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+```
+
+> 🔗 [slackapi/slack-github-action](https://github.com/slackapi/slack-github-action)
+
+### Option 2: Send Message to Slack with rtCamp/action-slack-notify
+
+```yaml
+- name: Send Message To Slack on failure
+  uses: rtCamp/action-slack-notify@v2
+  if: ${{ failure() }}
+  env:
+    SLACK_COLOR: ${{ job.status }}
+    SLACK_MESSAGE: '@here : The release failed! Panic accordingly.'
+    SLACK_TITLE: Operation Doom Update
+    SLACK_USERNAME: 'ci-goblin'
+    SLACK_WEBHOOK: ${{ secrets.SLACK_SUMMONING_PORTAL }}
+    SLACK_LINK_NAMES: true
+```
+
+> 🔗 [rtCamp/action-slack-notify](https://github.com/rtCamp/action-slack-notify)

@@ -14,7 +14,10 @@ const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
 async function loadContent(slug: string, basePath: string): Promise<string> {
   try {
     const [category, fileName] = slug.split('/')
-    const filePath = path.join(basePath, category, `${fileName}.mdx`)
+    const absolutePath = path.isAbsolute(basePath)
+      ? basePath
+      : path.join(process.cwd(), basePath)
+    const filePath = path.join(absolutePath, category, `${fileName}.mdx`)
     const source = await fs.readFile(filePath, 'utf8')
 
     const contentWithoutFrontmatter = source
@@ -30,29 +33,35 @@ async function loadContent(slug: string, basePath: string): Promise<string> {
 }
 
 async function buildSearchIndex() {
-  const [articles, snippets] = await Promise.all([
-    getArticles(ARTICLE_PATH),
-    getArticles(SNIPPETS_PATH),
-  ])
+  try {
+    const [articles, snippets] = await Promise.all([
+      getArticles(ARTICLE_PATH),
+      getArticles(SNIPPETS_PATH),
+    ])
 
-  const articlesWithContent = await Promise.all(
-    articles.map(async (article) => ({
-      ...article,
-      type: 'article' as const,
-      content: await loadContent(article.slug, ARTICLE_PATH),
-    })),
-  )
+    const articlesWithContent = await Promise.all(
+      articles.map(async (article) => ({
+        ...article,
+        type: 'article' as const,
+        content: await loadContent(article.slug, ARTICLE_PATH),
+      })),
+    )
 
-  const snippetsWithContent = await Promise.all(
-    snippets.map(async (snippet) => ({
-      ...snippet,
-      type: 'snippet' as const,
-      content: await loadContent(snippet.slug, SNIPPETS_PATH),
-    })),
-  )
+    const snippetsWithContent = await Promise.all(
+      snippets.map(async (snippet) => ({
+        ...snippet,
+        type: 'snippet' as const,
+        content: await loadContent(snippet.slug, SNIPPETS_PATH),
+      })),
+    )
 
-  const allContent = [...articlesWithContent, ...snippetsWithContent]
-  return new ArticleSearchIndex(allContent)
+    const allContent = [...articlesWithContent, ...snippetsWithContent]
+    return new ArticleSearchIndex(allContent)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Error building search index:', error)
+    return new ArticleSearchIndex([])
+  }
 }
 
 export default async function handler(

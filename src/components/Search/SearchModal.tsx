@@ -47,15 +47,6 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
   )
 }
 
-const fadeIn = keyframes`
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-`
-
 const scaleIn = keyframes`
   from {
     opacity: 0;
@@ -72,11 +63,16 @@ const Backdrop = styled.div<{ isOpen: boolean }>`
   inset: 0;
   z-index: 98;
   visibility: ${({ isOpen }) => (isOpen ? 'visible' : 'hidden')};
-  background: rgb(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.5);
   opacity: ${({ isOpen }) => (isOpen ? 1 : 0)};
   backdrop-filter: blur(4px);
-  transition: opacity 0.2s ease;
-  animation: ${({ isOpen }) => (isOpen ? fadeIn : 'none')} 0.2s ease;
+  -webkit-backdrop-filter: blur(4px);
+  transition:
+    opacity 0.2s ease,
+    visibility 0.2s ease;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
 `
 
 const Modal = styled.div<{ isOpen: boolean }>`
@@ -96,9 +92,12 @@ const Modal = styled.div<{ isOpen: boolean }>`
     0 20px 25px -5px rgb(0, 0, 0, 0.1),
     0 10px 10px -5px rgb(0, 0, 0, 0.04);
   opacity: ${({ isOpen }) => (isOpen ? 1 : 0)};
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateZ(0);
   transition: opacity 0.2s ease;
   animation: ${({ isOpen }) => (isOpen ? scaleIn : 'none')} 0.2s ease;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  will-change: opacity;
 `
 
 const ModalContent = styled.div`

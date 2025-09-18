@@ -1,0 +1,94 @@
+---
+title: 'Understanding DNS Resolution in Kubernetes and CoreDNS Behavior'
+description: 'How DNS resolution works inside Kubernetes, how CoreDNS handles it, and why setting ndots:1 made a big difference during high load.'
+published: true
+topics: ['Kubernetes']
+date: '2025-05-12'
+---
+
+## Overview
+
+Some notes on how DNS works inside Kubernetes, how it differs from local development, and a few lessons learned about CoreDNS (especially during outages)
+
+## How DNS Resolution Works in Kubernetes
+
+When a pod makes a DNS query like `example.com`, it doesn’t immediately hit the internet. Instead, the container’s `/etc/resolv.conf` points to the **CoreDNS** service IP inside the cluster. That’s where DNS queries go first.
+
+Kubernetes injects search domains into the pod’s DNS config. So something like:
+
+```
+curl my-service
+```
+
+might try resolving:
+
+```
+my-service.my-namespace.svc.cluster.local
+```
+
+before even trying `my-service` as a full domain.
+
+That’s where `ndots` matters.
+
+## What is "ndots"?
+
+This is a setting in `/etc/resolv.conf` that controls when a domain is considered “fully qualified”.
+
+If `ndots=5`, something like `foo.bar` will try resolving:
+
+```
+foo.bar.my-namespace.svc.cluster.local
+foo.bar.svc.cluster.local
+foo.bar.cluster.local
+foo.bar.ap-northeast-1.compute.internal
+foo.bar
+```
+
+first, **before** trying `foo.bar` directly.
+
+## Why "ndots:1" Helped
+
+At one point, I noticed a huge load on CoreDNS, with tons of lookups piling up even for domains that were already fully qualified.
+
+Setting `ndots:1` reduced the number of search paths DNS had to try. It made CoreDNS stop wasting effort trying to resolve things that didn’t need the cluster domain suffix.
+
+Unless the app is intentionally resolving short, partial names (which is rare), `ndots:1` seems like a solid default.
+
+Also noticed some container images and Helm charts override this, so it’s good to confirm it explicitly.
+
+Setting ndots:1 was as simple as adding this to the deployment.yaml to each microservice pods:
+
+```yaml
+dnsConfig:
+  options:
+    - name: ndots
+      value: '1'
+```
+
+## What is CoreDNS?
+
+It’s the default DNS server for Kubernetes clusters.
+
+It listens for pod DNS queries and resolves them based on:
+
+- Service names inside the cluster
+- External domains via upstream resolvers (like 8.8.8.8)
+- Configured rewrite/forward rules in the CoreDNS configmap
+
+## Why It Matters During Outages
+
+When something like CoreDNS goes down:
+
+- All internal service name resolution fails
+- Apps can’t talk to each other even if they’re healthy
+- Metrics might still show the pods are fine, which can be misleading
+
+It’s one of those pieces that quietly does a lot — until it doesn’t.
+
+## Final Notes
+
+- Always check `/etc/resolv.conf` inside the pod
+- Watch CoreDNS metrics (e.g. query load, errors)
+- Consider `ndots:1` unless there’s a reason not to
+
+Might come back and add visual diagrams later if needed.

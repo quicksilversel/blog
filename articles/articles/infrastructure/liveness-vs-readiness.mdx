@@ -1,0 +1,81 @@
+---
+title: 'Liveness vs Readiness Probes in Kubernetes: When It Matters (and When It Doesn’t)'
+description: 'A reflection on what I learned about liveness and readiness probes in Kubernetes, especially for frontend-only apps.'
+published: true
+topics: ['Kubernetes']
+date: '2025-06-11'
+---
+
+## What I Used to Think
+
+At first, I thought I had to strictly separate liveness and readiness probes in every Kubernetes app. The general advice online often emphasizes their importance for different reasons:
+
+- **Readiness**: tells the load balancer if your app is ready to receive traffic.
+- **Liveness**: tells Kubernetes if your app is still alive and should be restarted if not.
+
+So naturally, I assumed they always need to be different — or else something could break.
+
+## What I Actually Learned
+
+For frontend apps — especially those without external dependencies like a database or Redis — **having the same path for both probes is totally fine**. There’s no big penalty or gotcha.
+
+If your app has a simple `/health` or `/ping` endpoint that returns 200 as long as the server is up, you can safely use that for both readiness and liveness probes.
+
+The key is that:
+
+- **Liveness** is there to detect stuck or crashed containers (e.g., memory leak, infinite loop).
+- **Readiness** is to ensure your app isn’t added to the Service before it’s actually ready to handle traffic.
+
+In frontend apps, readiness checks are usually instant because there’s nothing to "wait for" — no DB connections to warm up, no async background jobs to complete. So readiness always returns 200, and liveness does too — which is fine.
+
+## When You Should Actually Separate Them
+
+You only need to split them when:
+
+- Your app might start before it's actually ready (e.g. needs DB, cache, external service)
+- Your app can get stuck in a bad state over time, and needs to be restarted (e.g. memory leaks, deadlocks)
+
+In that case, you’d want:
+
+- Readiness to return 200 only when everything is initialized
+- Liveness to detect stuck/crashed state and trigger a restart
+
+## Sample Config for Frontend Apps (Infra Side)
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /health/readiness/
+    port: 3000
+  initialDelaySeconds: 3
+  periodSeconds: 10
+
+livenessProbe:
+  httpGet:
+    path: /health/liveness/
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 30
+```
+
+## Sample Config for Frontend Apps (App Side)
+
+```javascript
+app.get('/health/liveness/', (_, reply) => {
+  reply.code(200).send({ status: 'READY' })
+})
+
+app.get('/health/readiness/', (_, reply) => {
+  reply.code(200).send({ status: 'READY' })
+})
+```
+
+They both point to the same path — and that’s OK. If the app crashes, liveness will catch it. If it’s up, readiness will allow traffic.
+
+## Final Takeaway
+
+Don’t overengineer health checks for simple apps.
+
+If you're deploying a static frontend or a lightweight SSR app that doesn't connect to other infra, **one health path can serve both purposes**.
+
+But once your app grows more complex (e.g., starts using a DB), it's worth re-evaluating and separating readiness and liveness probes accordingly.

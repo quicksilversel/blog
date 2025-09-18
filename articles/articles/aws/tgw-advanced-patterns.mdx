@@ -1,0 +1,509 @@
+---
+title: 'AWS Transit Gateway: Advanced Patterns and Battle-Tested Lessons'
+description: 'Real-world TGW deployment patterns, multi-account architectures, and the gotchas that will bite you in production.'
+topics: ['Transit Gateway', 'Direct Connect']
+published: true
+date: '2025-09-17'
+---
+
+## The Reality of Transit Gateway at Scale
+
+Everyone knows Transit Gateway is AWS's answer to the "VPC peering mesh from hell" problem. But after managing TGW across multiple accounts, dealing with cross-account resource sharing drama, and debugging route propagation issues at 2 AM, I've learned that the real complexity isn't in setting it up — it's in operating it at scale.
+
+This isn't your typical "here's how to create a TGW" tutorial. This is about the patterns, pitfalls, and production lessons that only come from actually running this thing in anger.
+
+## Quick TGW Refresher
+
+Before we dive into the main content, let's quickly align on what Transit Gateway actually does and why it matters.
+
+### What Problem Does TGW Solve?
+
+Remember the old days? You'd have:
+
+- VPC peering connections everywhere (n\*(n-1)/2 connections for n VPCs)
+- Separate VPN connections to each VPC for on-premises connectivity
+- Complex routing tables that nobody understood
+- No transitive routing (A→B→C didn't work)
+
+Transit Gateway replaces this mess with a single hub that:
+
+- **Acts as a cloud router** — Connect VPCs, VPNs, Direct Connect, and other TGWs through one central point
+- **Enables transitive routing** — Traffic can flow through the TGW to reach any connected network
+- **Scales horizontally** — Handles up to 5 Gbps per VPC attachment, 50 Gbps aggregate
+- **Supports multiple route tables** — Segment traffic based on security requirements
+
+### Core Components at a Glance
+
+```yaml
+# The basic building blocks you'll be working with
+Components:
+  TransitGateway:
+    Purpose: 'The central hub'
+    Limits: '5 per region, 5000 VPC attachments'
+
+  Attachments:
+    Types: ['VPC', 'VPN', 'Direct Connect Gateway', 'Peering', 'Connect']
+    KeyPoint: 'Each attachment is a network connection to the TGW'
+
+  RouteTables:
+    Purpose: 'Control traffic flow between attachments'
+    Association: 'Each attachment associates with exactly one route table'
+    Propagation: 'Attachments can propagate routes to multiple tables'
+```
+
+Now that we're on the same page about what TGW is and what it does, let's talk about what happens when you actually run this in production across multiple accounts, regions, and teams — because that's where things get interesting (and occasionally terrifying).
+
+## Advanced Architecture Patterns
+
+### The Multi-Account Transit Hub Pattern
+
+Forget the basic hub-and-spoke. In real enterprises, you're dealing with multiple AWS accounts, each with their own networking requirements, compliance boundaries, and — let's be honest — political territories.
+
+Here's the pattern that actually works:
+
+```yaml
+# The centralized network account owns the TGW
+Resources:
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Description: Central transit hub
+      DefaultRouteTableAssociation: disable
+      DefaultRouteTablePropagation: disable
+      # This is critical for multi-account
+      AmazonSideAsn: 64512
+      Tags:
+        - Key: Name
+          Value: tgw-central
+        - Key: Environment
+          Value: shared
+        - Key: CostCenter
+          Value: networking # Yes, this matters politically
+```
+
+The key insight: **Disable default route table association and propagation**. You want explicit control over routing decisions, not AWS making assumptions for you.
+
+### Segmented Route Tables for Security Zones
+
+Production networks aren't flat. You've got prod, dev, DMZ, shared services — each with different security postures. Here's how to segment properly:
+
+```yaml
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [production, development, staging]
+
+Mappings:
+  SecurityZones:
+    production:
+      CidrBlocks: '10.0.0.0/16'
+      AllowedDestinations: 'shared_services,dmz_egress'
+    development:
+      CidrBlocks: '10.1.0.0/16'
+      AllowedDestinations: 'shared_services,dmz_egress,development'
+    dmz:
+      CidrBlocks: '10.2.0.0/16'
+      AllowedDestinations: 'dmz_egress'
+    shared_services:
+      CidrBlocks: '10.3.0.0/16'
+      AllowedDestinations: 'production,development'
+
+Resources:
+  # Create route table for each security zone
+  ProductionRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: Name
+          Value: tgw-rt-production
+        - Key: SecurityZone
+          Value: production
+
+  DevelopmentRouteTable:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Properties:
+      TransitGatewayId: !Ref TransitGateway
+      Tags:
+        - Key: Name
+          Value: tgw-rt-development
+        - Key: SecurityZone
+          Value: development
+```
+
+The magic is in the `can_reach` mapping. This becomes your network security policy as code.
+
+## Cross-Account Resource Sharing: The Hard Parts
+
+### RAM Sharing That Actually Works
+
+AWS Resource Access Manager (RAM) is how you share TGW across accounts. But here's what the docs don't tell you:
+
+```yaml
+Resources:
+  TGWResourceShare:
+    Type: AWS::RAM::ResourceShare
+    Properties:
+      Name: !Sub 'tgw-share-${Environment}'
+      AllowExternalPrincipals: false # Start with false!
+      ResourceArns:
+        - !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway/${TransitGateway}'
+      Tags:
+        - Key: Purpose
+          Value: TGW cross-account sharing
+
+  # The gotcha: You need the principal associations
+  SpokeAccountAssociation:
+    Type: AWS::RAM::ResourceShareAssociation
+    Properties:
+      ResourceShareArn: !Ref TGWResourceShare
+      AssociatedEntity: !Ref SpokeAccountId # From Parameters
+      AssociationStatus: ASSOCIATING
+```
+
+> **Critical lesson**: Don't set `allow_external_principals = true` unless you absolutely need it. It opens up sharing outside your AWS Organization, which is rarely what you want.
+
+### The Attachment Configuration Dance
+
+This is where things get messy. Each spoke account needs to:
+
+1. Accept the RAM invitation (often forgotten!)
+2. Create the attachment
+3. Configure route tables
+
+But here's the killer pattern — use parameters to pass the shared TGW ID:
+
+```yaml
+# In the spoke account template
+Parameters:
+  TransitGatewayId:
+    Type: String
+    Description: Shared Transit Gateway ID from network account
+
+  NetworkAccountId:
+    Type: String
+    Description: AWS Account ID that owns the TGW
+
+Resources:
+  VPCAttachment:
+    Type: AWS::EC2::TransitGatewayVpcAttachment
+    Properties:
+      TransitGatewayId: !Ref TransitGatewayId
+      VpcId: !Ref VPC
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+      # This is crucial for routing control
+      Options:
+        DnsSupport: enable
+        Ipv6Support: disable
+        ApplianceModeSupport: disable
+
+      Tags:
+        - Key: Name
+          Value: !Sub 'tgw-attach-${Environment}'
+```
+
+## Production Gotchas and Solutions
+
+### The Route Propagation Mystery
+
+Ever had routes that should propagate but don't? Here's the debugging checklist I've built from painful experience:
+
+```bash
+# Check attachment state
+aws ec2 describe-transit-gateway-attachments \
+  --filters "Name=transit-gateway-id,Values=tgw-xxx" \
+  --query 'TransitGatewayAttachments[].{ID:TransitGatewayAttachmentId,State:State,Association:Association}'
+
+# Verify route table associations
+aws ec2 get-transit-gateway-route-table-associations \
+  --transit-gateway-route-table-id tgw-rtb-xxx
+
+# The money shot - actual propagations
+aws ec2 get-transit-gateway-route-table-propagations \
+  --transit-gateway-route-table-id tgw-rtb-xxx
+```
+
+90% of the time, it's because:
+
+1. The attachment isn't associated with the right route table
+2. Propagation is enabled but the source doesn't have routes to propagate
+3. Overlapping CIDR blocks (TGW silently drops these)
+
+### The Asymmetric Routing Trap
+
+This one's subtle. You've got traffic flowing A→B but not B→A. Classic symptoms:
+
+- SSH works one way
+- Health checks fail randomly
+- Intermittent timeouts
+
+The fix? Always configure routes symmetrically:
+
+```yaml
+Resources:
+  # Don't just add the route one way
+  ProdToSharedRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref SharedServicesCidr
+      TransitGatewayAttachmentId: !Ref SharedServicesAttachment
+      TransitGatewayRouteTableId: !Ref ProductionRouteTable
+
+  # You need the return path too!
+  SharedToProdRoute:
+    Type: AWS::EC2::TransitGatewayRoute
+    Properties:
+      DestinationCidrBlock: !Ref ProductionCidr
+      TransitGatewayAttachmentId: !Ref ProductionAttachment
+      TransitGatewayRouteTableId: !Ref SharedServicesRouteTable
+```
+
+## Advanced Patterns for Scale
+
+### Dynamic Route Learning with BGP
+
+If you're connecting to on-premises or using SD-WAN, you'll want BGP. Here's the pattern that actually works in production:
+
+```yaml
+Resources:
+  CustomerGateway:
+    Type: AWS::EC2::CustomerGateway
+    Properties:
+      BgpAsn: 65000 # Your on-prem ASN
+      IpAddress: !Ref CustomerGatewayIP
+      Type: ipsec.1
+      Tags:
+        - Key: Name
+          Value: cgw-datacenter
+
+  VPNConnection:
+    Type: AWS::EC2::VPNConnection
+    Properties:
+      CustomerGatewayId: !Ref CustomerGateway
+      TransitGatewayId: !Ref TransitGateway
+      Type: ipsec.1
+      StaticRoutesOnly: false # Enable BGP
+
+  # Enable route propagation from VPN
+  VPNAttachmentPropagation:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Properties:
+      TransitGatewayAttachmentId: !Ref VPNConnection
+      TransitGatewayRouteTableId: !Ref ProductionRouteTable
+```
+
+Pro tip: Use BGP communities to tag routes for different handling:
+
+```bash
+# On your edge router
+ip community-list standard PROD_ROUTES permit 65000:100
+ip community-list standard DEV_ROUTES permit 65000:200
+
+route-map TO_AWS permit 10
+ match community PROD_ROUTES
+ set as-path prepend 65000
+```
+
+### Cost Optimization Patterns
+
+TGW charges add up fast. Here's how to optimize:
+
+1. **Attachment Consolidation**: Don't create separate attachments for every little thing
+2. **Regional Hub Pattern**: Use TGW peering instead of duplicating TGWs
+3. **Traffic Engineering**: Route internet-bound traffic directly, not through TGW
+
+```yaml
+Resources:
+  # Smart routing to avoid unnecessary TGW charges
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  InternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+      # NOT TransitGatewayId - avoid TGW charges!
+```
+
+## Monitoring and Observability
+
+You can't manage what you can't measure. Essential metrics:
+
+```python
+# CloudWatch custom metric for route table size
+import boto3
+
+def check_route_table_size():
+    ec2 = boto3.client('ec2')
+    cloudwatch = boto3.client('cloudwatch')
+
+    response = ec2.describe_transit_gateway_route_tables()
+
+    for rt in response['TransitGatewayRouteTables']:
+        routes = ec2.search_transit_gateway_routes(
+            TransitGatewayRouteTableId=rt['TransitGatewayRouteTableId'],
+            MaxResults=100
+        )
+
+        cloudwatch.put_metric_data(
+            Namespace='TGW/RouteTableSize',
+            MetricData=[{
+                'MetricName': 'RouteCount',
+                'Value': len(routes['Routes']),
+                'Dimensions': [
+                    {'Name': 'RouteTableId', 'Value': rt['TransitGatewayRouteTableId']},
+                    {'Name': 'Environment', 'Value': rt['Tags'].get('Environment', 'unknown')}
+                ]
+            }]
+        )
+```
+
+Set alarms when route tables approach limits (10,000 routes per table).
+
+## CI/CD for Network Changes
+
+Network changes are scary. Here's a battle-tested CloudFormation workflow that's saved me from disasters:
+
+[Deploying CloudFormation with GitHub Actions](/articles/devops/deploy-cfn-with-gha)
+
+### The CloudFormation-Specific Gotchas
+
+After migrating from Terraform to CloudFormation for TGW management, here are the lessons learned:
+
+1. **Change Sets Are Your Friend**: Never update directly. Change sets show you exactly what will happen.
+
+2. **The "No Updates" Trap**: CloudFormation fails change sets with no changes. Handle this gracefully:
+
+   ```bash
+   if [[ "$REASON" == *"no updates"* ]]; then
+     echo "No changes needed"
+     exit 0
+   fi
+   ```
+
+3. **Wait Conditions Matter**: Don't just fire and forget. That `wait change-set-create-complete` has prevented many race conditions.
+
+4. **S3 Templates for Large Stacks**: Direct template body has size limits. Always use S3 for production:
+
+   ```bash
+   aws s3 cp template.yaml s3://bucket/templates/${{ github.sha }}.yaml
+   aws cloudformation create-change-set --template-url https://...
+   ```
+
+5. **GitHub Environments for Safety**: The `environment: production` line is crucial. It creates a deployment gate:
+
+   ```yaml
+   deploy:
+     environment: production # This requires manual approval!
+   ```
+
+   Combined with GitHub's deployment protection rules, this ensures someone with proper access must explicitly click "Deploy" before any changes hit production. No more accidental merges taking down the network at 3 AM.
+
+   Pro tip: Configure your environment with required reviewers who actually understand networking:
+
+   ```yaml
+   # In your repo settings → Environments → production
+   - Required reviewers: @network-team
+   - Wait timer: 5 minutes (gives time to catch mistakes)
+   - Deployment branches: main only
+   ```
+
+The key: **Always review change sets before execution**. A misconfigured route table can take down production faster than you can say "rollback." The manual approval gate has saved us more times than I'd like to admit.
+
+## The Politics of Network Architecture
+
+Let's be real — the technical challenges are only half the battle. Here's how to navigate the organizational aspects:
+
+### Cost Attribution
+
+```yaml
+Parameters:
+  CostCenter:
+    Type: String
+    Description: Cost center code for billing
+
+  ChargebackCode:
+    Type: String
+    Description: Chargeback code for internal accounting
+
+# Tag everything with cost centers
+Resources:
+  TransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Tags:
+        - Key: CostCenter
+          Value: !Ref CostCenter
+        - Key: ChargebackCode
+          Value: !Ref ChargebackCode
+        - Key: DataTransferTo
+          Value: track-me-please
+```
+
+Finance will thank you when they can actually attribute the $10K/month TGW bill.
+
+### Access Control Patterns
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOnlyTGW",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeTransitGateways",
+        "ec2:DescribeTransitGatewayRouteTables",
+        "ec2:GetTransitGatewayRouteTableAssociations"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ModifyOnlyOwnAttachments",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:ModifyTransitGatewayVpcAttachment",
+        "ec2:DeleteTransitGatewayVpcAttachment"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/Owner": "${aws:PrincipalTag/team}"
+        }
+      }
+    }
+  ]
+}
+```
+
+Give teams autonomy while maintaining guardrails.
+
+## The TL;DR Checklist
+
+If you take away nothing else:
+
+1. **Disable default route propagation** — Be explicit about routing
+2. **Test asymmetric routing** — It will happen, be ready
+3. **Monitor route table size** — You'll hit limits before you expect
+4. **Use RAM carefully** — Cross-account sharing is powerful but complex
+5. **Tag everything** — Future you will thank present you
+6. **Automate with change sets** — But always human-review route changes
+7. **Plan for BGP** — Even if you don't need it today
+8. **Document security zones** — Network segmentation as code
+
+Transit Gateway isn't just a network hub — it's the backbone of your multi-account strategy. Treat it with the respect (and automation) it deserves.
+
+## Further Reading
+
+- [AWS Transit Gateway quotas](https://docs.aws.amazon.com/vpc/latest/tgw/transit-gateway-quotas.html) - Know your limits
+- [TGW Network Manager](https://aws.amazon.com/transit-gateway/network-manager/) - Visualization at scale
+- [Cross-region peering patterns](https://aws.amazon.com/blogs/networking-and-content-delivery/building-a-global-network-using-aws-transit-gateway-inter-region-peering/) - When one region isn't enough
+
+Remember: In networking, as in life, it's not about avoiding all problems — it's about failing fast, debugging faster, and documenting everything for the next poor soul who has to maintain this.

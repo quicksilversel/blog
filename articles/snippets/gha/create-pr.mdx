@@ -1,0 +1,53 @@
+---
+title: 'Create a GitHub PR'
+description: 'A GitHub Actions workflow to create a pull request'
+published: true
+date: '2023-10-06'
+---
+
+### Option 1: Create PR with gh CLI
+
+```yaml
+- name: Commit & Push
+  env:
+    TZ: 'Asia/Tokyo'
+    GITHUB_TOKEN: ${{ secrets.SUPER_SECRET_TOKEN_OF_DOOM }}
+  run: |
+    DATE="$(date +"%Y%m%d%H%M")"
+    BRANCH_NAME="release-$DATE"
+    git config user.name "github-actions[bot]"
+    git config user.email "noreply@somewhere-magical.com"
+    git checkout -b "$BRANCH_NAME"
+    git add -A
+    git commit -m "$BRANCH_NAME"
+    git push origin "$BRANCH_NAME"
+    gh pr create \
+      -t "Update ${GITHUB_REPO} image to ${BRANCH_NAME}" \
+      -F .github/pull_request_template.md \
+      -a "${AUTHOR}" \
+      -r "${REVIEWER}" \
+      -B master \
+      -H "$(git branch --show-current)"
+```
+
+### Option 2: Create PR with peter-evans/create-pull-request
+
+```yaml
+- name: Create Pull Request
+  uses: peter-evans/create-pull-request@v5
+  with:
+    token: ${{ secrets.MAGICAL_AUTOMATION_TOKEN }}
+    commit-message: 'Chore: summon new image from the CI cauldron'
+    base: master
+    branch: ${{ env.BRANCH_NAME }}
+    title: "Update image – nothing's broken, promise"
+    body: >
+      Just your regular PR—no dragons, no production impact.
+      (Probably.)
+    labels: |
+      automation
+    reviewers: |
+      'team-rocket'
+```
+
+> [peter-evans/create-pull-request](https://github.com/peter-evans/create-pull-request)

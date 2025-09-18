@@ -1,0 +1,522 @@
+---
+title: 'My Next.js App Setup Checklist (2025 Edition)'
+description: 'My personal checklist that gets me from create-next-app to a fully configured development environment.'
+date: 2025-09-12
+topics: ['nextjs', 'emotion']
+published: true
+---
+
+## Intro
+
+Every time I start a new Next.js project, I find myself going through the same setup routine. Instead of constantly googling "how to configure Prettier with Next.js" or "Emotion cache provider setup" for the hundredth time, I decided to document my go-to configuration once and for all.
+
+This is my personal checklist that gets me from `create-next-app` to a fully configured development environment. Maybe it'll save you some time too.
+
+## Quick Package Installation
+
+Before diving into the configs, here are all the packages you'll need:
+
+```bash
+# Runtime dependencies
+npm install @emotion/css @emotion/react @emotion/server @emotion/styled
+
+# Development dependencies
+npm install -D eslint eslint-config-next eslint-config-prettier eslint-plugin-unused-imports @typescript-eslint/eslint-plugin @typescript-eslint/parser prettier stylelint stylelint-config-recess-order stylelint-config-standard stylelint-order stylelint-no-unsupported-browser-features postcss-styled-syntax
+```
+
+## 1. Set up Prettier
+
+First things first - consistent code formatting. I always start with Prettier because it eliminates so many formatting debates.
+
+**Install packages:**
+
+```bash
+npm install -D prettier eslint-config-prettier
+```
+
+**Create `prettier.config.js`:**
+
+```javascript
+/** @type {import('prettier').Config} */
+module.exports = {
+  tabWidth: 2,
+  semi: false,
+  singleQuote: true,
+  trailingComma: 'all',
+}
+```
+
+This config gives you clean, consistent formatting with no semicolons and trailing commas everywhere (which makes for cleaner git diffs).
+
+## 2. Configure ESLint
+
+ESLint is where the magic happens - it catches bugs before they make it to production and enforces consistency across your codebase. Here's my battle-tested configuration that focuses on meaningful rules with clear purposes.
+
+**Install packages:**
+
+```bash
+npm install -D eslint eslint-config-next eslint-config-prettier eslint-plugin-unused-imports @typescript-eslint/eslint-plugin @typescript-eslint/parser
+```
+
+**Create `eslint.config.js`:**
+
+```javascript
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import typescriptEslint from '@typescript-eslint/eslint-plugin'
+import typescriptEslintParser from '@typescript-eslint/parser'
+
+import { FlatCompat } from '@eslint/eslintrc'
+import js from '@eslint/js'
+import unusedImports from 'eslint-plugin-unused-imports'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const compat = new FlatCompat({
+  baseDirectory: __dirname,
+  recommendedConfig: js.configs.recommended,
+  allConfig: js.configs.all,
+})
+
+// Shared rules for all files
+const sharedRules = {
+  // Performance & Bundle Size
+  'unused-imports/no-unused-imports': 'error', // Unused imports increase bundle size
+  'no-unused-vars': 'off', // Turn off base rule to avoid conflicts
+  'unused-imports/no-unused-vars': [
+    'warn',
+    {
+      vars: 'all',
+      varsIgnorePattern: '^_',
+      args: 'after-used',
+      argsIgnorePattern: '^_',
+    },
+  ],
+
+  // Code Quality & Bug Prevention
+  'no-console': ['error', { allow: ['warn', 'dir'] }], // Prevent console.log in production, allow debugging tools
+  'no-restricted-syntax': ['error', 'TSEnumDeclaration', 'WithStatement'], // Prevent problematic syntax patterns
+  'no-unused-expressions': 'error', // Catch typos like `foo.bar` instead of `foo.bar()`
+  'no-debugger': 'error', // Prevent debugger statements in production
+  'no-alert': 'error', // Prevent alert() usage in production
+  'no-var': 'error', // Enforce let/const over var
+  'prefer-const': 'error', // Use const when variables aren't reassigned
+
+  // TypeScript rules (turned off for compatibility)
+  '@typescript-eslint/interface-name-prefix': 'off', // Allow flexible interface naming
+  '@typescript-eslint/member-delimiter-style': 'off', // Don't enforce semicolons in interfaces
+  '@typescript-eslint/no-empty-interface': 'off', // Sometimes empty interfaces are useful as placeholders
+
+  // React Best Practices
+  'react/self-closing-comp': ['error', { component: true, html: true }], // <Component /> instead of <Component></Component>
+
+  // Import Organization - Clean imports = easier navigation
+  'import/order': [
+    'error',
+    {
+      groups: [
+        'builtin', // node:fs, node:path
+        'external', // react, next, lodash
+        'type', // import type { ... }
+        'internal', // @/components, ~/utils
+        'sibling', // ./component
+        'parent', // ../component
+        'index', // ./
+        'object', // import log = console.log
+      ],
+      'newlines-between': 'always',
+      pathGroupsExcludedImportTypes: ['react'],
+      alphabetize: { order: 'asc', caseInsensitive: true },
+      pathGroups: [{ pattern: 'react', group: 'external', position: 'before' }], // React always goes first
+    },
+  ],
+}
+
+const config = [
+  ...compat.extends('next/core-web-vitals'),
+  {
+    files: ['**/*.{js,jsx,ts,tsx}'],
+    languageOptions: {
+      parser: typescriptEslintParser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        ecmaFeatures: { jsx: true },
+      },
+    },
+    plugins: {
+      'unused-imports': unusedImports,
+      '@typescript-eslint': typescriptEslint,
+    },
+    rules: sharedRules,
+  },
+]
+
+export default config
+```
+
+### Why These Rules Matter
+
+**Bundle Size & Performance:**
+
+- `unused-imports/no-unused-imports` - Unused imports get bundled even if never used, bloating your JavaScript bundle. This catches imports you forgot to remove after refactoring.
+- `no-unused-vars` - Dead code elimination works better when there are no unused variables lingering around.
+
+**Bug Prevention:**
+
+- `no-console` - Console logs in production can leak sensitive info and slow down performance. We allow `warn` and `dir` for debugging.
+- `no-restricted-syntax` - TypeScript enums can cause unexpected behavior and bundle bloat; `with` statements are just evil.
+- `prefer-const` - Catches bugs where you accidentally reassign variables that should be constants.
+
+**Developer Experience:**
+
+- `import/order` - Consistent import ordering makes it easier to find what you're looking for and reduces merge conflicts. React always goes first, then external packages, then your internal code, all alphabetized.
+- `react/self-closing-comp` - `<Button active />` is cleaner than `<Button active></Button>`
+
+The config is intentionally minimal - it focuses on catching real bugs and maintaining consistency without being overly restrictive. Sometimes the best ESLint config is the one that stays out of your way while preventing actual problems.
+
+## 3. Install and Configure Emotion
+
+For styling, I use Emotion. It gives me the flexibility of CSS-in-JS with great performance and TypeScript support.
+
+**Install packages:**
+
+```bash
+npm install @emotion/css @emotion/react @emotion/server @emotion/styled
+```
+
+### Setting up EmotionRegistry (Optional but Recommended)
+
+The EmotionRegistry is technically optional, but I highly recommend it. Without it, you'll get that dreaded "flash of unstyled content" (FOUC) where your page looks broken for a split second on initial load. The registry ensures your CSS is properly cached and rendered server-side, so users see a fully styled page immediately.
+
+**Create `lib/EmotionRegistry.tsx`:**
+
+```tsx
+'use client'
+
+import { useState } from 'react'
+import type { ReactNode } from 'react'
+
+import createCache from '@emotion/cache'
+import { CacheProvider } from '@emotion/react'
+import { useServerInsertedHTML } from 'next/navigation'
+
+export default function EmotionRegistry({ children }: { children: ReactNode }) {
+  const [cache] = useState(() => {
+    const cache = createCache({
+      key: 'css',
+      prepend: true,
+    })
+    cache.compat = true
+    return cache
+  })
+
+  useServerInsertedHTML(() => {
+    return (
+      <style
+        data-emotion={`${cache.key} ${Object.keys(cache.inserted).join(' ')}`}
+        dangerouslySetInnerHTML={{
+          __html: Object.values(cache.inserted).join(' '),
+        }}
+      />
+    )
+  })
+
+  return <CacheProvider value={cache}>{children}</CacheProvider>
+}
+```
+
+**Add to `layout.tsx`:**
+
+```tsx
+import EmotionRegistry from './lib/EmotionRegistry'
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <EmotionRegistry>{children}</EmotionRegistry>
+      </body>
+    </html>
+  )
+}
+```
+
+## 4. Configure Stylelint for CSS-in-JS
+
+Even with CSS-in-JS, you still want to catch CSS mistakes and maintain consistency. Stylelint works great with Emotion through the `postcss-styled-syntax` plugin, and these rules are specifically tuned for performance and CSS-in-JS compatibility.
+
+**Install packages:**
+
+```bash
+npm install -D stylelint stylelint-config-standard stylelint-config-recess-order stylelint-order stylelint-no-unsupported-browser-features postcss-styled-syntax
+```
+
+**Create `stylelint.config.js`:**
+
+```javascript
+/** @type {import('stylelint').Config} */
+module.exports = {
+  extends: ['stylelint-config-standard', 'stylelint-config-recess-order'],
+  plugins: ['stylelint-order', 'stylelint-no-unsupported-browser-features'],
+  customSyntax: 'postcss-styled-syntax', // This makes Stylelint understand CSS-in-JS
+  ignoreFiles: ['**/node_modules/**', 'src/styles/resetCss/resetCss.ts'],
+  rules: {
+    // CSS-in-JS compatibility - these rules don't play well with CSS-in-JS
+    'selector-class-pattern': null, // CSS-in-JS generates class names dynamically
+    'alpha-value-notation': null, // Modern alpha notation can break in some contexts
+    'color-function-notation': 'legacy', // Use rgb() instead of rgb(255 0 0) for better compatibility
+    'no-descending-specificity': null, // CSS-in-JS handles specificity differently
+    'property-no-vendor-prefix': null, // Sometimes you need vendor prefixes for cutting-edge features
+    'value-no-vendor-prefix': null,
+    'nesting-selector-no-missing-scoping-root': null, // CSS-in-JS handles scoping automatically
+
+    /* --- Performance & Bundle Size --- */
+    // Block render-blocking @import in CSS - use JavaScript imports instead
+    'at-rule-disallowed-list': ['import'],
+
+    // Keep CSS small & selector matching fast
+    'selector-max-compound-selectors': 4, // .a .b .c .d is OK; deeper selectors hurt performance
+    'selector-max-combinators': 3, // Limit descendant/child/sibling chains
+    'selector-max-specificity': '0,4,0', // Avoid overly specific selectors that are hard to override
+    'selector-max-class': 4, // Too many classes in one selector gets unwieldy
+    'selector-max-id': 0, // IDs have too much specificity and aren't reusable
+    'selector-max-universal': 0, // Universal selectors (*) are performance killers
+    'selector-no-qualifying-type': [true, { ignore: ['attribute', 'class'] }], // div.class is redundant
+
+    // Avoid CSS mistakes that bloat bundles
+    'declaration-block-no-duplicate-properties': [
+      true,
+      { ignore: ['consecutive-duplicates-with-different-values'] }, // Allow fallbacks like display: flex; display: grid;
+    ],
+    'declaration-block-no-shorthand-property-overrides': true, // margin-top shouldn't override margin
+    'declaration-no-important': true, // !important makes CSS harder to maintain and debug
+
+    // Tame nesting (important for CSS-in-JS readability)
+    'max-nesting-depth': 3, // Deep nesting creates specificity wars and hard-to-debug CSS
+
+    // Warn about features that need heavy polyfills (keeps bundles lean)
+    'plugin/no-unsupported-browser-features': [
+      true,
+      {
+        severity: 'warning', // Warn but don't block - sometimes cutting-edge features are worth it
+        ignorePartialSupport: true, // Don't warn if feature has partial support
+      },
+    ],
+  },
+}
+```
+
+**Create `.browserslistrc`:**
+
+```
+last 2 chrome version
+last 2 firefox version
+last 2 Edge version
+last 2 Safari version
+iOS >= 18
+not dead
+```
+
+This file tells the `no-unsupported-browser-features` plugin which browsers you're targeting, so it can warn you about CSS features that won't work in your supported browsers. The configuration above covers modern browsers while ensuring iOS 18+ compatibility for mobile users.
+
+### Why Stylelint Matters for CSS-in-JS
+
+**Performance Focus:** The selector limits (`selector-max-compound-selectors`, `selector-max-specificity`) prevent performance-killing CSS that makes browsers work harder to match elements. Even with CSS-in-JS, badly structured CSS can slow down your app.
+
+**Bundle Size:** Rules like `at-rule-disallowed-list: ['import']` prevent render-blocking CSS imports, and `declaration-no-important` discourages CSS that's hard to optimize.
+
+**CSS-in-JS Compatibility:** The disabled rules (`selector-class-pattern`, `no-descending-specificity`) acknowledge that CSS-in-JS tools like Emotion handle these concerns automatically through scoping and dynamic class generation.
+
+**Browser Support:** The `no-unsupported-browser-features` plugin warns when you use CSS features that might need polyfills, helping you make informed decisions about bundle size vs. cutting-edge features.
+
+## 5. Update Next.js Configuration
+
+This is where the magic happens - configuring Next.js to work seamlessly with Emotion using SWC, Next.js's native Rust-based compiler (not Babel). SWC is significantly faster than Babel and comes built-in with Next.js, so we get excellent performance out of the box.
+
+**Update `next.config.ts`:**
+
+```typescript
+import type { NextConfig } from 'next'
+
+const nextConfig: NextConfig = {
+  // Disable cache in development for faster iteration
+  ...(process.env.NODE_ENV !== 'production' && {
+    cacheMaxMemorySize: 0,
+  }),
+
+  // SWC compiler configuration for Emotion
+  compiler: {
+    emotion: {
+      // Source maps in development only - helps with debugging CSS-in-JS
+      sourceMap: process.env.NODE_ENV !== 'production',
+      // Auto-label components in development for easier debugging
+      autoLabel: process.env.NODE_ENV !== 'production' ? 'always' : 'never',
+      // Format for auto-generated labels
+      labelFormat: '[local]',
+      // Import map optimization - lets you import styled from @emotion/react
+      importMap: {
+        '@emotion/react': {
+          styled: {
+            canonicalImport: ['@emotion/styled', 'default'],
+          },
+        },
+      },
+    },
+  },
+
+  // Additional optimizations you might want to add:
+  experimental: {
+    // Enable optimizeCss for better CSS bundling (optional)
+    optimizeCss: true,
+  },
+}
+
+export default nextConfig
+```
+
+### Why This Configuration Matters
+
+**SWC vs Babel:** This config uses SWC (Speedy Web Compiler), Next.js's built-in Rust-based compiler, instead of Babel. SWC is up to 20x faster than Babel and requires zero additional setup. The `compiler.emotion` field tells SWC how to handle Emotion's CSS-in-JS transforms.
+
+**Development vs Production:**
+
+- In development: Source maps and auto-labeling help you debug which components are generating which styles
+- In production: These features are disabled for smaller bundles and better performance
+
+**Import Map Optimization:** The import map allows you to write `import styled from '@emotion/react'` instead of `import styled from '@emotion/styled'`, which can be more convenient and consistent with other Emotion imports.
+
+**Cache Configuration:** Disabling cache in development prevents stale build artifacts from causing confusion during development.
+
+## 6. Set up Theme System
+
+**Create `lib/theme.d.ts`:**
+
+```typescript
+import '@emotion/react'
+
+declare module '@emotion/react' {
+  export interface Theme {
+    colors: {
+      background: string
+      text: string
+      muted: string
+      floating: string
+      primary: string
+    }
+  }
+}
+```
+
+**Create `lib/theme.ts`:**
+
+```typescript
+import type { Theme } from '@emotion/react'
+
+export const colors: Theme = {
+  colors: {
+    background: 'hsl(0deg, 0%, 100%)',
+    text: 'hsl(230deg, 30%, 15%)',
+    muted: 'hsl(220deg, 20%, 85%)',
+    floating: 'hsl(0deg, 0%, 95%)',
+    primary: 'hsl(325deg, 90%, 72%)',
+  },
+}
+```
+
+## 7. Add CSS Reset
+
+**Create `lib/reset.ts`:**
+
+```typescript
+import { css } from '@emotion/react'
+
+export const resetCss = css`
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  img,
+  picture,
+  video,
+  canvas,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  input,
+  button,
+  textarea,
+  select {
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    text-align: inherit;
+    text-transform: inherit;
+    vertical-align: middle;
+    background: transparent;
+    border-style: none;
+  }
+
+  li {
+    list-style: none;
+  }
+
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    overflow-wrap: break-word;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  #root,
+  #__next {
+    isolation: isolate;
+  }
+`
+```
+
+This reset gives you a clean foundation to build on, with sensible defaults that work well across different browsers.
+
+## Why This Stack?
+
+This setup might seem like overkill for a simple project, but each piece serves a purpose:
+
+- **Prettier** eliminates formatting discussions and keeps code consistent
+- **ESLint** catches bugs early and enforces good practices
+- **Emotion** provides powerful styling capabilities with TypeScript support
+- **Stylelint** ensures your CSS-in-JS is performant and maintainable
+- **The reset** gives you a predictable starting point across browsers
+
+The best part? Once you have this setup, you can copy these configs to any new Next.js project and be productive immediately.
+
+## Wrapping Up
+
+That's my complete Next.js setup checklist. It takes about 15 minutes to get through all these steps, but it saves hours of debugging and configuration headaches later.
+
+Feel free to adjust the configurations to match your preferences - the important thing is having a consistent starting point that you can rely on project after project.

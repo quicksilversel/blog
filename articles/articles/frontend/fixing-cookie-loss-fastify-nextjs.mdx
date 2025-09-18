@@ -1,0 +1,113 @@
+---
+title: 'Fixing Cookie Loss When Proxying from Fastify → Next.js'
+description: 'A workaround for preserving cookies when using Fastify as a custom server for Next.js, ensuring cookies are not lost during SSR.'
+topics: ['nextjs', 'fastify']
+published: true
+date: '2024-09-19'
+---
+
+## Intro
+
+Ran into a weird issue while proxying requests from Fastify into Next.js:
+**Next.js won't preserve cookies when rendering pages via a custom server**. Even if your backend (Fastify) handles cookies correctly, `req.cookies` and `Set-Cookie` headers disappear downstream.
+
+What I ended up doing: store cookies temporarily on a custom property (called `tempCookies`) on the Fastify request, and then inject them back into the headers before calling Next.js' request handler. Feels scratch-your-head at first, but it works ⚙️
+
+## The Problem
+
+When forwarding a request into Next.js using something like:
+
+```ts
+await handle(req.raw, reply.raw)
+```
+
+Next.js ignores Fastify's `req.cookies` and even strips any `Set-Cookie` headers sent before it. Essentially:
+
+- Browser → Fastify Request
+- Fastify sets & reads cookies ok
+- `Set-Cookie` header ends up lost
+- In `handle(req.raw,…)` Next.js overrides headers
+
+## The Workaround (My Solution)
+
+### 1. Extend FastifyRequest
+
+Add a custom property to save cookies across the proxy boundary:
+
+```ts
+declare module 'fastify' {
+  interface FastifyRequest {
+    tempCookies?: string[]
+  }
+}
+```
+
+### 2. In `nextjsCustomServer.ts`
+
+Before forwarding to Next.js, re-attach the saved cookies:
+
+```ts
+serve.all('/*', async (req, reply) => {
+  if (Array.isArray(req.tempCookies) && req.tempCookies.length > 0) {
+    reply.raw.setHeader('Set-Cookie', req.tempCookies)
+  }
+  await handle(req.raw, reply.raw)
+  reply.hijack()
+})
+```
+
+That ensures Next.js' HTTP response includes any cookie headers Fastify accumulated.
+
+### 3. `setCookie()` helper logic (backend response → client propagation)
+
+When Fastify receives a `Set-Cookie` header from another service or API, capture and replay it:
+
+```ts
+export function setCookie(rawSetCookie: string, req: FastifyRequest) {
+  // Simplified for this note: parse key=value from raw header
+  const [whatToSet] = rawSetCookie.split(';')
+  req.tempCookies = (req.tempCookies ?? []).concat(rawSetCookie)
+
+  const [name, value] = whatToSet.split('=')
+  if (value === '' && req.cookies) {
+    delete req.cookies[name]
+  } else {
+    req.cookies = req.cookies || {}
+    req.cookies[name] = value
+  }
+
+  // Sync headers so Next.js can read them in SSR
+  const parsed = parse(req.headers.cookie ?? '')
+  value === '' ? delete parsed[name] : (parsed[name] = value)
+  req.headers.cookie = Object.entries(parsed)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ')
+}
+```
+
+Now `setCookie()` does three things:
+
+1. Stores the original `Set-Cookie` header in `req.tempCookies`.
+2. Updates `req.cookies` object so Fastify continues logic near-term.
+3. Rewrites `req.headers.cookie` so Next.js' internal cookie parser sees the new or deleted cookie.
+
+## 🤔 Why it happens & what docs say
+
+- Next.js **re-constructs** cookies for SSR based on the raw Node HTTP headers, not using Fastify's `req.cookies`.
+- You have to **manually sync** cookies if you use a custom server proxy.
+- Articles on header forwarding (e.g. Jon Meyers' blog) confirm: Next.js Server Components paired with Route Handlers won't forward cookies automatically—you must forward them in `fetch()` calls or wrapper layers
+
+## 🧪 Caveats & gotchas
+
+- If `tempCookies` is large or you add duplicates repeatedly, it can bloat headers. You can dedupe by cookie name if needed.
+- If setting multiple cookies with different attributes, always append them to an **array** when calling `setHeader('Set-Cookie', …)`.
+- Be cautious with domains, `httpOnly`, `SameSite`, etc—in local development your domain matching logic might differ.
+
+## ✅ Summary
+
+- Next.js **doesn't automatically propagate** cookies when you use a custom server proxy.
+- Fastify's `req.cookies` and `res.setHeader()` must be translated into raw HTTP headers manually.
+- My workaround: store cookies in `req.tempCookies`, reattach before calling Next.js, and rewrite the `cookie` header.
+- This lets my Next.js SSR see the correct cookies for auth/session logic—and the browser gets the actual `Set-Cookie` instructions.
+
+Now I can move cookies around the proxy boundary without them vanishing in thin air 😅
