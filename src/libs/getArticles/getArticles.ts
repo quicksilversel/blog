@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 
 import { serialize } from 'next-mdx-remote/serialize'
+import readingTime from 'reading-time'
 import remarkGfm from 'remark-gfm'
 
 import type { Article } from './types'
@@ -35,6 +36,8 @@ export async function getArticles(
             },
           })
 
+          const stats = readingTime(source)
+
           const slug = `${category}/${path.basename(fileName, '.mdx')}`
 
           return {
@@ -43,6 +46,7 @@ export async function getArticles(
             fullPath,
             category,
             slug,
+            readingTime: stats.text,
           } as Article
         }),
       )

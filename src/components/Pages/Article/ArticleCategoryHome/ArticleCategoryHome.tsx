@@ -21,6 +21,7 @@ export const ArticleCategoryHome = ({ category, articles }: Props) => {
           <Card
             key={article.slug}
             title={article.title}
+            subtitle={article.readingTime}
             description={article.description}
             topics={article.topics}
             link={`/articles/${article.slug}`}

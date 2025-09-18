@@ -3,14 +3,23 @@ import React from 'react'
 import styled from '@emotion/styled'
 import Image from 'next/image'
 
+import { H1 } from '@/components/Pages/Article/ArticleDetail/Markup'
+
 type Props = {
   title: string
+  titleTag?: 'h1' | 'h2'
   imageUrl?: string
   width?: number
   className?: string
 }
 
-export const SectionHeader = ({ title, imageUrl, width, className }: Props) => {
+export const SectionHeader = ({
+  title,
+  titleTag = 'h1',
+  imageUrl,
+  width,
+  className,
+}: Props) => {
   return (
     <Container className={className}>
       {imageUrl && (
@@ -21,7 +30,6 @@ export const SectionHeader = ({ title, imageUrl, width, className }: Props) => {
             width={width ?? 100}
             height={0}
             style={{
-              width: 'auto',
               height: 'auto',
             }}
             aria-hidden
@@ -30,7 +38,7 @@ export const SectionHeader = ({ title, imageUrl, width, className }: Props) => {
           />
         </ImageContainer>
       )}
-      <Title>{title}</Title>
+      {titleTag === 'h1' ? <H1>{title}</H1> : <H2>{title}</H2>}
     </Container>
   )
 }
@@ -48,8 +56,8 @@ const ImageContainer = styled.div`
   }
 `
 
-const Title = styled.h1`
-  margin: 0 0 2rem;
+const H2 = styled.h2`
+  margin-bottom: 1rem;
   font-size: var(--font-size-large);
-  color: ${({ theme }) => theme.colors.text};
+  color: ${({ theme }) => theme.colors.primary};
 `

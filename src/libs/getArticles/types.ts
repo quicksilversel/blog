@@ -8,4 +8,5 @@ export type Article = {
   fileName: string
   fullPath: string
   category: string
+  readingTime?: string
 }
