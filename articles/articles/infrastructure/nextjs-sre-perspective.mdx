@@ -1,0 +1,143 @@
+---
+title: 'Optimizing Next.js on EKS: Tips I’ve learned as an SRE'
+description: 'Lessons learnt by managing Next.js apps on EKS, covering health checks, scaling, caching, and logging.'
+topics: ['Node.js', 'Kubernetes']
+published: true
+date: '2025-08-14'
+---
+
+## Introduction
+
+I used to be a frontend engineer building Next.js apps, and now I maintain those apps as an SRE running on EKS.
+Next.js is easy to get running locally, but **running it reliably in production** is a whole different game. You need proper SRE thinking around design, monitoring, and performance.
+
+This post shares my hard-earned lessons specifically around **Next.js + EKS** based on real production issues we faced and solved.
+
+## 1. Designing health checks (readiness / liveness / startup)
+
+Always split `readiness` and `liveness`.
+When your app has external dependencies (like DBs or APIs), check them in `readiness`, and stop sending traffic if they fail. Meanwhile, **`liveness` should be just a process heartbeat**, and shouldn't be overly aggressive. For SSR apps with slow boot times, `startupProbe` adds more stability.
+
+### Handler example (with external deps)
+
+```ts
+app.get('/health/readiness/', async (_, reply) => {
+  const ok = await checkExternalDeps() // check DB/API
+  reply.code(200).send({ status: 'READY' })
+})
+```
+
+### Handler example (no deps)
+
+For simple apps with no dependencies, combining them is fine.
+
+```ts
+app.get(/^\/health\/(liveness|readiness)\/?$/, (_, reply) => {
+  reply.code(200).send({ status: 'READY' })
+})
+```
+
+### Probe example (EKS)
+
+```yaml
+readinessProbe:
+  httpGet: { path: /health/readiness/, port: 3000 }
+  initialDelaySeconds: 3
+  periodSeconds: 10
+livenessProbe:
+  httpGet: { path: /health/liveness/, port: 3000 }
+  initialDelaySeconds: 10
+  periodSeconds: 30
+startupProbe:
+  httpGet: { path: /health/liveness/, port: 3000 }
+  failureThreshold: 30
+  periodSeconds: 5
+```
+
+**Quick rules of thumb:**
+
+- `startupProbe`: delays `liveness` until app fully boots
+- `readiness`: removes pod from LB if dependencies break
+- `liveness`: restarts pod if it's frozen (too aggressive = noisy restarts)
+
+## 2. Misconceptions about SSR and scaling
+
+**More CPU ≠ faster SSR.**
+Node.js is single-threaded, so even if your pod gets 2 cores, your app might only use 1. You’ll need `cluster` or a process manager like PM2 to **match processes to CPU cores**.
+
+I go deeper into this here:
+
+https://zoelog.vercel.app/articles/infrastructure/enable-multi-cpu-nodejs
+
+## 3. SSR VS CSR chaos testing scenarios
+
+SSR and CSR behave very differently during failures — which means you need to **test both paths**.
+
+- **SSR**: if an API fails, the page likely returns HTTP 5xx
+- **CSR**: even if there's an error, the page might return 200 and silently fail (e.g. empty widget)
+
+Here’s a test matrix I use:
+
+| Case         | Scenario     | Expected (SSR)             | Expected (CSR)                                      |
+| ------------ | ------------ | -------------------------- | --------------------------------------------------- |
+| API failure  | API 5xx      | Page 5xx or error fallback | Page 200, but component is hidden/placeholder shown |
+| Latency      | API 3s→10s   | SSR times out or retries   | UI loading shown, then timeout                      |
+| Auth expired | Session dead | Redirect or error page     | Client detects and prompts re-login                 |
+
+> In prod, we often **accept partial degradation**. I recommend visual regression or component visibility checks in Playwright E2E tests.
+
+## 4. Cache design (CDN x SSR)
+
+Placing a CDN in front of your SSR app can drastically reduce load — but you need a clear **caching strategy**.
+
+- **Static assets** (`/_next/static/*`, images, fonts):
+  Use `Cache-Control: public, max-age=31536000, immutable`
+  → file names include hashes, so cache busting is automatic
+
+- **SSR HTML**:  
+  If personalized or uses auth, use `no-store`.
+  If you're okay with CDN caching briefly, use short `s-maxage` (like 30s).
+
+**Rough diagram**
+
+```
+Client → CDN (Akamai/CloudFront) → ALB → Next.js SSR
+                      ↑
+             Cache layer goes here
+```
+
+## 5. Logging (structured + latency + correlation ID)
+
+Out-of-the-box Next.js logging is limited.
+In a custom server (like Fastify), log structure and latency using `onResponse`. It helps **a ton** when debugging.
+
+Minimal Fastify example:
+
+```ts
+app.addHook('onResponse', (req, reply, done) => {
+  req.log.info({
+    http_method: req.method,
+    http_status: reply.statusCode,
+    user_agent: req.headers['user-agent'] ?? null,
+    latency: reply.getResponseTime() / 1000,
+  })
+  done()
+})
+```
+
+Docs: https://fastify.dev/docs/latest/Reference/Hooks/
+
+**What to measure:**
+
+- Latency (p50, p90, p99)
+- Error rate (4xx / 5xx)
+- Request count (by route)
+- Correlation ID (for tracing)
+
+## Summary (TL;DR)
+
+1. Use `readiness` / `liveness` / `startup` probes properly to avoid cascading failures
+2. Use `cluster` or PM2 to increase concurrency within 1 pod
+3. Test SSR/CSR separately and account for partial failures
+4. Cache wisely (long for static, short/no-cache for SSR HTML)
+5. Add structured logs + correlation ID to boost observability

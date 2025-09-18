@@ -1,0 +1,124 @@
+---
+title: '[Cloudformation] Deploying Cloudformation Change Sets without InvalidChangeSetStatus Error'
+description: 'How I solved the InvalidChangeSetStatus error in AWS CloudFormation GitHub Actions deploys by waiting for the change set to be ready before executing.'
+topics: ['GHA']
+published: true
+date: '2025-07-14'
+---
+
+## The Error I Hit
+
+I got this error during a CloudFormation deployment via GitHub Actions:
+
+```txt
+An error occurred (InvalidChangeSetStatus) when calling the ExecuteChangeSet operation:
+ChangeSet [...] cannot be executed in its current status of [CREATE_IN_PROGRESS]
+```
+
+The `execute-change-set` step was trying to run before the change set was fully created. Classic timing issue.
+
+## The Fix
+
+I added a simple polling step to wait for the change set to reach `CREATE_COMPLETE` before executing it. If the status becomes `FAILED`, it prints out the error and exits.
+
+```yaml
+- name: Wait for change set to be created
+  run: |
+    for i in {{1..30}}; do
+      status=$(aws cloudformation describe-change-set
+        --change-set-name "${{ steps.generate-stack-name.outputs.change_set_name }}"
+        --stack-name "${{ env.STACK_NAME }}"
+        --query "Status" --output text)
+
+      echo "Current change set status: $status"
+
+      if [[ "$status" == "CREATE_COMPLETE" ]]; then
+        break
+      elif [[ "$status" == "FAILED" ]]; then
+        echo "ERROR: Change set creation failed." >&2
+        aws cloudformation describe-change-set
+          --change-set-name "${{ steps.generate-stack-name.outputs.change_set_name }}"
+          --stack-name "${{ env.STACK_NAME }}"
+        exit 1
+      fi
+
+      echo "Waiting 10s for change set to be ready..."
+      sleep 10
+    done
+```
+
+## When It Happens
+
+This happens because `create-change-set` is asynchronous — it returns instantly while still processing in the background. If you try to execute it right away, CloudFormation throws an error.
+
+## The Full Code
+
+```yaml
+  runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Generate change set name
+        id: generate-stack-name
+        run: |
+          TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
+          echo "timestamp=$TIMESTAMP" >> "$GITHUB_OUTPUT"
+          echo "change_set_name=${STACK_NAME}-$TIMESTAMP" >> "$GITHUB_OUTPUT"
+
+      - name: Upload template to S3
+        run: |
+          aws s3 cp $TEMPLATE_FILE s3://${{ env.S3_BUCKET }}/${{ github.sha }}.yaml
+
+      - name: Create CloudFormation change set
+        run: |
+          aws cloudformation create-change-set \
+            --stack-name "${{ env.STACK_NAME }}" \
+            --template-url https://s3.amazonaws.com/${{ env.S3_BUCKET }}/${{ github.sha }}.yaml \
+            --change-set-name "${{ steps.generate-stack-name.outputs.change_set_name }}" \
+            --capabilities CAPABILITY_NAMED_IAM
+
+      - name: Wait for change set to be created
+        run: |
+          for i in {1..30}; do
+            status=$(aws cloudformation describe-change-set \
+              --change-set-name "${{ steps.generate-stack-name.outputs.change_set_name }}" \
+              --stack-name "${{ env.STACK_NAME }}" \
+              --query "Status" --output text)
+
+            echo "Current change set status: $status"
+
+            if [[ "$status" == "CREATE_COMPLETE" ]]; then
+              break
+            elif [[ "$status" == "FAILED" ]]; then
+              echo "ERROR: Change set creation failed." >&2
+              aws cloudformation describe-change-set \
+                --change-set-name "${{ steps.generate-stack-name.outputs.change_set_name }}" \
+                --stack-name "${{ env.STACK_NAME }}"
+              exit 1
+            fi
+
+            echo "Waiting 10s for change set to be ready..."
+            sleep 10
+          done
+
+      - name: Execute CloudFormation change set
+        run: |
+          aws cloudformation execute-change-set \
+            --change-set-name "${{ steps.generate-stack-name.outputs.change_set_name }}" \
+            --stack-name "${{ env.STACK_NAME }}"
+```
+
+## Pro Tip
+
+Always check the change set status before execution. I had no idea at first that GitHub Actions could try to execute it mid-creation.
+
+This fix helped make my deploys stable and smooth.
+
+If you're also automating CloudFormation updates via GitHub Actions, definitely consider waiting before the execution step. It’s a small addition but saved me a lot of debugging time 🔧🚀

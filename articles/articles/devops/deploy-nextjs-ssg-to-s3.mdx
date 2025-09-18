@@ -1,0 +1,87 @@
+---
+title: '[S3] Deploying a Next.js SSG App to S3 with GitHub Actions'
+description: 'Setups to deploy a Next.js app with Static Site Generation (SSG) to AWS S3 using GitHub Actions.'
+topics: ['GHA']
+published: true
+date: '2024-03-15'
+---
+
+## What is SSG again?
+
+SSG (Static Site Generation) builds HTML at build time, not per request. It means fast page loads and zero server costs!
+This is ideal for S3 hosting and hosting static sites affordably.
+
+## Update next.config.js
+
+Tell Next.js to export the app as a static site.
+
+```js
+// next.config.js
+const nextConfig = {
+  output: 'export',
+}
+
+module.exports = nextConfig
+```
+
+## GitHub Actions Workflow
+
+Automate the deployment with GitHub Actions. This workflow builds the Next.js app and uploads it to S3.
+
+```yaml
+name: Deploy to S3
+on:
+  push:
+    branches: ['main']
+
+permissions:
+  actions: write
+  contents: read
+  id-token: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<your-account-id>:role/<your-gha-role>
+          aws-region: ap-northeast-1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache node modules
+        id: cache-npm
+        uses: actions/cache@v4
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: \${{ runner.os }}-build-\${{ env.cache-name }}-\${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            \${{ runner.os }}-build-\${{ env.cache-name }}-
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to s3
+        run: |
+          aws s3 cp --recursive ./out/ s3://your-static-site-bucket-name --acl public-read
+```
+
+## Notes
+
+- Don't use `getServerSideProps()` — only `getStaticProps()` or plain pages.
+- Dynamic routes won't work unless they're pre-rendered.
+- S3 doesn't handle client-side routing. Might need CloudFront + fallback if routing breaks.

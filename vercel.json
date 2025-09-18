@@ -9,5 +9,5 @@
       "ENABLE_EXPERIMENTAL_COREPACK": "1"
     }
   },
-  "installCommand": "git submodule update --init --recursive && npm install"
+  "installCommand": "npm install"
 }

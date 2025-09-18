@@ -1,0 +1,186 @@
+---
+title: 'Understanding Garbage Collection in JVM'
+description: 'A deep dive into how JVM handles memory management through garbage collection, its types, and best practices.'
+topics: ['JVM', 'datadog']
+published: true
+date: '2025-08-18'
+---
+
+## Introduction
+
+My Java application was experiencing performance issues, and I suspected it was related to how the JVM was managing memory.
+To optimize performance, I needed a clear understanding of how garbage collection (GC) works in the JVM.
+
+## TL;DR – Watch out for Major GC!
+
+- Major GC (a.k.a. Full GC) causes your whole app to pause—and not in a chill way 😵
+- We saw memory usage spike, GC old gen size grow, and major GC run more frequently
+- The root cause? The service that was newly released was consuming too much memory
+- Always keep an eye on major GC metrics to catch issues early before users feel the lag!
+
+## What Is Garbage Collection (GC)?
+
+Garbage Collection is the JVM’s automatic memory management process. It finds and removes objects that are no longer in use, preventing memory leaks and freeing up memory for new allocations.
+
+## How Java Applications Use Memory
+
+Java splits memory into multiple areas:
+
+### 1. Heap Memory
+
+- Stores: Objects and arrays.
+- Managed by: Garbage Collector.
+- Subdivided into:
+  - **Young Generation**: Eden + Survivor spaces.
+  - **Old Generation**: Where long-lived objects are promoted.
+
+Example: `new User()` allocates memory in the heap.
+
+### 2. Stack Memory
+
+- Stores: Local variables and method call info.
+- Per-thread stack.
+- Cleared automatically on method return.
+
+Example: `int count = 5` goes on the stack.
+
+### 3. Metaspace (Java 8+)
+
+- Stores: Class metadata.
+- Native memory (not heap).
+- Grows dynamically but can OOM.
+
+Example: Defining a class like `class Product`.
+
+### 4. Code Cache
+
+- Stores: JIT-compiled native bytecode.
+
+### 5. Native Memory
+
+- Includes: Thread stacks, DirectByteBuffer, JNI memory.
+- Not managed by -Xmx.
+
+## What Is the Heap?
+
+- Dynamic memory allocation area.
+- Where `new Object()` lives.
+- Operated on by the GC.
+
+### Heap Structure
+
+| Generation       | Description                                       |
+| ---------------- | ------------------------------------------------- |
+| Young Generation | New objects go here (Eden + Survivor).            |
+| Old Generation   | Long-lived objects promoted here.                 |
+| Metaspace        | (Not technically heap) Class metadata lives here. |
+
+### GC Lifecycle Example
+
+1. `User user = new User();` → Eden
+2. Survives GC → Survivor → Old Gen
+3. Becomes unreachable → Collected by GC
+
+### Heap Management Tips
+
+- Too small → `OutOfMemoryError`
+- Too large → Long GC pauses
+- Monitor and tune with `-Xms`, `-Xmx`
+
+## Minor GC vs Major GC
+
+| Type     | Operates On             | Frequency          | Performance | Pause Time | Purpose                   |
+| -------- | ----------------------- | ------------------ | ----------- | ---------- | ------------------------- |
+| Minor GC | Young Generation        | Frequent (seconds) | Low         | Short      | Clean short-lived objects |
+| Major GC | Old Generation          | Rare (minutes+)    | High        | Long       | Clean long-lived objects  |
+| Full GC  | Entire Heap + Metaspace | Emergency          | Very High   | Longest    | Full memory cleanup       |
+
+## GC Spikes: What Do They Mean?
+
+### Minor GC Spikes
+
+- High object churn
+- Eden fills quickly
+- High frequency = CPU spike or latency
+
+✅ Fixes:
+
+- Tune `-Xmn`, increase Young Gen
+- Use object pools
+
+### Major GC Spikes
+
+- Old Gen pressure
+- Potential memory leaks
+- Long app pauses
+
+✅ Fixes:
+
+- Analyze heap dumps
+- Increase heap
+- Fix object retention
+
+## How Heap Size Is Determined
+
+Heap does **not** grow with system memory by default. Use:
+
+- `-Xms`: Initial heap
+- `-Xmx`: Max heap
+
+| Memory Limit | Default Max Heap |
+| ------------ | ---------------- |
+| 2 GB         | ~512 MB – 1 GB   |
+| 8 GB         | ~2–4 GB          |
+| 16 GB        | ~4–8 GB          |
+
+## GC Metric Analysis
+
+### Minor Collection Count
+
+```hcl
+exclude_null(avg:jvm.gc.minor_collection_count{...})
+```
+
+### Minor Collection Time
+
+```hcl
+exclude_null(avg:jvm.gc.minor_collection_time{...})
+```
+
+### Major Collection Count
+
+```hcl
+exclude_null(avg:jvm.gc.major_collection_count{...})
+```
+
+### Major Collection Time
+
+```hcl
+exclude_null(avg:jvm.gc.major_collection_time{...})
+```
+
+### Old Gen Size
+
+```hcl
+exclude_null(avg:jvm.gc.old_gen_size{...})
+```
+
+## What I Observed
+
+1. Minor GC spiked right after release.
+2. Major GC occurred days later (still microseconds).
+3. Old Gen size steadily increased.
+4. Memory usage jumped 40%.
+
+## Root Cause
+
+Since it was caused by the release of a new service, We asked the devs to dig into the app to identify memory-heavy objects. A memory leak or retained reference was likely responsible.
+
+## Final TL;DR
+
+- GC manages Java memory automatically.
+- Minor GC = Young Gen; fast and frequent.
+- Major GC = Old Gen; slow and heavy.
+- Heap structure (Eden → Survivor → Old Gen) determines GC behavior.
+- Watch for GC spikes: Minor = churn, Major = leaks.
+- Tune with `-Xms`, `-Xmx`, and monitor GC metrics.

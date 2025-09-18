@@ -1,0 +1,118 @@
+---
+title: 'Using AWS OIDC Roles in GitHub Actions for CI/CD'
+description: 'How to securely assume AWS IAM roles in GitHub Actions using OpenID Connect (OIDC).'
+topics: ['IAM']
+published: true
+date: '2025-03-27'
+---
+
+## 🤝 Intro : GHA + AWS Without Leaking Your Secrets
+
+I wanted to migrate away from using AWS secrets in GitHub Actions — not because it wasn’t working, but because storing long-lived credentials in CI just felt… sketchy. Like, “I really shouldn’t be doing this but I am anyway” kind of sketchy.
+
+But now with [OIDC](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html), I can securely assume AWS IAM roles in GitHub Actions without needing to store any AWS secrets in my repo. It’s like giving GitHub a VIP pass to AWS, but only for the right actions and repos.
+
+Here’s how I set it up using CloudFormation and wired it into my workflow.
+
+## 🛠️ Step 1: Set Up the OIDC Provider in AWS
+
+First, we need to tell AWS about GitHub’s OIDC provider. This is like giving AWS a heads-up that GitHub is going to come knocking with an identity token.
+This is needed only once per AWS account, so this step can be skipped if it's already done.
+
+In CloudFormation, define the OIDC provider:
+
+```yaml
+Resources:
+  GithubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - '6938fd4d98bab03faadb97b34396831e3780aea1' # GitHub’s root CA thumbprint
+```
+
+## 🔐 Step 2: Create the IAM Role for GHA
+
+_a.k.a. Give GitHub the Keys, but Only a Copy_
+
+In CloudFormation, Define a role that GitHub Actions can assume via OIDC.
+The idea is: let GitHub knock on the AWS door, show its identity token, and get in — but only if it’s the right repo, branch, and vibes.
+
+```yaml
+Type: AWS::IAM::Role
+Properties:
+  RoleName: your-service-gha
+  AssumeRolePolicyDocument:
+    Version: 2012-10-17
+    Statement:
+      - Effect: Allow
+        Action: sts:AssumeRoleWithWebIdentity
+        Principal:
+          Federated: arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com
+        Condition:
+          StringEquals:
+            token.actions.githubusercontent.com:aud: sts.amazonaws.com
+          ForAnyValue:StringLike:
+            token.actions.githubusercontent.com:sub:
+              - repo:your-org/your-repo:ref:refs/heads/main
+              - repo:your-org/your-repo:pull_request
+  Policies:
+    - PolicyName: your-service-gha
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowECR
+            Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+            Resource: '*'
+```
+
+Customize this to restrict to specific ECR repos, S3 buckets, or even different branches.
+
+📘 **Helpful Docs**:
+
+- [GitHub OIDC with AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+- [AWS OIDC Provider Setup](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+
+## ⚙️ Step 3: Use the Role in GitHub Actions
+
+In GHA workflow file:
+
+```yaml
+env:
+  GITHUB_ACTIONS_ROLE_ARN: arn:aws:iam::123456789012:role/your-service-gha
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ap-northeast-1
+```
+
+Once the role is assumed, all subsequent `aws` CLI or SDK commands in the job are authenticated with this role — no secrets required 🎉
+
+## 🧠 Gotchas to Watch Out For
+
+- Make sure GitHub’s OIDC provider is [added to IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- Be super specific with `Condition` blocks to avoid privilege creep
+- OIDC tokens expire quickly — assume the role once per job
+
+## ✅ Wrap Up
+
+- Ditch long-lived AWS secrets in GitHub
+- Use `sts:AssumeRoleWithWebIdentity` and GitHub’s OIDC token instead
+- Lock roles down to specific branches or repos for security
+- Simpler, safer CI/CD setup 💪

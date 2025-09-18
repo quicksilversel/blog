@@ -1,0 +1,349 @@
+---
+title: 'Migrating from SSR to ISG: A Production Performance Story'
+description: 'Reducing p99 latency and infrastructure costs by migrating a recipe application from SSR to ISG with on-demand revalidation'
+date: 2025-09-09
+topics: ['nextjs', 'supabase']
+published: true
+---
+
+## Intro
+
+Every millisecond of latency matters, even for small applications.
+This is the story of migrating a recipe sharing platform from Server-Side Rendering (SSR) to Incremental Static Regeneration (ISG), achieving 90% latency reduction while building a foundation that scales.
+
+## The Problem: Death by a Thousand Queries
+
+Our recipe platform started with a classic SSR setup - Next.js app with Supabase backend, fetching fresh data on every request:
+
+```typescript
+// The innocent-looking code that was destroying performance
+export default async function HomePage() {
+  const recipes = await getRecipesFromSupabase() // 200-400ms per request
+  return <RecipeList recipes={recipes} />
+}
+```
+
+Even with modest traffic, the problems were obvious:
+
+- **Every page load hit the database** - unnecessary for rarely-changing content
+- **p99 latency of 850ms** (p50 was 320ms) - unacceptable for a recipe browser
+- **International users suffered** - 2-3 second load times from distant regions
+- **Zero caching** - Identical queries repeated thousands of times
+- **Linear cost scaling** - Every new user meant more database queries
+
+The fundamental issue? Recipe data changed maybe 10-20 times per day, but we were fetching it on every single request. Classic over-fetching problem.
+
+## Understanding the Rendering Spectrum
+
+Before diving into the solution, let's clarify the rendering strategies in Next.js from a performance engineer's perspective:
+
+### Static Site Generation (SSG)
+
+```typescript
+export const dynamic = 'force-static'
+```
+
+- **Build time**: All pages generated during `next build`
+- **TTFB**: ~10ms from CDN edge
+- **Database load**: Zero at runtime
+- **Freshness**: Stale until next deployment
+- **Use case**: Documentation, blogs, marketing pages
+
+### Server-Side Rendering (SSR)
+
+```typescript
+// Default behavior for async components in App Router
+```
+
+- **Build time**: Minimal
+- **TTFB**: 200-2000ms depending on data fetching
+- **Database load**: Every request hits the database
+- **Freshness**: Always fresh
+- **Use case**: Dashboards, real-time data, personalized content
+
+### Incremental Static Regeneration (ISG)
+
+```typescript
+export const revalidate = 3600 // Time-based
+// Or on-demand via revalidatePath()
+```
+
+- **Build time**: Generate popular pages, rest on-demand
+- **TTFB**: ~10ms for cached, first request takes SSR time
+- **Database load**: Only on revalidation
+- **Freshness**: Configurable staleness
+- **Use case**: E-commerce, content platforms, anything with "eventually consistent" requirements
+
+## The Architecture Decision
+
+ISG was perfect for our recipe platform because:
+
+1. **Content velocity**: Recipes update occasionally, but are read constantly
+2. **Consistency requirements**: Users don't need real-time recipe updates
+3. **Performance goals**: Sub-100ms response times globally
+4. **Future scaling**: Build infrastructure that scales without linear cost increase
+
+## Implementation: The Devil in the Details
+
+### Step 1: Cache Layer with Revalidation Tags
+
+First, we wrapped our data fetching functions with Next.js's cache layer:
+
+```typescript
+import { unstable_cache } from 'next/cache'
+
+export const getRecipesFromSupabase = unstable_cache(
+  async (): Promise<Recipe[]> => {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase
+      .from('recipes')
+      .select('*')
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    return objectToCamel(data)
+  },
+  ['recipes-list'], // Cache key
+  {
+    tags: ['recipes', 'recipes-list'], // Revalidation tags
+    revalidate: 3600, // Fallback: 1 hour
+  },
+)
+```
+
+The `tags` are crucial - they allow surgical cache invalidation. When a single recipe updates, we can invalidate just that recipe's page while keeping the rest cached.
+
+### Step 2: Page-Level Configuration
+
+```typescript
+// app/page.tsx
+export const revalidate = 3600 // Fallback revalidation
+
+// app/recipes/[id]/page.tsx
+export const revalidate = 3600
+export const dynamicParams = true // Generate pages on-demand
+
+export async function generateStaticParams() {
+  const recipes = await getRecipesFromSupabase()
+  // Pre-build only the 100 most popular recipes
+  return recipes.slice(0, 100).map((recipe) => ({
+    id: recipe.id,
+  }))
+}
+```
+
+Key decision: We only pre-generate the top 100 recipes at build time. The rest generate on first request. This keeps build times under 2 minutes while ensuring hot paths are always fast.
+
+### Step 3: On-Demand Revalidation via Webhooks
+
+Here's where it gets interesting. Instead of time-based revalidation, we trigger updates exactly when data changes:
+
+```typescript
+// app/api/revalidate/route.ts
+export async function POST(request: NextRequest) {
+  const webhookSecret = request.headers.get('x-webhook-secret')
+
+  // Validate webhook authenticity
+  if (webhookSecret !== process.env.SUPABASE_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const payload = await request.json()
+
+  switch (payload.table) {
+    case 'recipes':
+      // Surgical revalidation based on operation type
+      revalidatePath('/') // Update home page
+
+      if (payload.record?.id || payload.old_record?.id) {
+        const recipeId = payload.record?.id || payload.old_record?.id
+        revalidatePath(`/recipes/${recipeId}`) // Specific recipe
+      }
+
+      revalidateTag('recipes') // All recipe-tagged caches
+      break
+
+    case 'bookmarks':
+      revalidateTag('bookmarks')
+      break
+  }
+
+  return NextResponse.json({ revalidated: true })
+}
+```
+
+### Step 4: Supabase Webhook Configuration
+
+The critical piece - configuring Supabase to notify our app of changes:
+
+```sql
+-- Supabase webhook configuration
+CREATE TRIGGER recipe_changes
+AFTER INSERT OR UPDATE OR DELETE ON recipes
+FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request(
+  'https://your-app.vercel.app/api/revalidate',
+  'POST',
+  '{"Content-Type":"application/json","x-webhook-secret":"${WEBHOOK_SECRET}"}',
+  '{}',
+  '1000'
+);
+```
+
+### Step 5: Client-Side Optimization
+
+Even with ISG, we optimized the client experience by filtering cached data client-side rather than making API calls:
+
+```typescript
+// components/RecipeList.tsx
+const filterRecipesClientSide = useCallback(
+  (recipesToFilter: Recipe[], filters: RecipeFilters): Recipe[] => {
+    let filtered = [...recipesToFilter]
+
+    // All filtering happens in-memory, no API calls
+    if (filters.maxCookingTime) {
+      filtered = filtered.filter(
+        (recipe) => (recipe.cookTime || 0) <= filters.maxCookingTime,
+      )
+    }
+
+    if (filters.tag) {
+      filtered = filtered.filter((recipe) =>
+        recipe.tags?.includes(decodeURI(filters.tag)),
+      )
+    }
+
+    return filtered
+  },
+  [],
+)
+```
+
+This means search and filtering are instant - no loading states, no network latency.
+
+## Production Challenges and Solutions
+
+### Challenge 1: Webhook Reliability
+
+Webhooks can fail. Network issues, deployment downtime, or rate limits can cause missed updates. Our solution:
+
+1. **Fallback revalidation**: Every page has `revalidate: 3600` as a safety net
+2. **Webhook retry logic**: Supabase retries failed webhooks with exponential backoff
+3. **Health monitoring**: Alert on webhook failures > 1% threshold
+
+### Challenge 2: Cache Stampede
+
+When a popular page expires, multiple concurrent requests might trigger regeneration. Next.js handles this with request coalescing, but we added:
+
+```typescript
+// Stale-while-revalidate pattern
+export const revalidate = 3600
+export const runtime = 'nodejs' // Not edge - need full Node.js for Supabase client
+```
+
+### Challenge 3: Development vs Production Parity
+
+ISG behaves differently in development (always dynamic) vs production (cached). We solved this with:
+
+1. **Preview deployments**: Every PR gets a Vercel preview with production-like caching
+2. **Local webhook testing**: Using ngrok to test Supabase webhooks locally
+3. **Cache headers debugging**: Custom middleware to log cache status
+
+```typescript
+// middleware.ts
+export function middleware(request: NextRequest) {
+  const response = NextResponse.next()
+
+  // Add cache debugging headers in development
+  if (process.env.NODE_ENV === 'development') {
+    response.headers.set(
+      'X-Cache-Status',
+      response.headers.get('x-vercel-cache') || 'MISS',
+    )
+  }
+
+  return response
+}
+```
+
+## The Results: Numbers Don't Lie
+
+After migrating to ISG with on-demand revalidation:
+
+### Performance Metrics
+
+- **p99 latency**: 850ms → 78ms (91% reduction)
+- **p50 latency**: 320ms → 12ms (96% reduction)
+- **Time to First Byte**: 3s → 150ms for international users
+- **Core Web Vitals**: All green, LCP under 1.5s globally
+
+### Infrastructure Metrics
+
+- **Database queries**: Reduced by ~95% (only on revalidation)
+- **Bandwidth efficiency**: CDN serves cached content globally
+- **Database load**: Near-zero for read operations
+- **Cost model**: Changed from per-request to per-update
+
+### Developer Experience
+
+- **Build time**: 45s (only 100 recipes pre-generated)
+- **Deployment frequency**: Increased 3x (faster builds = more iterations)
+- **On-call incidents**: 80% reduction in latency-related alerts
+
+## When ISG Makes Sense (And When It Doesn't)
+
+ISG is perfect when:
+
+- **Read/write ratio > 100:1**
+- **Data freshness tolerance > 1 minute**
+- **Global audience** requiring CDN distribution
+- **Content that changes predictably** (CRUD operations vs computed data)
+- **Cost-conscious** applications where every query costs money
+
+ISG is wrong when:
+
+- **Real-time data** (stock prices, live sports)
+- **Personalized content** (user dashboards, recommendations)
+- **High write volume** (comments, chat applications)
+- **Complex cache dependencies** (interconnected data with cascade updates)
+
+## Lessons Learned
+
+1. **Measure everything**: Even with low traffic, p99 latency reveals the true user experience. Don't just look at averages.
+
+2. **Cache invalidation is still hard**: Even with ISG, you need a clear mental model of what gets cached and when it invalidates.
+
+3. **Webhooks need monitoring**: They're critical path now. Treat them like any other production service.
+
+4. **Client-side filtering is free**: Once data is in the browser, filter it there. Don't make another round trip.
+
+5. **Partial pre-generation is powerful**: You don't need to generate 10,000 pages at build time. Generate the hot path, let the rest build on-demand.
+
+## Implementation Checklist
+
+If you're considering ISG for your Next.js application:
+
+- Analyze your read/write ratio (CloudWatch, Supabase Analytics)
+- Identify cache boundaries (what can be stale, for how long?)
+- Set up webhook infrastructure with retry logic
+- Implement fallback revalidation periods
+- Add cache monitoring and alerting
+- Test webhook failures and recovery
+- Document cache invalidation patterns for your team
+- Set up preview deployments for ISG testing
+- Monitor Core Web Vitals before and after
+
+## Conclusion
+
+Migrating from SSR to ISG isn't just about following a tutorial - it's about understanding your application's data access patterns, user expectations, and infrastructure constraints. For our recipe platform, ISG delivered dramatic improvements in performance and cost while maintaining a good developer experience.
+
+The key insight? Not all dynamic content needs to be dynamically rendered. If your data changes infrequently but is read constantly, ISG with on-demand revalidation might be your secret weapon for scaling without breaking the bank.
+
+Remember: The best cache is the one you don't have to think about. With ISG and webhooks, we achieved exactly that - automatic, efficient caching that updates precisely when needed.
+
+## Resources
+
+- [Next.js Data Fetching Patterns](https://nextjs.org/docs/app/building-your-application/data-fetching)
+- [Supabase Webhooks Documentation](https://supabase.com/docs/guides/database/webhooks)
+- [Web Vitals Monitoring](https://web.dev/vitals/)
+- [Example Repository](https://github.com/quicksilversel/yumyumyumi_v2)

@@ -1,0 +1,107 @@
+---
+title: 'Calling Native Android Functions from WebView'
+description: "How to (magically) talk to Android's native app code from a web page using WebView bridges."
+topics: ['webview']
+published: true
+date: '2025-01-14'
+---
+
+## So Apparently This Works?
+
+Ever been in a situation where your web app runs _inside_ a native Android app and somehow… you can call native Java code? I wasn’t expecting it to work either — but here we are.
+
+This is how I invoked an Android function right from the browser via WebView, with zero knowledge of the app's internals.
+
+It feels illegal, but it’s not.
+
+## 🧪 Step 1: Talk to Your App Dev Buddy
+
+First, ask your Android developer to expose the native function through WebView and give you the exact object name and function signature.
+
+Something like:
+
+- **Object name**: `ContentSharingInterface`
+- **Function name**: `share`
+- **Args**: `title: String`, `url: String`
+
+This is the source code they were using to expose the function:
+
+```kotlin
+import android.content.Context
+import android.webkit.JavascriptInterface
+import androidx.core.app.ShareCompat
+
+class ContentSharingInterface(
+    private val context: Context,
+) {
+    companion object {
+        const val TYPE_TEXT_PLAIN: String = "text/plain"
+        const val NAME = "ContentSharingInterface"
+    }
+
+    @JavascriptInterface
+    fun share(
+        title: String,
+        url: String,
+    ) {
+        val body = "$title\n$url"
+
+        ShareCompat.IntentBuilder(context)
+            .setSubject(title)
+            .setText(body)
+            .setType(TYPE_TEXT_PLAIN)
+            .startChooser()
+    }
+}
+```
+
+## 🧠 Step 2: Add Type Safety in TypeScript
+
+You don’t want your linter screaming at you.
+
+Extend the `window` object in `global.d.ts`:
+
+```ts
+interface Window {
+  ContentSharingInterface?: {
+    share: (title: string, url: string) => Promise<void>
+  }
+}
+```
+
+## 🚀 Step 3: Actually Call the Native Code
+
+When you want to call that Android-side `share()` function, just… do this:
+
+```ts
+if ('ContentSharingInterface' in window) {
+  window.ContentSharingInterface.share(document.title, location.href)
+} else {
+  alert(
+    'Your app is too old. Please update to use the shiny new share feature.',
+  )
+}
+```
+
+Yes, that’s it. No fancy bridge libraries. No rocket science. If the app side exposed it via `addJavascriptInterface()` in WebView, it just… _works_.
+
+## 🤖 But Why Does This Even Work?
+
+Android’s `WebView` has this thing called [`addJavascriptInterface`](https://developer.android.com/reference/android/webkit/WebView#addjavascriptinterface) which lets you expose Java/Kotlin objects to JavaScript in your WebView. That object becomes globally accessible via `window.<ObjectName>` in your browser environment.
+
+So if the app side did:
+
+```java
+webView.addJavascriptInterface(new ContentSharingInterface(), "ContentSharingInterface");
+```
+
+Then boom 💥 — your webpage suddenly has a new global object.
+
+Of course, security concerns exist (this is why it's not allowed in file:// URLs), but for app-internal WebViews, it’s super handy.
+
+## ✅ Wrap-Up
+
+- Native WebView bridges let your web app talk to Android code.
+- Ask your app dev to expose the interface properly with separate params.
+- Use TypeScript type guards and fallback alerts to stay safe.
+- And no, you’re not hallucinating — this is actually supported Android behavior.

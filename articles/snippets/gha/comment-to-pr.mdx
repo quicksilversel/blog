@@ -1,0 +1,21 @@
+---
+title: 'Comment to PR'
+description: 'A GitHub Actions workflow to comment on a pull request'
+published: true
+date: '2025-01-29'
+---
+
+```yaml
+success-notification:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Comment to PR
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: success-notification
+        message: |
+          :tada: The Release was successful!
+          You can view the changes.
+```
+
+> 🔗 [marocchino/sticky-pull-request-comment](https://github.com/marocchino/sticky-pull-request-comment)

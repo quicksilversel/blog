@@ -1,0 +1,106 @@
+---
+title: 'Adding Syntax Highlighting to MDX with Prism and Next.js'
+description: 'Adding syntax highlighting to an MDX blog using Prism, Next.js, and TypeScript — fast, minimal, and clean.'
+topics: ['prism', 'mdx']
+published: true
+date: '2024-07-15'
+---
+
+## Overview
+
+Code is easier to read and more fun to look at when it's highlighted properly. This is how I set up `prism-react-renderer` with MDX in a Next.js project.
+
+## Dependencies
+
+Versions used when this was written:
+
+- [Next.js](https://nextjs.org/): 14.2.4
+- [next-mdx-remote](https://github.com/hashicorp/next-mdx-remote): 5.0.0
+- [prism-react-renderer](https://github.com/FormidableLabs/prism-react-renderer): 2.3.1
+- [React](https://react.dev/): 18.3.1
+
+## Install
+
+```bash
+npm install --save prism-react-renderer
+```
+
+## Highlight Component
+
+Created a component to render highlighted code blocks from MDX:
+
+```tsx
+import { ReactNode, isValidElement } from 'react'
+import { Highlight } from 'prism-react-renderer'
+
+type Props = {
+  children?: ReactNode
+}
+
+export const HighlightedCode = ({ children }: Props) => {
+  if (
+    !isValidElement(children) ||
+    typeof children.props.children !== 'string'
+  ) {
+    return null
+  }
+
+  const code = children.props.children
+  const language = children.props.className?.replace('language-', '').trim()
+
+  if (!code || !language) return null
+
+  return (
+    <Highlight code={code} language={language}>
+      {({ tokens, getLineProps, getTokenProps }) => (
+        <pre>
+          {tokens.map((line, index) => (
+            <div key={`token-${index}`} {...getLineProps({ line })}>
+              {line.map((token, index) => (
+                <span key={`line-${index}`} {...getTokenProps({ token })} />
+              ))}
+            </div>
+          ))}
+        </pre>
+      )}
+    </Highlight>
+  )
+}
+```
+
+## Why ReactNode?
+
+MDX components pass in `ReactNode`, not `JSX.Element`, so had to guard for invalid inputs like this:
+
+```tsx
+if (!isValidElement(children) || typeof children.props.children !== 'string') {
+  return null
+}
+```
+
+## Breaking Changes in Prism v2
+
+Ran into this:
+
+```bash
+Module '"prism-react-renderer"' has no exported member 'defaultProps'
+```
+
+That’s expected. `defaultProps` is gone in v2. It’s handled internally now.
+
+## MDX Integration
+
+Used it like this with `next-mdx-remote`:
+
+```tsx
+<MDXRemote
+  {...source}
+  components={{
+    pre: HighlightedCode,
+  }}
+/>
+```
+
+## Final Notes
+
+This setup is simple, fast, and works well with MDX + TypeScript

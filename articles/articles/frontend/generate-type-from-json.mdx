@@ -1,0 +1,183 @@
+---
+title: Generating TypeScript Types from JSON Data - A Custom Solution
+description: 'Automate TypeScript type generation from JSON data fetched from a CMS with a custom solution when existing libraries don’t work.'
+topics: ['typescript']
+published: true
+date: '2024-07-25'
+---
+
+## Introduction
+
+I wanted an easy way to generate TypeScript types from JSON data fetched from a CMS. There are a lot of libraries out there, like [quicktype](https://github.com/glideapps/quicktype/tree/master) and [json-schema-to-typescript](https://github.com/bcherny/json-schema-to-typescript#readme), but they just didn’t work for me. So, I decided to create my own solution. In this article, I’ll show you the code I came up with to automatically generate TypeScript types from a JSON file.
+
+> The JSON File
+>
+> ```jsx
+> {
+>  title: 'test',
+>  id: 1111,
+>  startDate: '2024-07-02T15:00:00.000Z',
+>  endDate: '2024-07-29T17:01:00.000Z',
+>  thumbnailImage: null,
+> }
+> ```
+
+## Approach 1 : Using Quicktype
+
+### The Code
+
+I used the code snippet from the [official documentation](https://github.com/glideapps/quicktype/tree/master?tab=readme-ov-file#calling-quicktype-from-javascript)
+
+### The Result 🤷
+
+```jsx
+export interface Test {
+  any
+}
+```
+
+## Approach 2: Using json-schema-to-typescript
+
+### The Code
+
+```jsx
+import { compile, compileFromFile } from 'json-schema-to-typescript'
+
+if (!fs.existsSync('./src/libs/aem/types/type.d.ts')) {
+  compile(data, 'Schema').then((ts) => {
+    fs.writeFileSync('./src/type.d.ts', ts)
+  })
+}
+```
+
+### The Result 🤷 (Another Fail)
+
+```jsx
+export interface Test {
+  [k: string]: unknown;
+}
+```
+
+I'm not sure if the problem is because my JSON data has fields that aren't filled by the user (resulting in `null`) or if there's something wrong with my code. I got tired of trying to find the bug and just decided to write it myself instead.
+
+### Approach 3 : Writing my own code
+
+### The Code
+
+```jsx
+import * as fs from 'fs'
+import path from 'path'
+
+type JSONValue = string | number | boolean | JSONObject | JSONArray | unknown
+
+export interface JSONObject {
+  [key: string]: JSONValue
+}
+
+interface JSONArray extends Array<JSONValue> {}
+
+function generateTypeScriptType(
+  name: string,
+  json: JSONObject | JSONArray
+): string {
+  let result = ''
+
+  if (Array.isArray(json)) {
+    result += `type ${name} = ${getType(json)}[];\n`
+  } else {
+    result += `interface ${name} {\n`
+    for (const key in json) {
+      if (json[key]) {
+        result += `  ${key}: ${getType(json[key])};\n`
+      }
+    }
+    result += `}\n`
+  }
+
+  return result
+}
+
+function getType(value: JSONValue): string {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? `${getType(value[0])}[]` : 'unknown[]'
+  }
+
+  if (value === null) {
+    return 'null'
+  }
+
+  switch (typeof value) {
+    case 'object':
+      return `{\n${Object.entries(value)
+        .map(([key, val]) => `  ${key}: ${getType(val)};`)
+        .join('\n')}\n}`
+    case 'string':
+      return 'string'
+    case 'number':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    default:
+      return 'unknown'
+  }
+}
+
+function capitalizeFirstLetter(string: string) {
+  if (typeof string !== 'string' || string.length === 0) {
+    return string
+  }
+  return string.charAt(0).toUpperCase() + string.slice(1)
+}
+
+type Props = {
+  typeName: string
+  filename: string
+  data: JSONObject | JSONArray
+}
+
+export function generateTypeFromJson({ typeName, filename, data }: Props) {
+  const typeDefinitions = generateTypeScriptType(
+    capitalizeFirstLetter(typeName),
+    data
+  )
+  const filePath = path.resolve(
+    'src/libs/aem/generateType/',
+    `${filename.toLowerCase()}.d.ts`
+  )
+
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, typeDefinitions)
+  } else {
+    const currentContent = fs.readFileSync(filePath, 'utf8')
+    if (currentContent !== typeDefinitions) {
+      fs.writeFileSync(filePath, typeDefinitions)
+    }
+  }
+}
+```
+
+### Usage
+
+```jsx
+const data = await functionThatFetchesData()
+
+if (data) {
+  generateTypeFromJson({
+    typeName: 'Test',
+    filename: 'test',
+    data: data,
+  })
+}
+```
+
+### The Result 🎉
+
+```jsx
+interface Test {
+  title: string;
+  id: number;
+  startDate: string;
+  endDate: string;
+  thumbnailImage: null,
+}
+```

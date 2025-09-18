@@ -1,0 +1,121 @@
+---
+title: 'Configuring Emotion for SSR in Next.js'
+description: 'Configuring Emotion with Next.js for SSR, ensuring global CSS like background or font colors render server-side to avoid unstyled pages.'
+topics: ['css in js']
+published: true
+date: '2024-07-15'
+---
+
+It's easy to forget that global styles like background and font color should be server-rendered — otherwise, there's a flash of unstyled content.
+
+## Install necessary packages
+
+```bash
+npm install @emotion/react @emotion/server @emotion/styled
+```
+
+## Configure \_document.tsx`
+
+This file controls the HTML document structure on the server. Gotta plug in Emotion here so the critical CSS is sent in the initial HTML.
+
+```tsx
+import React from 'react'
+
+import { cache } from '@emotion/css'
+import { CacheProvider } from '@emotion/react'
+import createEmotionServer from '@emotion/server/create-instance'
+import Document, {
+  Html,
+  Head,
+  Main,
+  NextScript,
+  DocumentContext,
+} from 'next/document'
+
+export default class MyDocument extends Document {
+  static async getInitialProps(ctx: DocumentContext) {
+    const originalRenderPage = ctx.renderPage
+    const { extractCriticalToChunks } = createEmotionServer(cache)
+
+    ctx.renderPage = () =>
+      originalRenderPage({
+        enhanceApp: (App) => (props) => (
+          <CacheProvider value={cache}>
+            <App {...props} />
+          </CacheProvider>
+        ),
+      })
+
+    const initialProps = await Document.getInitialProps(ctx)
+    const emotionStyles = extractCriticalToChunks(initialProps.html)
+    const emotionStyleTags = emotionStyles.styles.map((style) => (
+      <style
+        data-emotion={`${style.key} ${style.ids.join(' ')}`}
+        key={style.key}
+        dangerouslySetInnerHTML={{ __html: style.css }}
+      />
+    ))
+
+    return {
+      ...initialProps,
+      styles: [
+        ...React.Children.toArray(initialProps.styles),
+        ...emotionStyleTags,
+      ],
+    }
+  }
+
+  render() {
+    return (
+      <Html lang="en">
+        <Head />
+        <body>
+          <Main />
+          <NextScript />
+        </body>
+      </Html>
+    )
+  }
+}
+```
+
+## \_app.tsx
+
+The ThemeProvider needs to go here to provide styling context, and the CacheProvider helps match the setup from \_document.
+
+```tsx
+import { ThemeProvider, CacheProvider } from '@emotion/react'
+import { cache } from '@emotion/css'
+
+const theme = {
+  colors: {
+    primary: '#0070f3',
+  },
+}
+
+function MyApp({ Component, pageProps }) {
+  return (
+    <CacheProvider value={cache}>
+      <ThemeProvider theme={theme}>
+        <Component {...pageProps} />
+      </ThemeProvider>
+    </CacheProvider>
+  )
+}
+
+export default MyApp
+```
+
+## Done!
+
+There should be two style tags with `data-emotion` attributes in `<head>`
+
+One is injected during SSR: `<style data-emotion="css-global">`
+
+![emotion-style-tag-ssr](/configure-ssr-emotion-nextjs/emotion-ssr-tag.png)
+
+The other shows up during CSR after hydration
+
+![emotion-style-tag](/configure-ssr-emotion-nextjs/emotion-csr-tag.png)
+
+Now global styles render immediately on first load. No more flashes of plain white before the theme kicks in.
