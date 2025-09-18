@@ -12,14 +12,18 @@ import { ARTICLE_PATH } from '@/utils/constants'
 export async function getArticles(
   basePath: string = ARTICLE_PATH,
 ): Promise<Article[]> {
-  const entries = await fs.readdir(basePath, { withFileTypes: true })
+  const absolutePath = path.isAbsolute(basePath)
+    ? basePath
+    : path.join(process.cwd(), basePath)
+
+  const entries = await fs.readdir(absolutePath, { withFileTypes: true })
   const categories = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
 
   const nested = await Promise.all(
     categories.map(async (category) => {
-      const categoryDir = path.join(basePath, category)
+      const categoryDir = path.join(absolutePath, category)
       const allFiles = await fs.readdir(categoryDir)
       const mdxFiles = allFiles.filter((file) =>
         file.toLowerCase().endsWith('.mdx'),
