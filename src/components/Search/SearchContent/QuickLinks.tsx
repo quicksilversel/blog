@@ -1,19 +1,22 @@
 import styled from '@emotion/styled'
+import { PawPrint } from 'lucide-react'
 import Link from 'next/link'
 
 export const QuickLinks = ({ onClose }: { onClose: () => void }) => {
+  const QUICK_LINKS = [
+    { href: '/articles', label: 'All Articles' },
+    { href: '/snippets', label: 'Code Snippets' },
+    { href: '/archive', label: 'Archive' },
+  ]
   return (
     <Container>
       <SectionTitle>Quick Links</SectionTitle>
-      <QuickLink href="/articles" onClick={onClose}>
-        All Articles
-      </QuickLink>
-      <QuickLink href="/snippets" onClick={onClose}>
-        Code Snippets
-      </QuickLink>
-      <QuickLink href="/archive" onClick={onClose}>
-        Archive
-      </QuickLink>
+      {QUICK_LINKS.map(({ href, label }) => (
+        <QuickLink key={href} href={href} onClick={onClose}>
+          <PawPrint />
+          {label}
+        </QuickLink>
+      ))}
     </Container>
   )
 }

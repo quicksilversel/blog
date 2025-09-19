@@ -1,8 +1,7 @@
 import { useRef } from 'react'
 
 import styled from '@emotion/styled'
-import CloseIcon from '@mui/icons-material/Close'
-import SearchIcon from '@mui/icons-material/Search'
+import { Search, X } from 'lucide-react'
 
 type Props = {
   query: string
@@ -30,7 +29,7 @@ export const SearchHeader = ({ query, setQuery, onClose }: Props) => {
           aria-label="Clear search"
           type="button"
         >
-          <CloseIcon fontSize="small" />
+          <X />
         </ClearButton>
       )}
       <EscapeKey onClick={onClose}>ESC</EscapeKey>
@@ -50,7 +49,7 @@ const Container = styled.div`
   background: ${({ theme }) => theme.colors.background};
 `
 
-const StyledSearchIcon = styled(SearchIcon)`
+const StyledSearchIcon = styled(Search)`
   flex-shrink: 0;
   width: 20px;
   height: 20px;

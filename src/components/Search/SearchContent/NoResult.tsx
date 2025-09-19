@@ -1,11 +1,11 @@
 import styled from '@emotion/styled'
-import SearchIcon from '@mui/icons-material/Search'
+import { Search } from 'lucide-react'
 
 export const NoResult = ({ query }: { query: string }) => {
   return (
     <NoResults>
       <NoResultsIcon>
-        <SearchIcon />
+        <Search />
       </NoResultsIcon>
       <NoResultsText>
         No results for &quot;<strong>{query}</strong>&quot;
