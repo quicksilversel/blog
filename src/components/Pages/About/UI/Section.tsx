@@ -20,6 +20,7 @@ export const Container = styled.section`
   display: flex;
   gap: 3rem;
   align-items: flex-start;
+  justify-content: space-around;
   margin-bottom: 6rem;
 
   @media (width <= 768px) {

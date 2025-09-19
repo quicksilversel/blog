@@ -1,11 +1,8 @@
-import styled from '@emotion/styled'
-
 import type { SearchResult } from '../types'
-
-import { LoadingSpinner } from '@/components/UI/LoadingSpinner'
 
 import { NoResult } from './NoResult'
 import { QuickLinks } from './QuickLinks'
+import { SearchLoading } from './SearchLoading'
 import { SearchResults } from './SearchResults'
 
 interface SearchContentProps {
@@ -22,11 +19,7 @@ export function SearchContent({
   onClose,
 }: SearchContentProps) {
   if (loading) {
-    return (
-      <LoadingContainer>
-        <LoadingSpinner aria-label="Searching..." />
-      </LoadingContainer>
-    )
+    return <SearchLoading query={query} />
   }
 
   if (!query) {
@@ -39,10 +32,3 @@ export function SearchContent({
 
   return <SearchResults results={results} onClose={onClose} />
 }
-
-const LoadingContainer = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3rem;
-`

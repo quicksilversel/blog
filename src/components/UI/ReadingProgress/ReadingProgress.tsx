@@ -40,7 +40,6 @@ export function ReadingProgress({ height = 4 }: ReadingProgressProps) {
       }
     }
 
-    // Add event listeners
     window.addEventListener('scroll', handleScroll, { passive: true })
     window.addEventListener('resize', calculateProgress)
 
@@ -51,8 +50,17 @@ export function ReadingProgress({ height = 4 }: ReadingProgressProps) {
   }, [calculateProgress])
 
   return (
-    <ProgressContainer height={height} isVisible={isVisible}>
-      <ProgressBar $progress={progress} />
+    <ProgressContainer
+      height={height}
+      isVisible={isVisible}
+      role="progressbar"
+      aria-label="Reading progress"
+      aria-valuenow={Math.round(progress)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuetext={`${Math.round(progress)}% read`}
+    >
+      <ProgressBar $progress={progress} aria-hidden="true" />
       {height >= 20 && <ProgressText>{Math.round(progress)}%</ProgressText>}
     </ProgressContainer>
   )

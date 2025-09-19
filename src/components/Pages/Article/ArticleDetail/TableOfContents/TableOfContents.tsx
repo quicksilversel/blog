@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 
 import styled from '@emotion/styled'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
@@ -15,6 +15,12 @@ type Props = {
 }
 
 export function TableOfContents({ content }: Props) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const headings = useMemo(() => {
     const headingRegex = /^(#{2,3})\s+(.+)$/gm
     const extractedHeadings: TocItem[] = []
@@ -40,10 +46,12 @@ export function TableOfContents({ content }: Props) {
 
   return (
     <Details>
-      <Summary aria-label="Toggle table of contents">
-        <Title id="toc-title">Table of Contents</Title>
-        <ToggleIcon aria-hidden="true" />
-      </Summary>
+      {mounted && (
+        <Summary aria-label="Toggle table of contents">
+          <Title id="toc-title">Table of Contents</Title>
+          <StyledKeyboardArrowDownIcon aria-hidden="true" />
+        </Summary>
+      )}
       <HeadingList role="navigation" aria-labelledby="toc-title">
         {headings.map((heading) => {
           return (
@@ -63,7 +71,7 @@ export function TableOfContents({ content }: Props) {
   )
 }
 
-const ToggleIcon = styled(KeyboardArrowDownIcon)`
+const StyledKeyboardArrowDownIcon = styled(KeyboardArrowDownIcon)`
   color: ${({ theme }) => theme.colors.primary};
   transition: transform 0.2s ease;
 
@@ -80,7 +88,7 @@ const Details = styled.details`
   border: 1px solid ${({ theme }) => theme.colors.muted};
   border-radius: 8px;
 
-  &[open] ${ToggleIcon} {
+  &[open] ${StyledKeyboardArrowDownIcon} {
     transform: rotate(180deg);
   }
 `
@@ -189,10 +197,6 @@ const HeadingLink = styled(Link)<{ level: number }>`
 
   &:focus:not(:focus-visible) {
     outline: none;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    transition: none;
   }
 `
 

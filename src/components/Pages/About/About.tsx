@@ -4,7 +4,6 @@ import styled from '@emotion/styled'
 
 import { AboutMe } from './Sections/AboutMe'
 import { Experience } from './Sections/Experience/Experience'
-import { FeaturedProjects } from './Sections/FeaturedProjects'
 import { Skills } from './Sections/Skills'
 
 export const About = () => {
@@ -13,7 +12,6 @@ export const About = () => {
       <Content>
         <AboutMe />
         <Experience />
-        <FeaturedProjects />
         <Skills />
       </Content>
     </Container>
@@ -29,8 +27,7 @@ const Container = styled.main`
 
 const Content = styled.div`
   flex: 1;
-  padding: 4rem 2rem;
-  margin-left: 200px;
+  padding: 4rem 0;
 
   @media (width <= 1024px) {
     padding: 2rem 1rem;

@@ -85,6 +85,10 @@ export default function Articles({
   relatedArticles,
   readingTime,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
+  const keywords = Array.isArray(source.frontmatter.topics)
+    ? source.frontmatter.topics.join(', ')
+    : ''
+
   return (
     <>
       <Head>
@@ -98,6 +102,7 @@ export default function Articles({
           property="og:description"
           content={String(source.frontmatter.description)}
         />
+        {keywords && <meta name="keywords" content={keywords} />}
       </Head>
       <ArticleDetail
         source={source}

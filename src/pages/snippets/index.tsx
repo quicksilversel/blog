@@ -35,9 +35,7 @@ export default function SnippetsPage({
           content="A collection of useful code snippets and mini-tutorials"
         />
       </Head>
-      <main>
-        <SnippetsList snippets={snippets} />
-      </main>
+      <SnippetsList snippets={snippets} />
     </>
   )
 }

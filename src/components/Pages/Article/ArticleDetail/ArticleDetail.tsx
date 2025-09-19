@@ -103,7 +103,7 @@ export const ArticleDetail = ({
   )
 }
 
-const Container = styled.article`
+const Container = styled.main`
   @media (width <= 768px) {
     padding: 0 24px;
   }

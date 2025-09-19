@@ -1,4 +1,4 @@
-import { ReactNode, isValidElement, useState } from 'react'
+import { ReactNode, isValidElement, useState, useEffect } from 'react'
 
 import styled from '@emotion/styled'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -11,6 +11,11 @@ type Props = {
 
 export const HighlightedCode = ({ children }: Props) => {
   const [copied, setCopied] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   if (
     !isValidElement(children) ||
@@ -36,12 +41,14 @@ export const HighlightedCode = ({ children }: Props) => {
     <Highlight code={code} language={language}>
       {({ tokens, getLineProps, getTokenProps }) => (
         <CodeContainer>
-          <CopyButton
-            onClick={handleCopy}
-            title={copied ? 'Copied!' : 'Copy code'}
-          >
-            {copied ? <DoneIcon /> : <ContentCopyIcon />}
-          </CopyButton>
+          {mounted && (
+            <CopyButton
+              onClick={handleCopy}
+              title={copied ? 'Copied!' : 'Copy code'}
+            >
+              {copied ? <DoneIcon /> : <ContentCopyIcon />}
+            </CopyButton>
+          )}
           <Pre>
             <CodeWrapper>
               {tokens.map((line, index) => (

@@ -15,13 +15,25 @@ interface SearchModalProps {
 
 export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
   const [mounted, setMounted] = useState(false)
+  const [shouldRender, setShouldRender] = useState(false)
   const { query, setQuery, results, loading } = useSearch(isOpen, onClose)
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  if (!mounted || typeof window === 'undefined') {
+  useEffect(() => {
+    if (isOpen) {
+      requestAnimationFrame(() => {
+        setShouldRender(true)
+      })
+    } else {
+      const timer = setTimeout(() => setShouldRender(false), 200)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen])
+
+  if (!mounted || typeof window === 'undefined' || !shouldRender) {
     return null
   }
 
@@ -63,16 +75,17 @@ const Backdrop = styled.div<{ isOpen: boolean }>`
   inset: 0;
   z-index: 98;
   visibility: ${({ isOpen }) => (isOpen ? 'visible' : 'hidden')};
-  background: rgba(0, 0, 0, 0.5);
+  background: rgb(0, 0, 0, 0.5);
   opacity: ${({ isOpen }) => (isOpen ? 1 : 0)};
-  backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  transition:
-    opacity 0.2s ease,
-    visibility 0.2s ease;
+  backdrop-filter: blur(4px);
+  -webkit-transform: translate3d(0, 0, 0);
+  transform: translate3d(0, 0, 0);
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
-  transform: translateZ(0);
+  transition: opacity 0.2s ease;
+  will-change: opacity;
+  -webkit-font-smoothing: antialiased;
 `
 
 const Modal = styled.div<{ isOpen: boolean }>`
@@ -92,12 +105,16 @@ const Modal = styled.div<{ isOpen: boolean }>`
     0 20px 25px -5px rgb(0, 0, 0, 0.1),
     0 10px 10px -5px rgb(0, 0, 0, 0.04);
   opacity: ${({ isOpen }) => (isOpen ? 1 : 0)};
-  transform: translateX(-50%) translateZ(0);
-  transition: opacity 0.2s ease;
-  animation: ${({ isOpen }) => (isOpen ? scaleIn : 'none')} 0.2s ease;
-  -webkit-backface-visibility: hidden;
+  -webkit-overflow-scrolling: touch;
+  transform: ${({ isOpen }) =>
+    isOpen ? 'translate3d(-50%, 0, 0)' : 'translate3d(-50%, 0, 0) scale(0.96)'};
   backface-visibility: hidden;
-  will-change: opacity;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+  animation: ${({ isOpen }) => (isOpen ? scaleIn : 'none')} 0.2s ease;
+  will-change: opacity, transform;
+  -webkit-font-smoothing: antialiased;
 `
 
 const ModalContent = styled.div`
@@ -108,7 +125,7 @@ const ModalContent = styled.div`
 
 const Divider = styled.div`
   height: 1px;
-  background: ${({ theme }) => theme.colors.muted}20;
+  background: ${({ theme }) => theme.colors.floating};
 `
 
 const ResultsSection = styled.div`

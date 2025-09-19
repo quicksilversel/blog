@@ -1,5 +1,9 @@
 import styled from '@emotion/styled'
 
+import { TableWrapper } from '@/components/Pages/Article/ArticleDetail/Markup/Table'
+
+import { EXPERIENCE_LIST } from './data'
+
 import { Section } from '../../UI/Section'
 
 export const Experience = () => {
@@ -9,40 +13,28 @@ export const Experience = () => {
       <Section.Content>
         <Section.Title>Experience</Section.Title>
         <ExperienceItem>
-          <JobTitle>Site Reliability Engineer</JobTitle>
-          <Company>ZOZO, Inc • 2025 - Present</Company>
-          <Description>
-            Operating large-scale services in AWS + Kubernetes environments.
-            Focused on observability, scalability, and reliability — from
-            designing resilient architectures to debugging production issues.
-            Contributed to infra automation with Terraform and built internal
-            tooling to improve deployment and monitoring workflows.
+          <JobTitle>Frontend Engineer & SRE</JobTitle>
+          <Company>ZOZO, Inc • 2023 - Present</Company>
+          <Description as="div">
+            <TableWrapper>
+              <Table>
+                <Thead>
+                  <Tr>
+                    <Th>Area</Th>
+                    <Th>Responsibilities</Th>
+                  </Tr>
+                </Thead>
+                <tbody>
+                  {EXPERIENCE_LIST.map((item) => (
+                    <Tr key={item.title}>
+                      <TitleCell>{item.title}</TitleCell>
+                      <DescriptionCell>{item.description}</DescriptionCell>
+                    </Tr>
+                  ))}
+                </tbody>
+              </Table>
+            </TableWrapper>
           </Description>
-          <TechList>
-            <TechItem>AWS</TechItem>
-            <TechItem>Kubernetes (EKS)</TechItem>
-            <TechItem>Docker</TechItem>
-            <TechItem>Terraform</TechItem>
-            <TechItem>Datadog</TechItem>
-            <TechItem>Splunk</TechItem>
-          </TechList>
-        </ExperienceItem>
-        <ExperienceItem>
-          <JobTitle>Frontend Engineer</JobTitle>
-          <Company>ZOZO, Inc • 2022 - 2023</Company>
-          <Description>
-            Developed and maintained customer-facing features in Next.js
-            applications, optimized performance for high-traffic e-commerce
-            pages, and collaborated with backend/SRE teams to ensure smooth
-            production deployments.
-          </Description>
-          <TechList>
-            <TechItem>React</TechItem>
-            <TechItem>Next.js</TechItem>
-            <TechItem>TypeScript</TechItem>
-            <TechItem>Node.js</TechItem>
-            <TechItem>HTML/CSS</TechItem>
-          </TechList>
         </ExperienceItem>
         <ExperienceItem>
           <JobTitle>BSc. Computer Science </JobTitle>
@@ -84,17 +76,63 @@ const Description = styled.p`
   color: ${({ theme }) => theme.colors.text};
 `
 
-const TechList = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+const Table = styled.table`
+  width: 100%;
+  font-size: var(--font-size-extra-small);
+  border-collapse: collapse;
 `
 
-const TechItem = styled.span`
-  padding: 0.25rem 0.75rem;
+const Thead = styled.thead`
+  border-bottom: 1px solid ${({ theme }) => theme.colors.primary};
+
+  @media (width <= 35.1875rem) {
+    display: none;
+  }
+`
+
+const Th = styled.th`
+  padding: 0.75rem;
   font-size: var(--font-size-extra-small);
-  font-weight: 500;
-  color: ${({ theme }) => theme.colors.text};
-  background-color: ${({ theme }) => theme.colors.primary};
-  border-radius: 12px;
+  font-weight: bold;
+  color: ${({ theme }) => theme.colors.primary};
+  text-align: left;
+`
+
+const Tr = styled.tr`
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.muted};
+  }
+
+  @media (width <= 35.1875rem) {
+    display: block;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+    border: 1px solid ${({ theme }) => theme.colors.muted};
+  }
+`
+
+const Td = styled.td`
+  padding: 0.75rem;
+
+  @media (width <= 35.1875rem) {
+    display: block;
+    width: 100%;
+  }
+`
+
+const TitleCell = styled(Td)`
+  flex: 0 0 30%;
+  font-weight: bold;
+`
+
+const DescriptionCell = styled(Td)`
+  flex: 1;
+
+  @media (width <= 35.1875rem) {
+    border-top: 1px solid ${({ theme }) => theme.colors.muted};
+  }
 `

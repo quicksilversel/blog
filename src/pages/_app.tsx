@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 
 import { cache } from '@emotion/css'
 import { ThemeProvider, CacheProvider } from '@emotion/react'
-import { AppProps } from 'next/app'
+
+import type { AppProps } from 'next/app'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { GlobalStyles } from '@/components/Styles'
@@ -36,8 +37,8 @@ function MyApp({ Component, pageProps }: AppProps) {
   return (
     <CacheProvider value={cache}>
       <ThemeProvider theme={theme === 'dark' ? darkTheme : lightTheme}>
+        <GlobalStyles />
         <ErrorBoundary>
-          <GlobalStyles />
           <Header theme={theme} setTheme={setTheme} />
           <Component {...pageProps} />
           <Footer />

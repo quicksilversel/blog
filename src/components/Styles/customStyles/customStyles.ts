@@ -19,5 +19,9 @@ export const customStyles = (theme: Theme) => css`
   button:hover {
     opacity: 0.8;
     transition: opacity 0.2s ease-in;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
   }
 `

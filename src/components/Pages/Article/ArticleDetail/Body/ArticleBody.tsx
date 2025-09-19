@@ -6,7 +6,7 @@ export const ArticleBody = ({ children }: { children: ReactNode }) => {
   return <Container>{children}</Container>
 }
 
-const Container = styled.div`
+const Container = styled.article`
   margin-top: 2rem;
 
   @media (width <= 35.1875rem) {

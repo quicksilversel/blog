@@ -39,9 +39,9 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
   }, [router.pathname])
 
   const navItems = [
-    { href: '/snippets', label: 'Snippets' },
-    { href: '/archive', label: 'Archive' },
     { href: '/about', label: 'About' },
+    { href: '/archive', label: 'Archive' },
+    { href: '/snippets', label: 'Snippets' },
   ]
 
   return (
@@ -76,6 +76,11 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
             <ThemeButton
               type="button"
               onClick={toggleTheme}
+              title={
+                theme === 'dark'
+                  ? 'Switch to light mode'
+                  : 'Switch to dark mode'
+              }
               aria-label={
                 theme === 'dark'
                   ? 'Switch to light mode'
@@ -193,6 +198,7 @@ const NavLink = styled(Link, {
   color: ${({ isActive, theme }) =>
     isActive ? theme.colors.primary : theme.colors.text};
   text-decoration: none;
+  user-select: none;
   transition: color 0.2s ease;
 
   &:hover {

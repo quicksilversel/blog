@@ -15,7 +15,7 @@ type Props = {
 
 export function Breadcrumb({ items }: Props) {
   return (
-    <nav aria-label="breadcrumb">
+    <nav aria-label="Breadcrumb navigation">
       <BreadcrumbList>
         {items.map((item, index) => {
           const isLast = index === items.length - 1
@@ -23,14 +23,28 @@ export function Breadcrumb({ items }: Props) {
             <React.Fragment key={`${item.label}-${index}`}>
               <BreadcrumbItem>
                 {item.href && !isLast ? (
-                  <BreadcrumbLink href={item.href}>{item.label}</BreadcrumbLink>
+                  <BreadcrumbLink
+                    href={item.href}
+                    aria-label={`Go to ${item.label}`}
+                  >
+                    {item.label}
+                  </BreadcrumbLink>
                 ) : (
-                  <BreadcrumbCurrent aria-current={isLast ? 'page' : undefined}>
+                  <BreadcrumbCurrent
+                    aria-current={isLast ? 'page' : undefined}
+                    aria-label={
+                      isLast ? `Current page: ${item.label}` : undefined
+                    }
+                  >
                     {item.label}
                   </BreadcrumbCurrent>
                 )}
               </BreadcrumbItem>
-              {!isLast && <Separator aria-hidden="true">/</Separator>}
+              {!isLast && (
+                <Separator aria-hidden="true" role="presentation">
+                  /
+                </Separator>
+              )}
             </React.Fragment>
           )
         })}
@@ -66,21 +80,16 @@ const BreadcrumbLink = styled(Link)`
   color: ${({ theme }) => theme.colors.primary};
   text-transform: capitalize;
   white-space: nowrap;
-  transition: opacity 0.2s ease;
-
-  &:hover {
-    opacity: 0.8;
-  }
 `
 
 const BreadcrumbCurrent = styled.span`
-  color: ${({ theme }) => theme.colors.muted};
+  color: ${({ theme }) => theme.colors.mutedText};
   text-transform: capitalize;
   white-space: nowrap;
 `
 
 const Separator = styled.span`
-  flex-shrink: 0; /* Prevent separator from shrinking */
+  flex-shrink: 0;
   margin: 0 0.5rem;
   color: ${({ theme }) => theme.colors.muted};
 `

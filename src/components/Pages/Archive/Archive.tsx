@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 
 import styled from '@emotion/styled'
 import ExpandCircleDownIcon from '@mui/icons-material/ExpandCircleDown'
@@ -20,6 +20,11 @@ export function Archive({ articles }: Props) {
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(
     new Set(Object.keys(articles)),
   )
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const toggleMonth = (monthKey: string) => {
     setExpandedMonths((prev) => {
@@ -71,9 +76,9 @@ export function Archive({ articles }: Props) {
             <MonthSection key={monthKey}>
               <MonthHeader onClick={() => toggleMonth(monthKey)}>
                 <MonthTitle>
-                  <ToggleIcon isExpanded={expandedMonths.has(monthKey)}>
-                    ▶
-                  </ToggleIcon>
+                  {mounted && (
+                    <ToggleIcon isExpanded={expandedMonths.has(monthKey)} />
+                  )}
                   {monthName}
                 </MonthTitle>
                 <PostCount>{articles.length} posts</PostCount>
@@ -212,10 +217,6 @@ const MonthHeader = styled.button`
     &:hover {
       background-color: transparent;
     }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    transition: none;
   }
 `
 

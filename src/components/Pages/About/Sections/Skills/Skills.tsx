@@ -5,7 +5,7 @@ import { Section } from '../../UI/Section'
 export const Skills = () => {
   return (
     <Section id="skills">
-      <Section.Number>04</Section.Number>
+      <Section.Number>03</Section.Number>
       <Section.Content>
         <Section.Title>Skills & Technologies</Section.Title>
         <SkillsGrid>
