@@ -1,19 +1,8 @@
-import { useEffect, useState } from 'react'
-
 import styled from '@emotion/styled'
-import GitHubIcon from '@mui/icons-material/GitHub'
-import LinkedInIcon from '@mui/icons-material/LinkedIn'
+import { Github, Linkedin } from 'lucide-react'
 import Link from 'next/link'
 
 export const Footer = () => {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  if (!mounted) return null
-
   return (
     <Container>
       <Links>
@@ -23,7 +12,7 @@ export const Footer = () => {
           rel="noopener noreferrer"
           aria-label="GitHub"
         >
-          <GitHubIcon />
+          <Github />
         </Link>
         <Link
           href="https://www.linkedin.com/in/sueun-lee"
@@ -31,7 +20,7 @@ export const Footer = () => {
           rel="noopener noreferrer"
           aria-label="LinkedIn"
         >
-          <StyledLinkedInIcon />
+          <Linkedin />
         </Link>
         <Link
           href="https://codepen.io/quicksilversel"
@@ -84,9 +73,4 @@ const Copyright = styled.span`
   margin-top: 16px;
   font-size: 12px;
   color: ${({ theme }) => theme.colors.text};
-`
-
-const StyledLinkedInIcon = styled(LinkedInIcon)`
-  margin-top: -2px;
-  font-size: 1.75rem;
 `

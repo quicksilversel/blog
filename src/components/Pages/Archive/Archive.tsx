@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
-import ExpandCircleDownIcon from '@mui/icons-material/ExpandCircleDown'
+import { CircleChevronDown } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 
@@ -20,11 +20,6 @@ export function Archive({ articles }: Props) {
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(
     new Set(Object.keys(articles)),
   )
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
 
   const toggleMonth = (monthKey: string) => {
     setExpandedMonths((prev) => {
@@ -76,9 +71,7 @@ export function Archive({ articles }: Props) {
             <MonthSection key={monthKey}>
               <MonthHeader onClick={() => toggleMonth(monthKey)}>
                 <MonthTitle>
-                  {mounted && (
-                    <ToggleIcon isExpanded={expandedMonths.has(monthKey)} />
-                  )}
+                  <ToggleIcon isExpanded={expandedMonths.has(monthKey)} />
                   {monthName}
                 </MonthTitle>
                 <PostCount>{articles.length} posts</PostCount>
@@ -229,7 +222,7 @@ const MonthTitle = styled.h2`
   color: ${({ theme }) => theme.colors.primary};
 `
 
-const ToggleIcon = styled(ExpandCircleDownIcon, {
+const ToggleIcon = styled(CircleChevronDown, {
   shouldForwardProp: (prop) => prop !== 'isExpanded',
 })<{
   isExpanded: boolean

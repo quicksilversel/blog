@@ -1,8 +1,7 @@
-import { ReactNode, isValidElement, useState, useEffect } from 'react'
+import { ReactNode, isValidElement, useState } from 'react'
 
 import styled from '@emotion/styled'
-import ContentCopyIcon from '@mui/icons-material/ContentCopy'
-import DoneIcon from '@mui/icons-material/Done'
+import { Clipboard, ClipboardCheck } from 'lucide-react'
 import { Highlight } from 'prism-react-renderer'
 
 type Props = {
@@ -11,11 +10,6 @@ type Props = {
 
 export const HighlightedCode = ({ children }: Props) => {
   const [copied, setCopied] = useState(false)
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
 
   if (
     !isValidElement(children) ||
@@ -41,14 +35,12 @@ export const HighlightedCode = ({ children }: Props) => {
     <Highlight code={code} language={language}>
       {({ tokens, getLineProps, getTokenProps }) => (
         <CodeContainer>
-          {mounted && (
-            <CopyButton
-              onClick={handleCopy}
-              title={copied ? 'Copied!' : 'Copy code'}
-            >
-              {copied ? <DoneIcon /> : <ContentCopyIcon />}
-            </CopyButton>
-          )}
+          <CopyButton
+            onClick={handleCopy}
+            title={copied ? 'Copied!' : 'Copy code'}
+          >
+            {copied ? <ClipboardCheck /> : <Clipboard />}
+          </CopyButton>
           <Pre>
             <CodeWrapper>
               {tokens.map((line, index) => (

@@ -14,13 +14,8 @@ interface SearchModalProps {
 }
 
 export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
-  const [mounted, setMounted] = useState(false)
   const [shouldRender, setShouldRender] = useState(false)
   const { query, setQuery, results, loading } = useSearch(isOpen, onClose)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
 
   useEffect(() => {
     if (isOpen) {
@@ -33,7 +28,7 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
     }
   }, [isOpen])
 
-  if (!mounted || typeof window === 'undefined' || !shouldRender) {
+  if (typeof window === 'undefined' || !shouldRender) {
     return null
   }
 

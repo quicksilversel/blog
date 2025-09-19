@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 
 import styled from '@emotion/styled'
-import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+import { ChevronDown } from 'lucide-react'
 import Link from 'next/link'
 
 import type { ProjectArticle } from '@/libs/getProjects'
@@ -75,7 +75,7 @@ const Title = styled.h3`
   text-transform: capitalize;
 `
 
-const ToggleIcon = styled(KeyboardArrowDownIcon, {
+const ToggleIcon = styled(ChevronDown, {
   shouldForwardProp: (prop) => prop !== 'isExpanded',
 })<{ isExpanded: boolean }>`
   color: ${({ theme }) => theme.colors.primary};

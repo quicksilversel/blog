@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import styled from '@emotion/styled'
-import CloseIcon from '@mui/icons-material/Close'
-import DarkModeIcon from '@mui/icons-material/DarkMode'
-import LightModeIcon from '@mui/icons-material/LightMode'
-import MenuIcon from '@mui/icons-material/Menu'
-import SearchIcon from '@mui/icons-material/Search'
+import { Search, X, Menu, Moon, Sun } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/router'
 
@@ -71,7 +67,7 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
               title="Search"
               aria-label="Search"
             >
-              <SearchIcon />
+              <Search />
             </SearchButton>
             <ThemeButton
               type="button"
@@ -87,14 +83,14 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
                   : 'Switch to dark mode'
               }
             >
-              {theme === 'dark' ? <DarkModeIcon /> : <LightModeIcon />}
+              {theme === 'dark' ? <Moon /> : <Sun />}
             </ThemeButton>
             <MobileMenuButton
               type="button"
               onClick={() => setIsDrawerOpen(!isDrawerOpen)}
               aria-label="Open menu"
             >
-              <MenuIcon />
+              <Menu />
             </MobileMenuButton>
           </RightSection>
         )}
@@ -108,7 +104,7 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
                 onClick={() => setIsDrawerOpen(false)}
                 aria-label="Close menu"
               >
-                <CloseIcon />
+                <X />
               </CloseButton>
             </DrawerHeader>
             <DrawerNav>
