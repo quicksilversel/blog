@@ -142,7 +142,7 @@ const Title = styled.h1`
 
 const TotalCount = styled.span`
   font-size: 1rem;
-  color: ${({ theme }) => theme.colors.muted};
+  color: ${({ theme }) => theme.colors.mutedText};
 `
 
 const Timeline = styled.div`
@@ -236,7 +236,7 @@ const ToggleIcon = styled(CircleChevronDown, {
 
 const PostCount = styled.span`
   font-size: 0.875rem;
-  color: ${({ theme }) => theme.colors.muted};
+  color: ${({ theme }) => theme.colors.mutedText};
 `
 
 const ArticleList = styled.ul`
@@ -263,7 +263,7 @@ const DateLabel = styled.span`
   width: 3.5rem;
   font-family: monospace;
   font-size: 0.875rem;
-  color: ${({ theme }) => theme.colors.muted};
+  color: ${({ theme }) => theme.colors.mutedText};
 `
 
 const ArticleLink = styled(Link)`
