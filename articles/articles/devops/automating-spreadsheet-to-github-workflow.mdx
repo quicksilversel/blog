@@ -1,0 +1,310 @@
+---
+title: 'Automating Spreadsheet to GitHub PRs: A Production Workflow'
+description: 'How I automated weekly PR creation from Google Sheets data using Python, GitHub Actions, and Slack notifications'
+topics: ['Python', 'GHA']
+published: true
+date: '2025-10-08'
+---
+
+## Intro
+
+Product managers love spreadsheets. Engineers love Git. Bridging these two worlds can be painful, especially when you're managing weekly releases that involve copying data from a Google Sheet into YAML files, validating everything, and creating PRs.
+
+I built an automation that reads data from Google Sheets every Thursday at 1AM, validates it, generates YAML entries, and creates a pull request automatically. If validation fails, it sends a Slack alert instead. Here's how it works.
+
+## The Problem
+
+Every week, PMs would fill out a Google Sheet with release details (start dates, URLs, tags, etc.) for that week. Someone on the team had to:
+
+1. Manually copy data from the sheet
+2. Transform it into YAML format
+3. Validate all required fields
+4. Create a PR with proper formatting
+5. Notify the team
+
+This took 30-60 minutes every week and was error-prone. Missing fields, incorrect date formats, or malformed URLs would cause production issues.
+
+## The Solution: Python + Google Sheets API + GitHub Actions
+
+### Architecture Overview
+
+The automation has three main components:
+
+1. **Google Sheets Reader** - Fetches spreadsheet data using service account credentials
+2. **Python Validation & YAML Generation** - Validates data and transforms it into YAML
+3. **GitHub Actions Workflow** - Orchestrates everything and creates the PR
+
+## Setting Up Google Sheets API Access
+
+First, I set up a service account to access the Google Sheet programmatically.
+
+### Creating Service Account Credentials
+
+1. Enable Google Sheets API in Google Cloud Console
+2. Create a service account
+3. Generate JSON key
+4. Share the spreadsheet with the service account email (viewer access)
+
+The credentials are stored as a GitHub secret (`GOOGLE_SHEETS_CREDENTIALS`) and loaded at runtime:
+
+```python
+import json
+import os
+from google.oauth2.service_account import Credentials
+import gspread
+
+class SheetsReader:
+    def __init__(self):
+        # Load credentials from environment variable
+        creds_json = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
+        if not creds_json:
+            raise ValueError("GOOGLE_SHEETS_CREDENTIALS not set")
+
+        creds_dict = json.loads(creds_json)
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        self.client = gspread.authorize(credentials)
+```
+
+### Reading and Filtering Data
+
+The script reads all rows starting from row 5 (header row) and filters entries where the start date falls between last Friday and this Thursday:
+
+```python
+def get_data(self) -> List[Dict[str, Any]]:
+    sheet = self.client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+
+    # Get all values including headers
+    all_values = sheet.get("A5:AZ")
+
+    if not all_values:
+        return []
+
+    headers = all_values[0]
+    data_rows = all_values[1:]
+
+    # Convert to list of dictionaries
+    data = []
+    for row in data_rows:
+        padded_row = row + [""] * (len(headers) - len(row))
+        row_dict = dict(zip(headers, padded_row))
+        data.append(row_dict)
+
+    return data
+```
+
+The date filtering logic handles Japanese date formats like `2024/3/1 (金)`:
+
+```python
+def _parse_japanese_date(date_str: str) -> datetime.date:
+    # Remove day of week in parentheses if present
+    date_str = date_str.split("(")[0].strip()
+
+    formats = ["%Y/%m/%d", "%Y-%m-%d", "%Y/%m/%d %H:%M", "%Y-%m-%d %H:%M"]
+
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+
+    raise ValueError(f"Unable to parse date: {date_str}")
+```
+
+## Data Validation
+
+Before generating YAML, the script validates required fields:
+
+```python
+class DataValidator:
+    def validate_entry(self, entry_data: Dict[str, Any]) -> List[ValidationError]:
+        errors = []
+        entry_name = entry_data.get("name", "Unknown Entry")
+
+        # Check required fields
+        for field in REQUIRED_FIELDS:
+            value = entry_data.get(field, "").strip()
+            if not value:
+                errors.append(
+                    ValidationError(
+                        entry_name=entry_name,
+                        field=field,
+                        message=f"{field} is required"
+                    )
+                )
+
+        # Validate URL format
+        url = entry_data.get("url", "").strip()
+        if url and not url.startswith("https://example.com/"):
+            errors.append(
+                ValidationError(
+                    entry_name=entry_name,
+                    field="url",
+                    message="URL must start with 'https://example.com/'"
+                )
+            )
+
+        return errors
+```
+
+If validation fails, the script sends a Slack alert and exits without creating a PR. This prevents bad data from reaching production.
+
+## YAML Generation
+
+The script transforms spreadsheet data into YAML entries:
+
+```python
+def generate_entry(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    name = data.get("name", "").strip()
+    category_input = data.get("category", "").strip()
+    category = category_input.upper() if category_input else DEFAULT_CATEGORY
+    url = data.get("url", "").strip()
+
+    start_datetime = self._parse_datetime(
+        data.get("start_date", ""),
+        data.get("start_time", "")
+    )
+
+    end_datetime = self._parse_datetime(
+        data.get("end_date", ""),
+        data.get("end_time", "")
+    )
+
+    project_id = self._parse_project_id(data.get("project_id", ""))
+
+    entry = {
+        "name": name,
+        "category": category,
+        "url": url,
+        "start_datetime": start_datetime,
+        "end_datetime": end_datetime,
+        "project_id": project_id,
+    }
+
+    return entry
+```
+
+## GitHub Actions Workflow
+
+The GitHub Actions workflow ties everything together:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 1 * * 4' # Every Thursday at 1:00 AM
+  workflow_dispatch: # Manual trigger
+
+name: Spreadsheet Sync Workflow
+
+jobs:
+  create-sync-pull-request:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r scripts/automation/requirements.txt
+
+      - name: Run automation script
+        env:
+          GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          cd scripts/automation
+          python main.py
+        continue-on-error: true
+
+      - name: Create branch and commit changes
+        if: steps.check_data.outputs.has_data == 'true'
+        run: |
+          DATE=$(date "+%Y%m%d")
+          BRANCH_NAME="${DATE}_update_data"
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          git fetch origin main:main
+          git checkout main
+          git checkout -b ${BRANCH_NAME}
+
+          git add data/master.yaml
+          git commit -m "Update data from spreadsheet (${{ steps.check_data.outputs.count }} entries)"
+
+          git push -u origin ${BRANCH_NAME}
+
+      - name: Create Pull Request
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ env.BRANCH_NAME }} \
+            --title "Data Update - ${{ env.DATE }}" \
+            --body-file /tmp/pr_body.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+## Key Lessons
+
+### 1. Service Account Permissions Matter
+
+Initially, I tried using OAuth tokens, but service accounts are way better for automation. Just make sure to share the spreadsheet with the service account email.
+
+### 2. Validation Before Automation
+
+The first version didn't validate data and would create PRs with missing fields. Adding validation and Slack alerts saved hours of back-and-forth with PMs.
+
+### 3. Date Parsing is Messy
+
+Japanese date formats like `2024/3/1 (金)` required custom parsing logic. Supporting multiple formats (`YYYY/MM/DD`, `YYYY-MM-DD`) made the script more resilient.
+
+### 4. Indentation Matters in YAML
+
+Appending new entries to existing YAML files is tricky. I had to manually indent each line by 2 spaces to match the existing structure:
+
+```python
+indented_lines = []
+for line in new_yaml.split('\n'):
+    if line.strip():
+        indented_lines.append('  ' + line)
+```
+
+### 5. Manual Trigger is Essential
+
+While the scheduled cron job works great, having `workflow_dispatch` lets PMs manually trigger the workflow if they need to add data outside the regular schedule.
+
+## Impact
+
+This automation:
+
+- Saves 30-60 minutes every week
+- Reduces human error in data entry
+- Provides immediate feedback via Slack when data is incomplete
+- Creates consistent, well-formatted PRs
+- Allows PMs to work in their preferred tool (Google Sheets) without blocking engineering
+
+The workflow has been running in production for several months with zero incidents related to data formatting.
+
+## Pro Tips
+
+**Use `continue-on-error: true`** for the Python script step, then check if output files exist before proceeding. This prevents the workflow from failing when there's no data to process.
+
+**Store the PR body in a file** (`/tmp/pr_body.txt`) rather than trying to pass it as a string in GitHub Actions. Multi-line strings in workflow YAML are painful.
+
+**Default missing times to noon** (12:00) instead of midnight. This prevents accidental early releases when exact times aren't specified.
+
+**Auto-generate what you can** but validate what matters (like URLs and dates). This reduces manual work while ensuring data quality.
+
+## Wrapping Up
+
+Automating spreadsheet-to-GitHub workflows isn't glamorous, but it's the kind of operational improvement that compounds over time. By integrating Google Sheets API with GitHub Actions, you can let PMs work in familiar tools while maintaining code-based workflows for engineers.
+
+The full code structure includes separate modules for reading, validating, generating YAML, and sending Slack notifications, making it easy to extend or modify individual components without touching the rest of the system.
