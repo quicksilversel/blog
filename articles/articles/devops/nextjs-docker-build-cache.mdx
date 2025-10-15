@@ -1,0 +1,183 @@
+---
+title: '[Docker] Speeding Up Next.js Docker Builds with GitHub Actions Cache'
+description: 'How I fixed painfully slow Docker builds by implementing Next.js build caching that works with GitHub Actions.'
+topics: ['GHA', 'Docker', 'nextjs']
+published: true
+date: '2025-10-10'
+---
+
+## The Problem
+
+Every push triggered a full Next.js rebuild in our Docker-based CI/CD. Webpack recompiled everything, pages were regenerated, and builds took forever 😇
+
+Meanwhile, our native `npm run build` on GitHub Actions was blazing fast thanks to Next.js's built-in caching.
+
+Docker was killing our velocity.
+
+## How Next.js Build Cache Works
+
+Next.js stores build artifacts in `.next/cache` to speed up subsequent builds:
+
+- **Webpack compilation cache** - Compiled modules and chunks
+- **TypeScript cache** - Type checking results (`.tsbuildinfo`)
+- **SWC cache** - Transformed JavaScript/TypeScript files
+- **Image optimization cache** - Processed images
+
+When you run `npm run build` again, Next.js checks this cache. If source files haven't changed, it skips recompiling them. This can cut build times from minutes to seconds.
+
+In a native environment (like directly on a GitHub Actions runner), this just works. The `.next/cache` directory persists between builds.
+
+But in Docker? Each build starts fresh. The cache gets created, used during that single build, then thrown away when the container exits.
+
+## Why Docker Wasn't Caching
+
+I tried BuildKit cache mounts:
+
+```dockerfile
+RUN --mount=type=cache,target=/app/.next/cache \
+    npm run build
+```
+
+And GitHub Actions cache:
+
+```yaml
+cache-from: type=gha
+cache-to: type=gha,mode=max
+```
+
+But builds stayed slow. Every. Single. Time.
+
+Turns out **GitHub Actions cache backend doesn't properly export BuildKit cache mounts**. The cache was created but never persisted.
+
+## The Solution
+
+The key: explicitly move the Next.js cache in and out of Docker containers.
+
+### 1. Restore Cache Before Docker Build
+
+```yaml
+- name: Cache Next.js build
+  uses: actions/cache@v4
+  with:
+    path: .next/cache
+    key: ${{ runner.os }}-nextjs-docker-${{ hashFiles('**/package-lock.json') }}
+    restore-keys: |
+      ${{ runner.os }}-nextjs-docker-
+```
+
+This restores `.next/cache` to the runner before building the Docker image.
+
+### 2. Include Cache in Docker
+
+Create `.dockerignore` that excludes heavy stuff but NOT `.next/`:
+
+```
+node_modules
+.git
+.github
+```
+
+Now `COPY . .` includes the restored cache.
+
+### 3. Extract Cache After Build
+
+After Docker build, extract the updated cache:
+
+```yaml
+- name: Extract Next.js cache from container
+  run: |
+    CONTAINER_ID="$(docker create ${{ env.DOCKER_IMAGE_REPO }}:${{ env.DOCKER_IMAGE_TAG }})"
+    mkdir -p .next
+    docker cp "${CONTAINER_ID}:/app/.next/cache" .next/cache
+    docker rm "${CONTAINER_ID}"
+```
+
+GitHub Actions auto-saves it at job end.
+
+## Don't Make This Mistake
+
+I initially used `${{ github.sha }}` in the cache key:
+
+```yaml
+key: ${{ runner.os }}-nextjs-docker-${{ github.sha }} # ❌ Wrong!
+```
+
+Every commit got a unique cache key. Useless.
+
+Fix: base it on `package-lock.json`:
+
+```yaml
+key: ${{ runner.os }}-nextjs-docker-${{ hashFiles('**/package-lock.json') }} # ✅ Right!
+```
+
+Cache persists across commits, only invalidates when dependencies change.
+
+## The Flow
+
+```
+┌─────────────────────────────────────┐
+│ 1. GitHub Actions restores cache    │
+│    .next/cache → runner filesystem  │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│ 2. Docker build copies cache        │
+│    COPY . . → includes cache        │
+│    npm run build → reuses cache     │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│ 3. Extract updated cache             │
+│    docker cp → pull cache from       │
+│    container to runner               │
+└─────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────┐
+│ 4. GHA auto-saves for next build    │
+└─────────────────────────────────────┘
+```
+
+## Complete Workflow
+
+```yaml
+- name: Cache Next.js build
+  uses: actions/cache@v4
+  with:
+    path: .next/cache
+    key: ${{ runner.os }}-nextjs-docker-${{ hashFiles('**/package-lock.json') }}
+    restore-keys: |
+      ${{ runner.os }}-nextjs-docker-
+
+- name: Set up Docker Buildx
+  uses: docker/setup-buildx-action@v3
+
+- name: Build image
+  uses: docker/build-push-action@v6
+  with:
+    context: .
+    file: dockerfiles/nextjs/Dockerfile
+    load: true
+    tags: my-app:latest
+    outputs: type=docker
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
+
+- name: Extract Next.js cache from container
+  run: |
+    CONTAINER_ID="$(docker create my-app:latest)"
+    mkdir -p .next
+    docker cp "${CONTAINER_ID}:/app/.next/cache" .next/cache
+    docker rm "${CONTAINER_ID}"
+```
+
+## Results
+
+- **Before:** Full rebuild every time
+- **After:** ~2GB of cached build artifacts reused
+- **Impact:** Way faster CI/CD
+
+## Lesson
+
+BuildKit cache mounts don't integrate well with GitHub Actions cache. You need to explicitly manage cache persistence.
+
+Sometimes the best solution isn't elegant—it's the one that works. Don't be afraid to use `docker cp` if that's what it takes.
