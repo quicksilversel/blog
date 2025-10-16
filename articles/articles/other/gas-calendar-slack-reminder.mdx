@@ -1,0 +1,307 @@
+---
+title: 'Automating Weekly Calendar Reminders with Google Apps Script and Slack'
+description: 'How I built a Slack bot that reads Google Calendar events and sends automated weekly reminders with user mentions using Google Apps Script'
+topics: ['GAS', 'Slack', 'Automation']
+published: true
+date: '2023-11-16'
+---
+
+## The Problem
+
+Every week, our team needed reminders about upcoming events from a shared Google Calendar. Someone would have to manually check the calendar, figure out who was involved, and post a message in Slack with all the relevant details and mentions.
+
+This took 15-20 minutes every Monday morning and was easy to forget. I wanted to automate this completely using Google Apps Script (GAS) since it integrates natively with Google Calendar and can send webhooks to Slack.
+
+## Solution Overview
+
+The automation does three things:
+
+1. **Reads calendar events** for the current week (Monday to Friday)
+2. **Filters events** based on keywords in the title
+3. **Posts to Slack** with formatted messages and user mentions
+
+No external services needed. Just GAS, Google Calendar API, and Slack webhooks.
+
+## Setting Up the Slack Webhook
+
+First, create an incoming webhook in Slack:
+
+1. Go to your Slack workspace's App settings
+2. Create a new app or use an existing one
+3. Enable "Incoming Webhooks"
+4. Add a new webhook to your target channel
+5. Copy the webhook URL (looks like `https://hooks.slack.com/services/...`)
+
+## The Code
+
+### Configuration and Data
+
+I started by defining a mapping between email addresses and Slack user IDs. This lets the bot mention the right people when posting reminders:
+
+```javascript
+const WEBHOOK_URL = 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+const CALENDAR_ID = 'your-calendar-id@group.calendar.google.com'
+
+const memberList = [
+  { user_name: 'alice@example.com', user_id: 'U123456' },
+  { user_name: 'bob@example.com', user_id: 'U789012' },
+  { user_name: 'charlie@example.com', user_id: 'U345678' },
+]
+```
+
+### Getting Monday of the Current Week
+
+Calendar events are filtered by week, so I needed a helper function to find the Monday of any given date:
+
+```javascript
+function getMonday(date) {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1) // Adjust if Sunday
+  return new Date(d.setDate(diff))
+}
+```
+
+This handles the edge case where the current day is Sunday by going back 6 days instead of forward 1.
+
+### Main Function: Reading Events and Posting to Slack
+
+The main function fetches events from the calendar, filters them, formats the data, and sends it to Slack:
+
+```javascript
+function sendWeeklyCalendarReminder() {
+  // Calculate the week range (Monday 00:00 to Friday 23:59)
+  const startTime = getMonday(new Date().setHours(0, 0, 0, 0))
+  const endTime = new Date(startTime.getTime() + 5 * 24 * 60 * 60 * 1000) // +5 days
+
+  // Get the calendar and its events
+  const calendar = CalendarApp.getCalendarById(CALENDAR_ID)
+  const events = calendar.getEvents(startTime, endTime)
+  const calendarColor = calendar.getColor()
+
+  const eventDetails = []
+
+  // Process each event
+  for (let event of events) {
+    const title = event.getTitle()
+
+    // Filter: only include events with specific keywords
+    if (
+      title.includes('deploy') &&
+      !title.includes('rollback') &&
+      !title.includes('test')
+    ) {
+      const startDate = event.getStartTime()
+      const endDate = event.getEndTime()
+
+      // Format dates in Japanese locale
+      const formattedStart = startDate.toLocaleDateString('ja-JP', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+      })
+
+      const formattedEnd = endDate.toLocaleDateString('ja-JP', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+      })
+
+      // Get attendees and map to Slack user IDs
+      const guests = event
+        .getGuestList(true)
+        .map((guest) => guest.getEmail())
+        .filter((email) => email.includes('@example.com'))
+
+      const mentions = guests
+        .map((email) => {
+          const member = memberList.find((m) => m.user_name === email)
+          return member ? `<@${member.user_id}>` : null
+        })
+        .filter(Boolean)
+        .join(' ')
+
+      // Build event summary
+      eventDetails.push(
+        `\n\n${mentions}\n${title}\n${formattedStart} 〜 ${formattedEnd}`,
+      )
+    }
+  }
+
+  // Prepare Slack message payload
+  const payload = {
+    channel: '#team-notifications',
+    username: 'Calendar Bot',
+    icon_emoji: ':calendar:',
+    text:
+      '<!channel> Weekly deployment reminders:\n' +
+      'Please check the calendar and complete your tasks by Thursday.\n' +
+      'If you have any blockers, notify the team lead.',
+    attachments: [
+      {
+        color: calendarColor,
+        fields: [
+          {
+            title: "This Week's Events",
+            value: eventDetails.join('\n') || 'No events this week',
+            short: false,
+          },
+        ],
+      },
+    ],
+  }
+
+  sendToSlack(payload)
+}
+```
+
+### Sending Data to Slack
+
+The webhook sender is straightforward. It serializes the payload as JSON and posts it using `UrlFetchApp`:
+
+```javascript
+function sendToSlack(payload) {
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+  }
+
+  UrlFetchApp.fetch(WEBHOOK_URL, options)
+}
+```
+
+## Setting Up the Trigger
+
+To run this automatically every Monday morning:
+
+1. Open your script in Google Apps Script editor
+2. Go to **Triggers** (clock icon on the left)
+3. Click **Add Trigger**
+4. Set:
+   - Function: `sendWeeklyCalendarReminder`
+   - Event source: **Time-driven**
+   - Type: **Week timer**
+   - Day: **Monday**
+   - Time: **8am to 9am** (or whenever you prefer)
+
+GAS will now run this function every Monday automatically.
+
+## Key Improvements I Made
+
+### 1. User Mentions
+
+The original script just listed names. I added Slack user ID mapping so people actually get notified when mentioned.
+
+### 2. Better Date Filtering
+
+Instead of hardcoding date ranges, the script calculates the current week dynamically using `getMonday()`. This works reliably across months and years.
+
+### 3. Cleaner Event Filtering
+
+Used a clear inclusion/exclusion pattern with keywords instead of chaining multiple conditions:
+
+```javascript
+if (
+  title.includes("deploy") &&
+  !title.includes("rollback") &&
+  !title.includes("test")
+)
+```
+
+This makes it easy to adjust which events get included.
+
+### 4. Fallback for Missing Members
+
+If someone isn't in the `memberList`, the script skips them instead of breaking:
+
+```javascript
+.filter(Boolean) // Remove null values
+```
+
+## Debugging Tips
+
+### Check Calendar Permissions
+
+Make sure your script has access to the calendar. Run this manually first:
+
+```javascript
+function testCalendarAccess() {
+  const calendar = CalendarApp.getCalendarById(CALENDAR_ID)
+  Logger.log(calendar.getName())
+}
+```
+
+If it throws an error, share the calendar with your GAS project's email (found under **Project Settings** → **Service account**).
+
+### Test the Webhook
+
+Send a simple test message to verify the webhook works:
+
+```javascript
+function testSlackWebhook() {
+  const payload = {
+    text: 'Test message from GAS',
+  }
+  sendToSlack(payload)
+}
+```
+
+### View Logs
+
+Use `Logger.log()` to debug and check execution logs:
+
+- Click **Executions** in the left sidebar
+- Click on any execution to see logs and errors
+
+## Lessons Learned
+
+### 1. GAS Date Handling is Quirky
+
+JavaScript's `Date` object in GAS behaves slightly differently than in browsers. Always test date calculations manually before setting up triggers.
+
+### 2. Slack Mentions Require User IDs
+
+You can't mention people by email or display name. You need their Slack user ID, which looks like `U123ABC456`. Get these from Slack's user profile or API.
+
+### 3. Color Codes Work in Attachments
+
+Using `calendar.getColor()` lets the Slack message match your calendar's color scheme. Small touch, but makes the bot feel more integrated.
+
+### 4. Filtering Saves Noise
+
+Not every calendar event needs a reminder. Adding keyword filters keeps the Slack channel focused and reduces notification fatigue.
+
+## Impact
+
+This bot has been running every Monday for months now:
+
+- **Saves 15-20 minutes** of manual work per week
+- **Zero missed reminders** since automation started
+- **Better visibility** with automatic user mentions
+- **Lower cognitive load** — no one needs to remember to check the calendar
+
+## Pro Tips
+
+**Use `getGuestList(true)`** to include the organizer in the guest list. Otherwise, you might miss mentioning the person who created the event.
+
+**Test with `workflow_dispatch`-style manual runs** before setting up weekly triggers. You don't want to spam your Slack channel while debugging.
+
+**Store sensitive data in Script Properties** instead of hardcoding it. Go to **Project Settings** → **Script Properties** and access via `PropertiesService`:
+
+```javascript
+const WEBHOOK_URL =
+  PropertiesService.getScriptProperties().getProperty('WEBHOOK_URL')
+```
+
+**Format Slack messages with Block Kit** for richer layouts. Check out [Slack's Block Kit Builder](https://api.slack.com/block-kit) for interactive message designs.
+
+## Wrapping Up
+
+Google Apps Script is underrated for simple automations like this. No servers, no containers, no deployment pipelines. Just write a function, set a trigger, and it runs forever.
+
+This calendar-to-Slack bot took about an hour to build and has saved dozens of hours since. If your team uses Google Calendar and Slack, this pattern works for almost any recurring reminder workflow.
