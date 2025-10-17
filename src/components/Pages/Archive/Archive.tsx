@@ -42,6 +42,21 @@ export function Archive({ articles }: Props) {
     [articles],
   )
 
+  // Group articles by year
+  const articlesByYear = useMemo(() => {
+    const grouped: Record<string, Record<string, ArchiveItem[]>> = {}
+
+    Object.entries(articles).forEach(([monthKey, articles]) => {
+      const [year] = monthKey.split('-')
+      if (!grouped[year]) {
+        grouped[year] = {}
+      }
+      grouped[year][monthKey] = articles
+    })
+
+    return grouped
+  }, [articles])
+
   return (
     <Box>
       <Header>
@@ -49,52 +64,70 @@ export function Archive({ articles }: Props) {
         <Title>Archive</Title>
         <TotalCount>{totalArticles} posts</TotalCount>
       </Header>
-      <Timeline>
-        {Object.entries(articles).map(([monthKey, articles]) => {
-          const [year, month] = monthKey.split('-')
-          const monthName = new Date(`${year}-${month}-01`).toLocaleDateString(
-            'en-US',
-            {
-              month: 'long',
-              year: 'numeric',
-            },
+      {Object.entries(articlesByYear)
+        .sort(([yearA], [yearB]) => Number(yearB) - Number(yearA))
+        .map(([year, monthsData]) => {
+          const yearPostCount = Object.values(monthsData).reduce(
+            (sum, articles) => sum + articles.length,
+            0,
           )
+
           return (
-            <MonthSection key={monthKey}>
-              <MonthHeader onClick={() => toggleMonth(monthKey)}>
-                <MonthTitle>
-                  <ToggleIcon isExpanded={expandedMonths.has(monthKey)} />
-                  {monthName}
-                </MonthTitle>
-                <PostCount>{articles.length} posts</PostCount>
-              </MonthHeader>
-              {expandedMonths.has(monthKey) && (
-                <ArticleList>
-                  {articles.map((article) => (
-                    <ArticleItem key={article.slug}>
-                      <DateLabel>
-                        {new Date(article.date).toLocaleDateString('en-US', {
-                          day: 'numeric',
-                          month: 'short',
-                        })}
-                      </DateLabel>
-                      <ArticleLink
-                        href={
-                          article.isProject
-                            ? `/projects/${article.slug}`
-                            : `/articles/${article.slug}`
-                        }
-                      >
-                        {article.title}
-                      </ArticleLink>
-                    </ArticleItem>
-                  ))}
-                </ArticleList>
-              )}
-            </MonthSection>
+            <YearSection key={year}>
+              <YearHeader>
+                <YearTitle>{year}</YearTitle>
+                <YearPostCount>{yearPostCount} posts</YearPostCount>
+              </YearHeader>
+              <Timeline>
+                {Object.entries(monthsData).map(([monthKey, articles]) => {
+                  const [, month] = monthKey.split('-')
+                  const monthName = new Date(
+                    `${year}-${month}-01`,
+                  ).toLocaleDateString('en-US', {
+                    month: 'long',
+                  })
+                  return (
+                    <MonthSection key={monthKey}>
+                      <MonthHeader onClick={() => toggleMonth(monthKey)}>
+                        <MonthTitle>
+                          <ToggleIcon isExpanded={expandedMonths.has(monthKey)} />
+                          {monthName}
+                        </MonthTitle>
+                        <PostCount>{articles.length} posts</PostCount>
+                      </MonthHeader>
+                      {expandedMonths.has(monthKey) && (
+                        <ArticleList>
+                          {articles.map((article) => (
+                            <ArticleItem key={article.slug}>
+                              <DateLabel>
+                                {new Date(article.date).toLocaleDateString(
+                                  'en-US',
+                                  {
+                                    day: 'numeric',
+                                    month: 'short',
+                                  },
+                                )}
+                              </DateLabel>
+                              <ArticleLink
+                                href={
+                                  article.isProject
+                                    ? `/projects/${article.slug}`
+                                    : `/articles/${article.slug}`
+                                }
+                              >
+                                {article.title}
+                              </ArticleLink>
+                            </ArticleItem>
+                          ))}
+                        </ArticleList>
+                      )}
+                    </MonthSection>
+                  )
+                })}
+              </Timeline>
+            </YearSection>
           )
         })}
-      </Timeline>
     </Box>
   )
 }
@@ -252,4 +285,40 @@ const ArticleLink = styled(Link)`
   &:hover {
     text-decoration: underline;
   }
+`
+
+const YearSection = styled.section`
+  margin-bottom: 3rem;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  @media (width <= 35.1875rem) {
+    margin-bottom: 2rem;
+  }
+`
+
+const YearHeader = styled.div`
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
+
+  @media (width <= 35.1875rem) {
+    margin-bottom: 1rem;
+  }
+`
+
+const YearTitle = styled.h2`
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: ${({ theme }) => theme.colors.primary};
+`
+
+const YearPostCount = styled.span`
+  font-size: 0.875rem;
+  color: ${({ theme }) => theme.colors.mutedText};
 `
