@@ -1,7 +1,6 @@
 import React from 'react'
 
 import styled from '@emotion/styled'
-import Image from 'next/image'
 import { useRouter } from 'next/router'
 
 import type { Article } from '@/libs/getArticles/types'
@@ -21,15 +20,6 @@ export function SnippetsList({ snippets }: SnippetsListProps) {
   }
   return (
     <Container>
-      <ImageContainer>
-        <StyledImage
-          src="/hero-balcony.png"
-          alt="Snippets Hero Image"
-          fill
-          loading="eager"
-          priority
-        />
-      </ImageContainer>
       <Title>Snippets</Title>
       <Table>
         <Thead>
@@ -60,22 +50,6 @@ const Container = styled.div`
   @media (width <= 768px) {
     padding: 0 24px;
   }
-`
-
-const ImageContainer = styled.div`
-  position: relative;
-  width: 100%;
-  aspect-ratio: 836/557;
-  margin-bottom: 2rem;
-
-  @media (width <= 35.1875rem) {
-    margin-bottom: 1rem;
-  }
-`
-
-const StyledImage = styled(Image)`
-  object-fit: cover;
-  border-radius: 8px;
 `
 
 const Title = styled.h1`

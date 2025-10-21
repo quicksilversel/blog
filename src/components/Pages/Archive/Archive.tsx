@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
 import { CircleChevronDown } from 'lucide-react'
-import Image from 'next/image'
+import { PawPrint } from 'lucide-react'
 import Link from 'next/link'
 
 import type { Article } from '@/libs/getArticles/types'
@@ -59,16 +59,8 @@ export function Archive({ articles }: Props) {
 
   return (
     <Box>
-      <ImageContainer>
-        <StyledImage
-          src="/hero-lofi.png"
-          alt="Archive Hero Image"
-          fill
-          loading="eager"
-          priority
-        />
-      </ImageContainer>
       <Header>
+        <StyledPawPrint />
         <Title>Archive</Title>
         <TotalCount>{totalArticles} posts</TotalCount>
       </Header>
@@ -140,22 +132,6 @@ export function Archive({ articles }: Props) {
   )
 }
 
-const ImageContainer = styled.div`
-  position: relative;
-  width: 100%;
-  aspect-ratio: 836/557;
-  margin-bottom: 2rem;
-
-  @media (width <= 35.1875rem) {
-    margin-bottom: 1rem;
-  }
-`
-
-const StyledImage = styled(Image)`
-  object-fit: cover;
-  border-radius: 8px;
-`
-
 const Header = styled.div`
   display: flex;
   gap: 1rem;
@@ -165,6 +141,10 @@ const Header = styled.div`
   @media (width <= 35.1875rem) {
     margin-bottom: 1rem;
   }
+`
+
+const StyledPawPrint = styled(PawPrint)`
+  color: ${({ theme }) => theme.colors.primary};
 `
 
 const Title = styled.h1`
