@@ -1,0 +1,498 @@
+---
+title: 'Building My First Flask App: A Next.js Developer‘s Perspective'
+description: 'What building a Flask REST API looks like when you‘re coming from Next.js. Spoiler: Flask routes are way simpler than I expected.'
+topics: ['Python', 'Flask']
+published: true
+date: '2025-10-21'
+---
+
+## Intro
+
+After [setting up my Python development environment](/articles/backend/typescript-to-python-dev-setup), it was time to build something. I needed a Flask app that would eventually become a Slack bot, but first: the classic "Hello World" REST API.
+
+Coming from Next.js, I had strong opinions about how API routes should work. Turns out, Flask has its own elegant approach that's surprisingly straightforward.
+
+Here's what I learned building my first Flask application, with comparisons to Next.js throughout.
+
+## Project Structure
+
+First, I set up a basic Flask project structure:
+
+```
+slack-bot/
+├── app/
+│   ├── __init__.py
+│   └── main.py          # Main Flask application
+├── .env                 # Environment variables
+├── Makefile             # Task automation
+├── pyproject.toml       # Dependencies
+└── uv.lock              # Lock file
+```
+
+Nothing fancy. Flask doesn't enforce a specific structure like Next.js does with its `app/` or `pages/` directory.
+
+## Creating the Flask App
+
+Here's the complete `app/main.py`:
+
+```python
+from flask import Flask, jsonify, request
+from dotenv import load_dotenv
+import os
+
+# Load environment variables (like Next.js does automatically)
+load_dotenv()
+
+# Create Flask app
+app = Flask(__name__)
+
+# Get port from environment with default
+port = int(os.getenv("PORT", 3000))
+
+@app.route("/", methods=["GET"])
+def hello():
+    return jsonify({
+        "message": "Hello from Flask! 👋",
+        "endpoints": {
+            "/": "This hello message",
+            "/health": "Health check",
+            "/echo": "Echo endpoint (POST)"
+        }
+    }), 200
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "healthy",
+        "service": "slack-bot",
+        "version": "0.1.0"
+    }), 200
+
+@app.route("/echo", methods=["POST"])
+def echo():
+    data = request.get_json()
+    return jsonify({
+        "received": data,
+        "message": "Echo successful! 📡"
+    }), 200
+
+if __name__ == "__main__":
+    # Debug mode enables auto-reload (like next dev)
+    debug_mode = os.getenv("FLASK_ENV") == "development"
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)
+```
+
+## Flask vs Next.js: Route Handlers
+
+Let's compare how routes work in both frameworks.
+
+### Next.js API Route (App Router)
+
+```typescript
+// app/api/hello/route.ts
+export async function GET(request: Request) {
+  return Response.json(
+    {
+      message: 'Hello from Next.js!',
+    },
+    { status: 200 },
+  )
+}
+
+export async function POST(request: Request) {
+  const body = await request.json()
+  return Response.json(
+    {
+      received: body,
+    },
+    { status: 200 },
+  )
+}
+```
+
+### Flask Equivalent
+
+```python
+# app/main.py
+@app.route("/hello", methods=["GET"])
+def get_hello():
+    return jsonify({"message": "Hello from Flask!"}), 200
+
+@app.route("/hello", methods=["POST"])
+def post_hello():
+    data = request.get_json()
+    return jsonify({"received": data}), 200
+```
+
+**Key Differences:**
+
+- **Next.js:** One file per route, exports named functions (`GET`, `POST`)
+- **Flask:** All routes in one place, uses decorators (`@app.route`)
+- **Next.js:** Status code in `Response.json()` options
+- **Flask:** Status code as second return value (tuple unpacking)
+
+Both approaches work well. Flask's decorator pattern felt cleaner for simple APIs, while Next.js's file-based routing scales better for large applications.
+
+## Handling Request Data
+
+### Getting JSON from Request Body
+
+**Next.js:**
+
+```typescript
+const body = await request.json()
+const name = body.name
+```
+
+**Flask:**
+
+```python
+data = request.get_json()
+name = data.get("name")
+```
+
+Flask's `request.get_json()` is simpler - no async/await needed.
+
+### Getting Query Parameters
+
+**Next.js:**
+
+```typescript
+const { searchParams } = new URL(request.url)
+const query = searchParams.get('q')
+```
+
+**Flask:**
+
+```python
+query = request.args.get('q')
+```
+
+Flask wins here. Way more straightforward.
+
+### Environment Variables
+
+**Next.js:**
+
+```typescript
+// Automatically loaded from .env.local
+const token = process.env.SLACK_TOKEN
+```
+
+**Flask:**
+
+```python
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # Must explicitly load
+token = os.getenv("SLACK_TOKEN")
+```
+
+Next.js handles this automatically. In Flask, you need `python-dotenv`:
+
+```bash
+uv add python-dotenv
+```
+
+## Running the Development Server
+
+### The Manual Way
+
+```bash
+uv run python app/main.py
+```
+
+This works, but you have to remember the path. I automated it with a Makefile:
+
+```makefile
+.PHONY: dev
+
+dev:
+	uv run python app/main.py
+```
+
+Now just:
+
+```bash
+make dev
+```
+
+### Auto-Reload in Development
+
+Flask has a built-in development mode with auto-reload (like `next dev`):
+
+**.env:**
+
+```bash
+FLASK_ENV=development
+PORT=3000
+```
+
+**In code:**
+
+```python
+debug_mode = os.getenv("FLASK_ENV") == "development"
+app.run(debug=debug_mode)
+```
+
+Now when you save a file, Flask automatically reloads - just like Next.js.
+
+**Important:** Never use `debug=True` in production. It exposes sensitive information and has security implications.
+
+## Testing the Endpoints
+
+### Using curl
+
+```bash
+# Test root endpoint
+curl http://localhost:3000/
+
+# Test health check
+curl http://localhost:3000/health
+
+# Test POST endpoint
+curl -X POST http://localhost:3000/echo \
+  -H "Content-Type: application/json" \
+  -d '{"test": "hello", "number": 123}'
+```
+
+### Expected Responses
+
+**GET /**
+
+```json
+{
+  "message": "Hello from Flask! 👋",
+  "endpoints": {
+    "/": "This hello message",
+    "/health": "Health check",
+    "/echo": "Echo endpoint (POST)"
+  }
+}
+```
+
+**GET /health**
+
+```json
+{
+  "status": "healthy",
+  "service": "slack-bot",
+  "version": "0.1.0"
+}
+```
+
+**POST /echo**
+
+```json
+{
+  "received": {
+    "test": "hello",
+    "number": 123
+  },
+  "message": "Echo successful! 📡"
+}
+```
+
+## Common Patterns I Learned
+
+### 1. Returning JSON Responses
+
+Flask's `jsonify()` automatically sets the correct `Content-Type` header:
+
+```python
+from flask import jsonify
+
+# ✅ Correct - sets Content-Type: application/json
+return jsonify({"key": "value"}), 200
+
+# ❌ Don't do this - returns plain string
+return str({"key": "value"}), 200
+```
+
+### 2. Multiple HTTP Methods on Same Route
+
+You can handle multiple methods in one function:
+
+```python
+@app.route("/data", methods=["GET", "POST", "PUT"])
+def handle_data():
+    if request.method == "GET":
+        return jsonify({"action": "fetching"})
+    elif request.method == "POST":
+        return jsonify({"action": "creating"})
+    elif request.method == "PUT":
+        return jsonify({"action": "updating"})
+```
+
+But I prefer separate functions for clarity:
+
+```python
+@app.route("/data", methods=["GET"])
+def get_data():
+    return jsonify({"action": "fetching"})
+
+@app.route("/data", methods=["POST"])
+def create_data():
+    return jsonify({"action": "creating"})
+```
+
+### 3. Error Handling
+
+```python
+@app.route("/user/<user_id>", methods=["GET"])
+def get_user(user_id):
+    if not user_id.isdigit():
+        return jsonify({"error": "Invalid user ID"}), 400
+
+    # Fetch user logic here
+    return jsonify({"user_id": user_id}), 200
+```
+
+You can also register global error handlers:
+
+```python
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Not found"}), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({"error": "Internal server error"}), 500
+```
+
+## Side-by-Side Feature Comparison
+
+| Feature              | Next.js                         | Flask                            |
+| -------------------- | ------------------------------- | -------------------------------- |
+| **Route Definition** | File-based (`app/api/route.ts`) | Decorator-based (`@app.route()`) |
+| **JSON Response**    | `Response.json(data)`           | `jsonify(data)`                  |
+| **Request Body**     | `await request.json()`          | `request.get_json()`             |
+| **Query Params**     | `searchParams.get('q')`         | `request.args.get('q')`          |
+| **Status Code**      | `{status: 200}`                 | `return data, 200`               |
+| **Auto-reload**      | Built-in (`next dev`)           | `app.run(debug=True)`            |
+| **Environment**      | Auto-loaded                     | Need `python-dotenv`             |
+| **Port Config**      | `package.json` or `-p 3000`     | `app.run(port=3000)`             |
+
+## Common Mistakes I Made
+
+### 1. Forgetting to Return Status Code
+
+```python
+# ❌ Wrong - defaults to 200
+@app.route("/error")
+def error():
+    return jsonify({"error": "Something went wrong"})
+
+# ✅ Correct - explicitly set 500
+@app.route("/error")
+def error():
+    return jsonify({"error": "Something went wrong"}), 500
+```
+
+### 2. Using `app.run()` in Production
+
+```python
+# ❌ Never do this in production
+if __name__ == "__main__":
+    app.run(debug=True)
+```
+
+Flask's built-in server is for development only. In production, use a proper WSGI server like Gunicorn:
+
+```bash
+uv add gunicorn
+uv run gunicorn app.main:app --bind 0.0.0.0:8080
+```
+
+### 3. Not Checking Request Method
+
+```python
+# ❌ Allows any HTTP method
+@app.route("/data")
+def handle_data():
+    data = request.get_json()  # Breaks on GET requests
+    return jsonify(data)
+
+# ✅ Explicitly specify methods
+@app.route("/data", methods=["POST"])
+def handle_data():
+    data = request.get_json()
+    return jsonify(data)
+```
+
+## Complete Makefile
+
+Here's my full Makefile for Flask development:
+
+```makefile
+.PHONY: dev format lint test check
+
+dev:
+	uv run python app/main.py
+
+format:
+	uv run black .
+
+lint:
+	uv run flake8 app/
+
+test:
+	uv run pytest
+
+check: format lint test
+	@echo "✅ All checks passed!"
+```
+
+**Usage:**
+
+```bash
+make dev      # Start development server
+make format   # Format code with black
+make lint     # Lint code with flake8
+make test     # Run tests with pytest
+make check    # Run all quality checks
+```
+
+## What I Liked About Flask
+
+1. **Simplicity** - No magic. Just decorators and functions.
+2. **Explicit** - You control everything. No hidden conventions.
+3. **Lightweight** - Minimal boilerplate to get started.
+4. **Flexible** - Structure your app however you want.
+
+## What I Missed from Next.js
+
+1. **File-based routing** - Flask requires manual route registration
+2. **Auto environment loading** - Need `python-dotenv` in Flask
+3. **TypeScript** - Python's type hints aren't as robust (though mypy helps)
+4. **Built-in caching** - Next.js has this; Flask needs extensions
+
+## Next Steps
+
+Now that I have a basic Flask app running, the next steps are:
+
+1. Connect to Slack API using Slack Bolt SDK
+2. Integrate with Google Cloud's Vertex AI
+3. Deploy to Cloud Run
+4. Set up proper testing with pytest
+
+## Wrapping Up
+
+Building my first Flask app as a Next.js developer was surprisingly smooth. The concepts translate well - routes, JSON responses, environment variables - they all work similarly.
+
+Flask's decorator-based routing felt weird at first, but after building a few endpoints, I appreciated its simplicity. No file structure to remember, no export naming conventions - just functions with `@app.route()` decorators.
+
+If you're a TypeScript/Next.js developer dipping into Python, Flask is a great starting point. It's simple, well-documented, and the ecosystem is mature.
+
+## Pro Tips
+
+**Use `jsonify()` instead of manually setting headers.** It handles serialization and Content-Type for you.
+
+**Always specify HTTP methods in `@app.route()`.** Being explicit prevents bugs where endpoints accept unintended methods.
+
+**Create a health check endpoint.** Cloud platforms (like Cloud Run, EKS, etc.) need it for liveness/readiness probes.
+
+**Use environment variables for configuration.** Never hardcode ports, tokens, or API keys.
+
+**Don't use `debug=True` in production.** It exposes sensitive info and has security implications. Use a proper WSGI server like Gunicorn instead.
