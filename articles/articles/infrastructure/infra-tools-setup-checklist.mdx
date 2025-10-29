@@ -1,0 +1,473 @@
+---
+title: 'My Infrastructure Tools Setup Checklist: AWS, kubectl, Terraform & More'
+description: 'Complete kubectl, AWS CLI, and Terraform setup guide for Mac. Install and configure Kubernetes tools (k9s, kubectx, Istio, Flux) using Aqua for version management. Includes shell aliases and productivity tips for DevOps engineers.'
+topics: ['kubernetes', 'aws', 'terraform', 'devops']
+published: true
+date: '2025-10-24'
+---
+
+## Intro
+
+Every time I set up a new laptop or onboard a teammate, I go through the same ritual: install AWS CLI, kubectl, terraform, istioctl, flux, and about ten other tools. Then configure profiles, contexts, aliases, and shell completions.
+
+After doing this four times in two years, I finally documented the complete process. This is my infrastructure tools setup checklist, covering everything from tool installation to shell configuration. It takes about 30 minutes to go from a fresh macOS install to a fully configured environment.
+
+The key insight: use Aqua for declarative tool management, and invest time in shell configuration once to save hours later.
+
+## Tool Management with Aqua
+
+Instead of installing tools one-by-one with Homebrew, I use [Aqua](https://aquaproj.github.io/), a declarative CLI version manager. Think `package.json` for command-line tools.
+
+### Install Aqua
+
+```bash
+brew install aquaproj/aqua/aqua
+export PATH="$(aqua root-dir)/bin:$PATH"
+```
+
+### Configure Tools
+
+Create `~/.config/aqua/aqua.yaml`:
+
+```yaml
+registries:
+  - type: standard
+    ref: v4.307.0
+
+packages:
+  # Kubernetes ecosystem
+  - name: kubernetes/kubectl@v1.29.4
+  - name: kubernetes-sigs/kustomize@v5.4.2
+  - name: kubernetes-sigs/krew@v0.4.4
+  - name: derailed/k9s@v0.32.5
+  - name: sbstp/kubie@v0.23.0
+  - name: ahmetb/kubectx
+  - name: fluxcd/flux2@v2.4.0
+  - name: istio/istio@1.21.0
+
+  # Cloud infrastructure
+  - name: hashicorp/terraform@v1.8.5
+
+  # Utilities
+  - name: junegunn/fzf@0.48.1
+  - name: peco/peco@v0.5.11
+```
+
+Install everything:
+
+```bash
+aqua install -a
+```
+
+### Why Aqua Over Homebrew
+
+**Version locking:** Homebrew auto-upgrades to latest versions. kubectl 1.32 doesn't play nice with Kubernetes 1.29 clusters. Aqua lets you pin exact versions.
+
+**Reproducibility:** Share one `aqua.yaml` file across the team. Everyone uses identical tool versions. No more "works on my machine" from version mismatches.
+
+**Speed:** Downloads prebuilt binaries from GitHub releases. No compilation. No Homebrew dependency trees.
+
+**Clean state:** Everything lives in `~/.local/share/aquaproj-aqua`. Delete the directory to start fresh. No scattered symlinks.
+
+## krew: kubectl Plugin Manager
+
+krew is a plugin manager for kubectl. Install kubectl extensions like kubectl-tree, kubectl-whoami, or kubectl-neat.
+
+**Note:** I installed krew with Aqua for clarity in this article, but you can also install it via Homebrew or directly from GitHub.
+
+```bash
+# Already in aqua.yaml
+- name: kubernetes-sigs/krew@v0.4.4
+
+# Install plugins
+kubectl krew install ctx
+kubectl krew install ns
+
+# Use them
+kubectl ctx  # List/switch contexts
+kubectl ns   # List/switch namespaces
+```
+
+Like Homebrew, but for kubectl extensions.
+
+## AWS CLI and Profile Management
+
+### Install
+
+```bash
+# Already in aqua.yaml, or:
+brew install awscli
+```
+
+### Configure Multiple Profiles
+
+For multi-account setups (dev/staging/production), configure profiles in `~/.aws/config`:
+
+```ini
+[profile dev]
+region = us-west-2
+output = json
+
+[profile staging]
+region = us-west-2
+output = json
+
+[profile production]
+region = us-west-2
+output = json
+```
+
+Use AWS SSO if available:
+
+```bash
+aws configure sso --profile dev
+aws configure sso --profile staging
+aws configure sso --profile production
+```
+
+### Interactive Profile Switching with Custom Alias
+
+Install `peco` (already in `aqua.yaml` above), then create a custom alias in `~/.zshrc`:
+
+```bash
+alias awsp='export AWS_PROFILE=$(aws configure list-profiles | peco)'
+```
+
+Now `awsp` gives you an interactive menu. Visual confirmation of which profile you're using prevents production accidents.
+
+### Verify
+
+```bash
+echo $AWS_PROFILE
+aws sts get-caller-identity
+```
+
+Always run `get-caller-identity` before infrastructure changes.
+
+## Kubernetes: kubectl, k9s, and Context Management
+
+### Install kubectl
+
+```bash
+# Already in aqua.yaml
+- name: kubernetes/kubectl@v1.29.4
+```
+
+Match kubectl version to your cluster (±1 minor version). Production on 1.29? Use kubectl 1.28-1.30.
+
+### Connect to EKS Clusters
+
+```bash
+aws eks update-kubeconfig --region us-west-2 --name dev-cluster --profile dev
+aws eks update-kubeconfig --region us-west-2 --name staging-cluster --profile staging
+aws eks update-kubeconfig --region us-west-2 --name production-cluster --profile production
+```
+
+### Context Switching: kubie and kubectx
+
+Instead of typing long kubectl config commands, use specialized tools.
+
+**Note:** I installed kubie, kubectx, and krew with Aqua for clarity in this article, but you can also install them via Homebrew or other package managers.
+
+**kubie** - Switch context for current tab only:
+```bash
+kubie ctx production-cluster
+```
+
+**kubectx** - Switch context for all terminal tabs:
+```bash
+kubectx production-cluster
+```
+
+Use kubie when you want to work in multiple contexts simultaneously (production in one tab, dev in another). Use kubectx when you want to switch everything at once.
+
+### kubectl Aliases
+
+Add to `~/.zshrc`:
+
+```bash
+# Basic shortcuts
+alias k='kubectl'
+alias kg='kubectl get'
+alias kgp='kubectl get pods'
+alias kgs='kubectl get svc'
+alias kd='kubectl describe'
+alias kl='kubectl logs -f'
+alias kpf='kubectl port-forward'
+```
+
+### kubectl Autocomplete
+
+```bash
+# Add to ~/.zshrc
+source <(kubectl completion zsh)
+```
+
+### Show Context in Prompt: kube-ps1
+
+Even with kubectx and kubie, it's easy to forget which context you're in. Show it in your prompt.
+
+```bash
+# Install
+git clone https://github.com/jonmosco/kube-ps1.git ~/.kube-ps1
+
+# Add to ~/.zshrc
+source ~/.kube-ps1/kube-ps1.sh
+PROMPT='%n@%m in %F{magenta}%1~%f $(kube_ps1) '
+```
+
+Your prompt now shows: `yourname@laptop in ~/projects (⎈ production:default)`
+
+Hard to miss which context you're in.
+
+### Custom kubectl Functions
+
+```bash
+# Restart deployment
+krestart() {
+  kubectl rollout restart deployment "$1" -n "${2:-default}"
+}
+
+# Stream logs by pod name pattern
+klogs() {
+  kubectl logs -f -n "$1" "$(kubectl get pods -n "$1" | grep "$2" | awk '{print $1}')"
+}
+```
+
+Usage:
+
+```bash
+krestart api production
+klogs staging frontend
+```
+
+## k9s: Terminal UI for Kubernetes
+
+k9s is a terminal-based Kubernetes dashboard that's easier for interactive work. Instead of typing multiple kubectl commands to view pods, check logs, or describe resources, k9s gives you a keyboard-driven UI.
+
+```bash
+# Already in aqua.yaml
+- name: derailed/k9s@v0.32.5
+
+# Run it
+k9s
+```
+
+Navigate with `:pods`, `:svc`, `:deploy`. Press `l` for logs, `d` for describe, `s` to shell into a pod. Press `?` for help.
+
+I use k9s for interactive debugging and kubectl for scripting. They complement each other.
+
+## Istio, Flux, Terraform
+
+### Istio
+
+```bash
+# Already in aqua.yaml
+- name: istio/istio@1.21.0
+```
+
+Match your cluster's Istio version.
+
+Essential commands:
+
+```bash
+istioctl version
+istioctl analyze
+istioctl proxy-status
+```
+
+When debugging mysterious 503s, run `istioctl analyze` first. Catches 80% of common issues.
+
+### Flux
+
+```bash
+# Already in aqua.yaml
+- name: fluxcd/flux2@v2.4.0
+```
+
+Essential commands:
+
+```bash
+flux check
+flux get all
+flux reconcile kustomization <name> --with-source
+```
+
+Suspend Flux during load tests:
+
+```bash
+flux suspend kustomization app-deployment
+# Run load test
+flux resume kustomization app-deployment
+```
+
+### Terraform
+
+```bash
+# Already in aqua.yaml
+- name: hashicorp/terraform@v1.8.5
+```
+
+Aliases (add to `~/.zshrc`):
+
+```bash
+alias tf='terraform'
+alias tfi='terraform init'
+alias tfp='terraform plan'
+alias tfa='terraform apply'
+alias tfd='terraform destroy'
+```
+
+No `-auto-approve` in production. Always review plans.
+
+Workflow:
+
+```bash
+tfi  # Initialize
+tfp  # Preview
+tfa  # Apply (with confirmation)
+```
+
+## Complete ~/.zshrc Configuration
+
+```bash
+# Aqua
+export PATH="$(aqua root-dir)/bin:$PATH"
+
+# AWS Profile Switcher
+alias awsp='export AWS_PROFILE=$(aws configure list-profiles | peco)'
+
+# Kubernetes Prompt
+if [ -f ~/.kube-ps1/kube-ps1.sh ]; then
+  source ~/.kube-ps1/kube-ps1.sh
+fi
+
+setopt PROMPT_SUBST
+PROMPT='%n@%m in %F{magenta}%1~%f $(kube_ps1) '
+
+# Kubernetes Aliases
+alias k='kubectl'
+alias kg='kubectl get'
+alias kgp='kubectl get pods'
+alias kgs='kubectl get svc'
+alias kd='kubectl describe'
+alias kl='kubectl logs -f'
+alias kpf='kubectl port-forward'
+
+# Terraform Aliases
+alias tf='terraform'
+alias tfi='terraform init'
+alias tfp='terraform plan'
+alias tfa='terraform apply'
+alias tfd='terraform destroy'
+
+# kubectl Autocomplete
+source <(kubectl completion zsh)
+
+# Custom Functions
+krestart() {
+  kubectl rollout restart deployment "$1" -n "${2:-default}"
+}
+
+klogs() {
+  kubectl logs -f -n "$1" "$(kubectl get pods -n "$1" | grep "$2" | awk '{print $1}')"
+}
+```
+
+Reload:
+
+```bash
+source ~/.zshrc
+```
+
+## 10-Minute Setup Checklist
+
+### 1. Install Aqua
+
+```bash
+brew install aquaproj/aqua/aqua
+export PATH="$(aqua root-dir)/bin:$PATH"
+```
+
+### 2. Create aqua.yaml
+
+Create `~/.config/aqua/aqua.yaml` with the configuration above.
+
+### 3. Install all tools
+
+```bash
+aqua install -a
+```
+
+### 4. Configure AWS
+
+```bash
+aws configure sso --profile dev
+aws configure sso --profile staging
+aws configure sso --profile production
+```
+
+### 5. Connect to Kubernetes
+
+```bash
+aws eks update-kubeconfig --region us-west-2 --name dev-cluster --profile dev
+aws eks update-kubeconfig --region us-west-2 --name staging-cluster --profile staging
+aws eks update-kubeconfig --region us-west-2 --name production-cluster --profile production
+```
+
+### 6. Install kube-ps1
+
+```bash
+git clone https://github.com/jonmosco/kube-ps1.git ~/.kube-ps1
+```
+
+### 7. Configure ~/.zshrc
+
+Copy the complete configuration above.
+
+```bash
+source ~/.zshrc
+```
+
+### 8. Verify everything
+
+```bash
+aws sts get-caller-identity
+kubectl version --client
+k9s version
+istioctl version
+flux check
+terraform version
+```
+
+**Total: 10 minutes.**
+
+## What This Gives You
+
+**Context awareness:** `awsp` and `kube-ps1` show exactly which AWS profile and Kubernetes context you're using. Prevents production accidents.
+
+**Speed:** Aliases and functions save 5-30 seconds per command. Hundreds of commands per day = hours saved per week.
+
+**Consistency:** Everyone uses the same tool versions. No version mismatch bugs.
+
+**Fast onboarding:** New teammates productive in 10 minutes instead of 2 days.
+
+**Mental energy:** Stop context-switching to google installation commands. Focus on actual work.
+
+## Key Lessons
+
+**Lock tool versions.** Homebrew auto-upgrades break things. Aqua pins versions.
+
+**Visual indicators matter.** kube-ps1 in your prompt has prevented more incidents than any monitoring system.
+
+**Document once, use forever.** This checklist exists because I forgot configurations too many times.
+
+**Invest in shell config.** 5 hours configuring aliases saves 200 hours over a year.
+
+## Wrapping Up
+
+Infrastructure tools setup doesn't have to take days. With Aqua for version management, good aliases, and visual context indicators, you can reproduce a fully configured environment in 10 minutes every time.
+
+The best infrastructure is the infrastructure you can set up consistently, quickly, and correctly every single time.
+
+Next laptop? Follow this checklist. Same setup. Zero guesswork.
