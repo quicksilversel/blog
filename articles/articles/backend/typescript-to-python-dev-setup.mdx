@@ -1,0 +1,458 @@
+---
+title: 'From TypeScript to Python: Setting Up a Modern Development Environment'
+description: 'How I set up a Python development environment using uv, coming from a TypeScript/Next.js background. Spoiler: it‘s a lot like modern JavaScript tooling.'
+topics: ['Python']
+published: true
+date: '2025-10-21'
+---
+
+## Intro
+
+I've been writing TypeScript and Next.js for years. Python? I used it in college for LeetCode problems, but that was about it. Fast forward to now, and I needed to build a real Python project—a Slack bot using Flask and Google Cloud.
+
+The Python ecosystem has changed a lot since my college days. Modern Python tooling now resembles the JavaScript world I'm familiar with, especially with tools like `uv` that bring the simplicity of `npm` and `pnpm` to Python development.
+
+Here's what I learned setting up a modern Python development environment, with constant comparisons to TypeScript/Next.js to make the transition easier.
+
+## The Old Way vs The New Way
+
+### Traditional Python Setup (What I Remembered)
+
+Back in college, setting up Python meant juggling multiple tools:
+
+```bash
+# Install pyenv (like nvm)
+brew install pyenv
+
+# Set up virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Don't forget this!
+
+# Install packages
+pip install flask
+pip freeze > requirements.txt
+```
+
+This worked, but it was clunky. You had to remember to activate the virtual environment every time. Forgetting meant installing packages globally or getting weird import errors.
+
+### The Modern Approach: uv
+
+Enter **uv** - an all-in-one tool that replaces `pyenv`, `pip`, `venv`, and `poetry`. It's written in Rust, blazingly fast (10-100x faster than pip), and works like modern JavaScript tools.
+
+**Think of it as:**
+
+- `uv` ≈ `pnpm` or `bun` (all-in-one package manager)
+- `pyproject.toml` ≈ `package.json`
+- `uv.lock` ≈ `package-lock.json`
+
+## Setting Up Python with uv
+
+### Installation
+
+```bash
+# Install uv (macOS/Linux)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or with Homebrew
+brew install uv
+
+# Verify
+uv --version
+```
+
+### Creating a Project
+
+```bash
+# Create new project
+mkdir my-python-app
+cd my-python-app
+uv init
+
+# This creates:
+# - .python-version (like .nvmrc)
+# - pyproject.toml (like package.json)
+# - .venv/ (virtual environment, like node_modules)
+```
+
+### Installing Python Versions
+
+```bash
+# Install specific Python version
+uv python install 3.12
+
+# Pin it to your project
+uv python pin 3.12
+```
+
+This is like using `nvm install 18` and creating a `.nvmrc` file - but all in one command.
+
+### Managing Dependencies
+
+```bash
+# Add a package (like npm install express)
+uv add flask
+
+# Add dev dependency (like npm install -D jest)
+uv add --dev pytest black mypy
+
+# Install all dependencies (like npm install)
+uv sync
+
+# Run Python with the right environment (like npx)
+uv run python app/main.py
+```
+
+The best part? **No need to activate the virtual environment.** `uv run` automatically uses your project's isolated Python environment.
+
+## The pyproject.toml File
+
+Here's what a typical `pyproject.toml` looks like:
+
+```toml
+[project]
+name = "my-python-app"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.1.2",
+    "slack-bolt>=1.26.0",
+]
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "pytest>=8.4.2",
+    "mypy>=1.18.2",
+]
+```
+
+**Comparison to package.json:**
+
+```json
+{
+  "name": "my-nextjs-app",
+  "version": "0.1.0",
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.0.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.0.0",
+    "eslint": "^8.0.0"
+  }
+}
+```
+
+Pretty similar, right?
+
+## Python Development Tools
+
+Coming from TypeScript, I wanted the same developer experience: formatting, linting, and type checking. Here's the Python equivalent of your JavaScript toolchain.
+
+### Code Formatting (Like Prettier)
+
+**Black** is Python's Prettier - opinionated, automatic formatting:
+
+```bash
+# Add black
+uv add --dev black
+
+# Format all files
+uv run black .
+
+# Check without formatting
+uv run black --check .
+```
+
+Configuration in `pyproject.toml`:
+
+```toml
+[tool.black]
+line-length = 88  # Like prettier's printWidth
+target-version = ['py312']
+```
+
+### Linting (Like ESLint)
+
+**Flake8** catches code issues:
+
+```bash
+# Add flake8
+uv add --dev flake8
+
+# Lint your code
+uv run flake8 app/
+```
+
+Configuration in `.flake8`:
+
+```ini
+[flake8]
+max-line-length = 88
+exclude = .venv,__pycache__
+```
+
+### Type Checking (Like tsc)
+
+**Mypy** is Python's TypeScript compiler (kind of):
+
+```bash
+# Add mypy
+uv add --dev mypy
+
+# Type check
+uv run mypy app/
+```
+
+Python's type hints look like this:
+
+```python
+# Python with type hints
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+# TypeScript
+function greet(name: string): string {
+  return `Hello, ${name}!`
+}
+```
+
+Very similar syntax!
+
+## Automating Tasks with Makefile
+
+In Next.js, you'd use `package.json` scripts:
+
+```json
+{
+  "scripts": {
+    "dev": "next dev",
+    "test": "jest",
+    "format": "prettier --write ."
+  }
+}
+```
+
+In Python, I use a **Makefile** (common practice in Python projects):
+
+```makefile
+.PHONY: dev format lint test check
+
+dev:
+	uv run python app/main.py
+
+format:
+	uv run black .
+
+lint:
+	uv run flake8 app/
+
+test:
+	uv run pytest
+
+check: format lint test
+	@echo "✅ All checks passed!"
+```
+
+**Usage:**
+
+```bash
+make dev      # Start dev server
+make format   # Format code
+make test     # Run tests
+make check    # Run all checks before committing
+```
+
+**Why Makefile instead of npm scripts?**
+
+- Familiar to infrastructure/DevOps folks
+- Can chain commands with dependencies
+- Standard practice in Python ecosystem
+- Works great with any language (not just Python)
+
+## VSCode Configuration
+
+Getting VSCode to work properly with Python requires some setup. Without it, you'll see import errors even though your code runs fine.
+
+**Create `.vscode/settings.json`:**
+
+```json
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/.venv/lib/python3.12/site-packages"
+  ],
+  "python.languageServer": "Pylance",
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter"
+  },
+  "python.terminal.activateEnvironment": false
+}
+```
+
+**Required VSCode Extensions:**
+
+1. **Python** (ms-python.python)
+2. **Pylance** (ms-python.vscode-pylance) - Like TypeScript's language server
+3. **Black Formatter** (ms-python.black-formatter)
+4. **Mypy Type Checker** (ms-python.mypy-type-checker)
+
+After installing, select your interpreter:
+
+1. Open command palette (`Cmd+Shift+P`)
+2. Type "Python: Select Interpreter"
+3. Choose `./.venv/bin/python`
+
+Now imports will autocomplete, and you'll get inline type checking—just like in TypeScript.
+
+## Common Gotchas Coming from TypeScript
+
+### 1. "Command not found" Even Though Package is Installed
+
+**Problem:**
+
+```bash
+uv add --dev black
+black .  # ❌ command not found
+```
+
+**Solution:**
+
+Always use `uvx` to run binaries from your virtual environment:
+
+```bash
+uvx black .  # ✅ Works
+```
+
+This is like using `npx` in JavaScript - it ensures you're using the project-local version, not a global one.
+
+### 2. Forgetting to Run `uv sync` After Pulling
+
+**Problem:**
+
+```bash
+git pull
+uv run pytest  # ❌ ImportError: module not found
+```
+
+**Solution:**
+
+```bash
+git pull
+uv sync  # Like npm install
+uvx pytest  # ✅ Works
+```
+
+I created an alias to avoid this:
+
+```bash
+# In ~/.zshrc
+alias gup='git pull && uv sync'
+```
+
+### 3. Import Errors in IDE But Code Runs Fine
+
+**Problem:** VSCode shows red squiggles on imports, but `uv run python app.py` works.
+
+**Solution:** Your IDE is using the wrong Python interpreter. Follow the VSCode setup steps above to point it to `.venv/bin/python`.
+
+### 4. Module Files (`__init__.py`)
+
+In Python, folders need `__init__.py` files to be treated as packages:
+
+```
+app/
+├── __init__.py       # Makes 'app' a package
+├── main.py
+└── utils/
+    ├── __init__.py   # Makes 'utils' a package
+    └── helpers.py
+```
+
+Think of `__init__.py` like `index.ts` in TypeScript - it marks the folder as a module.
+
+## Quick Command Reference
+
+Here's a cheat sheet mapping JavaScript commands to Python/uv:
+
+| Task               | JavaScript/npm           | Python/uv                                          |
+| ------------------ | ------------------------ | -------------------------------------------------- |
+| Install tool       | `npm install`            | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Init project       | `npm init`               | `uv init`                                          |
+| Add dependency     | `npm install express`    | `uv add flask`                                     |
+| Add dev dependency | `npm install -D jest`    | `uv add --dev pytest`                              |
+| Install all deps   | `npm install`            | `uv sync`                                          |
+| Run script         | `npm run dev`            | `uv run python app.py`                             |
+| Run local binary   | `npx prettier`           | `uv run black`                                     |
+| Format code        | `npx prettier --write .` | `uv run black .`                                   |
+| Run tests          | `npm test`               | `uv run pytest`                                    |
+| Type check         | `tsc --noEmit`           | `uv run mypy app/`                                 |
+
+## Why This Setup is Better
+
+Coming from TypeScript, this modern Python setup feels familiar:
+
+- **One tool (`uv`)** instead of three (`pyenv` + `pip` + `venv`)
+- **Fast** - Rust-based, 10-100x faster than pip
+- **No manual venv activation** - `uv run` handles it
+- **Lock file** - `uv.lock` ensures reproducible builds (like `package-lock.json`)
+- **Familiar workflow** - Works like npm/pnpm
+
+The old Python workflow felt archaic. This feels like modern JavaScript tooling.
+
+## Project Structure
+
+Here's the complete structure for a Python project:
+
+```
+my-python-app/
+├── .venv/                  # Virtual environment (like node_modules)
+├── .vscode/
+│   └── settings.json       # VSCode config
+├── app/
+│   ├── __init__.py
+│   └── main.py
+├── tests/
+│   ├── __init__.py
+│   └── test_main.py
+├── .gitignore
+├── .python-version         # Like .nvmrc
+├── pyproject.toml          # Like package.json
+├── uv.lock                 # Like package-lock.json
+├── Makefile                # Task automation
+└── README.md
+```
+
+**.gitignore:**
+
+```gitignore
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+.coverage
+.pytest_cache/
+```
+
+## Wrapping Up
+
+Transitioning from TypeScript to Python felt daunting at first, but modern tooling bridges the gap. The key is finding the right tools - `uv` makes Python development feel as smooth as JavaScript.
+
+If you're a TypeScript developer dipping your toes into Python:
+
+1. Use `uv` instead of the traditional `pyenv + pip + venv` stack
+2. Set up VSCode properly (or you'll fight import errors)
+3. Use a Makefile for task automation
+4. Think of Python's tooling as similar to JavaScript - just different names
+
+In the next article, I'll cover building my first Flask application and how it compares to Next.js API routes.
