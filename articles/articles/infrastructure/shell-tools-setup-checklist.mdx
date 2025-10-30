@@ -1,0 +1,410 @@
+---
+title: '5 Essential Shell Tools for Terminal Productivity'
+description: 'Complete zsh setup guide: Install Spaceship Prompt, zsh-autosuggestions, zsh-syntax-highlighting, fzf, and zoxide on Mac. Includes git aliases and shell configuration for terminal productivity.'
+topics: ['productivity']
+published: true
+date: '2025-10-30'
+---
+
+## Intro
+
+After covering infrastructure tools like kubectl and AWS CLI in my [previous article](/articles/infrastructure/infra-tools-setup-checklist), this guide focuses on shell productivity tools—the ones that make the terminal itself more productive.
+
+The default macOS terminal works, but it's minimal. No autocomplete from history. No syntax highlighting. No smart directory navigation. These 5 tools transform the terminal from functional to actually productive.
+
+## 1. Spaceship Prompt
+
+**GitHub**: [spaceship-prompt/spaceship-prompt](https://github.com/spaceship-prompt/spaceship-prompt)
+
+Spaceship is a customizable zsh prompt showing git branch, language versions, AWS profiles, Kubernetes contexts, and more.
+
+### Install
+
+```bash
+brew install spaceship
+
+# Add to ~/.zshrc
+source /opt/homebrew/opt/spaceship/spaceship.zsh
+```
+
+### What It Shows
+
+```
+my-project/scripts is 📦 0.1.0 via 🐍 v3.11.0 at ☸️ v1.32.9 dev-cluster
+❯
+```
+
+- Current directory
+- Package version from package.json/pyproject.toml
+- Language version (Python, Node, Go, etc.)
+- Kubernetes cluster and version
+
+In git repos:
+
+```
+blog/articles on main via 🟢 v18.17.0
+❯
+```
+
+- Git branch
+- Node version
+
+Context awareness prevents deployment accidents. Seeing `☸️ production-cluster` makes it hard to accidentally run destructive commands in the wrong environment.
+
+## 2. zsh-autosuggestions
+
+**GitHub**: [zsh-users/zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions)
+
+Fish-like autocomplete that suggests commands from history as you type.
+
+### Install
+
+```bash
+git clone https://github.com/zsh-users/zsh-autosuggestions ~/.zsh/zsh-autosuggestions
+
+# Add to ~/.zshrc
+source ~/.zsh/zsh-autosuggestions/zsh-autosuggestions.zsh
+```
+
+### How It Works
+
+Type `kubectl lo` and it suggests:
+
+```bash
+kubectl logs -f deployment/api -n production --tail=100
+        ↑ greyed out suggestion
+```
+
+Press `→` to accept. Commands that took 30 seconds to type now take 3 seconds.
+
+## 3. zsh-syntax-highlighting
+
+**GitHub**: [zsh-users/zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting)
+
+Real-time command validation. Valid commands show green, invalid show red.
+
+### Install
+
+```bash
+git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.zsh/zsh-syntax-highlighting
+
+# Add to ~/.zshrc
+source ~/.zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+```
+
+### Visual Feedback
+
+Type `git stats`:
+
+```bash
+git stats  ← RED (invalid)
+```
+
+Type `git status`:
+
+```bash
+git status  ← GREEN (valid)
+```
+
+Catches typos before execution. No more "command not found" surprises.
+
+## 4. fzf
+
+**GitHub**: [junegunn/fzf](https://github.com/junegunn/fzf)
+
+Fuzzy finder for command history, files, and directories.
+
+### Install
+
+```bash
+brew install fzf
+
+# Install keybindings
+$(brew --prefix)/opt/fzf/install
+```
+
+Sets up:
+
+- `Ctrl+R` - Search command history
+- `Ctrl+T` - Search files
+- `Alt+C` - Search directories and cd
+
+### History Search
+
+Press `Ctrl+R`, type `kubectl`:
+
+```
+> kubectl get pods -n production
+  kubectl logs -f api-7d8f9c8b-xk2m9
+  kubectl describe deployment api -n staging
+  kubectl port-forward svc/api 8080:80
+  15/15 ─────────────────────────────
+> kubectl
+```
+
+Navigate with arrows, press Enter to run. No more endless up-arrow pressing.
+
+### File Search
+
+Press `Ctrl+T`, type part of filename:
+
+```
+> next.config.js
+  tsconfig.json
+  src/config/api.ts
+  4/157 ──────────────────────────
+> config
+```
+
+Select and press Enter to insert into command.
+
+## 5. zoxide
+
+**GitHub**: [ajeetdsouza/zoxide](https://github.com/ajeetdsouza/zoxide)
+
+Smart cd replacement that learns directory patterns.
+
+### Install
+
+```bash
+brew install zoxide
+
+# Add to ~/.zshrc
+eval "$(zoxide init zsh)"
+```
+
+### Usage
+
+Instead of:
+
+```bash
+cd ~/Projects/work/frontend/src/components/buttons
+```
+
+Just:
+
+```bash
+z buttons
+```
+
+zoxide remembers frequently visited directories and jumps there directly.
+
+Fuzzy matching works too:
+
+```bash
+z blog art  # → ~/Projects/blog/articles
+```
+
+After a week, muscle memory kicks in:
+
+```bash
+z proj  # → ~/Projects/
+z comp  # → ~/Projects/work/frontend/src/components/
+```
+
+## Git Aliases
+
+Save keystrokes on git commands.
+
+### Setup
+
+```bash
+git config --global alias.st status
+git config --global alias.co checkout
+git config --global alias.br branch
+git config --global alias.cm 'commit -m'
+git config --global alias.ca 'commit --amend'
+git config --global alias.p push
+git config --global alias.pl pull
+git config --global alias.l 'log --oneline --graph --decorate'
+git config --global alias.undo 'reset HEAD~1 --soft'
+```
+
+### Usage
+
+Instead of:
+
+```bash
+git status
+git checkout -b feature/dashboard
+git commit -m "feat: add dashboard"
+git push origin feature/dashboard
+```
+
+Now:
+
+```bash
+git st
+git co -b feature/dashboard
+git cm "feat: add dashboard"
+git p origin feature/dashboard
+```
+
+Useful aliases:
+
+**`git l`** - Pretty one-line log:
+
+```bash
+* 2a0dfc5 (HEAD -> main) fix: update API endpoint
+* df8fa26 feat: add dashboard component
+* 1067bbf refactor: clean up old code
+```
+
+**`git undo`** - Undo last commit, keep changes:
+
+```bash
+git cm "typo in message"
+git undo  # Keeps changes staged
+git cm "fix: correct message"
+```
+
+## History Configuration
+
+Default zsh history is limited. Fix it:
+
+```bash
+# Add to ~/.zshrc
+HISTFILE=~/.zsh_history
+HISTSIZE=50000
+SAVEHIST=50000
+setopt APPEND_HISTORY
+setopt SHARE_HISTORY
+```
+
+**HISTSIZE/SAVEHIST=50000** - Store 50k commands instead of 2k
+
+**APPEND_HISTORY** - Append to history file, don't overwrite
+
+**SHARE_HISTORY** - Share history across all terminal tabs immediately
+
+## Complete .zshrc
+
+```bash
+# Spaceship Prompt
+source /opt/homebrew/opt/spaceship/spaceship.zsh
+
+# zsh-autosuggestions
+source ~/.zsh/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+# zsh-syntax-highlighting
+source ~/.zsh/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# fzf
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+
+# zoxide
+eval "$(zoxide init zsh)"
+
+# History
+HISTFILE=~/.zsh_history
+HISTSIZE=50000
+SAVEHIST=50000
+setopt APPEND_HISTORY
+setopt SHARE_HISTORY
+
+# Useful aliases
+alias pip='python3 -m pip'
+alias vihost='sudo vi /etc/hosts'
+```
+
+Reload:
+
+```bash
+source ~/.zshrc
+```
+
+## 15-Minute Setup Checklist
+
+### 1. Install Homebrew
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+### 2. Install tools
+
+```bash
+brew install spaceship fzf zoxide
+```
+
+### 3. Install zsh plugins
+
+```bash
+git clone https://github.com/zsh-users/zsh-autosuggestions ~/.zsh/zsh-autosuggestions
+git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.zsh/zsh-syntax-highlighting
+$(brew --prefix)/opt/fzf/install
+```
+
+### 4. Set up git aliases
+
+```bash
+git config --global alias.st status
+git config --global alias.co checkout
+git config --global alias.br branch
+git config --global alias.cm 'commit -m'
+git config --global alias.ca 'commit --amend'
+git config --global alias.p push
+git config --global alias.pl pull
+git config --global alias.l 'log --oneline --graph --decorate'
+git config --global alias.undo 'reset HEAD~1 --soft'
+```
+
+### 5. Configure ~/.zshrc
+
+Add configuration from "Complete .zshrc" section above.
+
+### 6. Reload
+
+```bash
+source ~/.zshrc
+```
+
+### 7. Verify
+
+- Prompt shows Spaceship
+- Typing shows suggestions (zsh-autosuggestions)
+- Invalid commands turn red (zsh-syntax-highlighting)
+- `Ctrl+R` searches history (fzf)
+- `z` jumps to directories (zoxide)
+- `git st` works (git aliases)
+
+**Total: 15 minutes.**
+
+## Time Savings
+
+- zsh-autosuggestions: ~10s per command × 200/day = 30+ min/day
+- zoxide: ~5s per cd × 50/day = 4 min/day
+- fzf: ~20s per search × 30/day = 10 min/day
+- Git aliases: ~3s per command × 50/day = 2.5 min/day
+
+**Total: 46+ minutes/day, 3.8+ hours/week**
+
+## Optional Tools
+
+**bat** - Better cat with syntax highlighting:
+
+```bash
+brew install bat
+alias cat='bat'
+```
+
+**ripgrep** - Faster grep:
+
+```bash
+brew install ripgrep
+alias grep='rg'
+```
+
+**tldr** - Simplified man pages:
+
+```bash
+brew install tldr
+```
+
+## Wrapping Up
+
+Shell productivity tools turn the terminal from functional to productive. Install these 5 tools, configure your `.zshrc`, and save hours per week.
+
+Copy your `.zshrc` to new machines for instant productivity. No more painful setup days. Just clone dotfiles, run install commands, and you're productive.
+
+Next laptop? Follow this checklist. 15 minutes to fully productive terminal.

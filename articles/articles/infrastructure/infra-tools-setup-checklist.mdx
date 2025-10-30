@@ -1,7 +1,7 @@
 ---
 title: 'My Infrastructure Tools Setup Checklist: AWS, kubectl, Terraform & More'
 description: 'Complete kubectl, AWS CLI, and Terraform setup guide for Mac. Install and configure Kubernetes tools (k9s, kubectx, Istio, Flux) using Aqua for version management. Includes shell aliases and productivity tips for DevOps engineers.'
-topics: ['kubernetes', 'aws', 'terraform', 'devops']
+topics: ['kubernetes', 'aws', 'terraform', 'productivity']
 published: true
 date: '2025-10-24'
 ---
@@ -170,11 +170,13 @@ Instead of typing long kubectl config commands, use specialized tools.
 **Note:** I installed kubie, kubectx, and krew with Aqua for clarity in this article, but you can also install them via Homebrew or other package managers.
 
 **kubie** - Switch context for current tab only:
+
 ```bash
 kubie ctx production-cluster
 ```
 
 **kubectx** - Switch context for all terminal tabs:
+
 ```bash
 kubectx production-cluster
 ```
