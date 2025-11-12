@@ -91,11 +91,11 @@ const fadeIn = keyframes`
 `
 
 const DistributionChart = styled.div`
-  margin-bottom: 32px;
   padding: 24px;
+  margin-bottom: 32px;
+  background: ${({ theme }) => theme.colors.background};
   border: 1px solid ${({ theme }) => theme.colors.muted};
   border-radius: 8px;
-  background: ${({ theme }) => theme.colors.background};
 
   @media (width <= 35.1875rem) {
     padding: 16px;
@@ -103,9 +103,9 @@ const DistributionChart = styled.div`
 `
 
 const ChartTitle = styled.h3`
+  margin: 0 0 16px;
   font-size: var(--font-size-small);
   font-weight: 600;
-  margin: 0 0 16px 0;
   color: ${({ theme }) => theme.colors.text};
   opacity: 0;
   animation: ${fadeIn} 0.5s ease-out forwards;
@@ -115,10 +115,10 @@ const ChartBarContainer = styled.div`
   display: flex;
   width: 100%;
   height: 48px;
-  border-radius: 8px;
-  overflow: hidden;
   margin-bottom: 16px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgb(0, 0, 0, 0.1);
 `
 
 const ChartSegment = styled.div<{
@@ -128,15 +128,16 @@ const ChartSegment = styled.div<{
   animationDelay: number
 }>`
   --target-width: ${({ percentage }) => percentage}%;
+
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 0%;
   background: ${({ theme, useSecondary, opacity }) => {
     const color = useSecondary ? theme.colors.secondary : theme.colors.primary
     return color.replace('hsl(', `hsla(`).replace(')', `, ${opacity})`)
   }};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
   transition: opacity 0.2s ease;
   animation: ${growWidth} 1s ease-out forwards;
   animation-delay: ${({ animationDelay }) => animationDelay}s;
@@ -152,13 +153,13 @@ const ChartSegment = styled.div<{
 
 const SegmentLabel = styled.span<{ animationDelay?: number }>`
   display: flex;
-  align-items: center;
   gap: 4px;
+  align-items: center;
   font-size: var(--font-size-extra-small);
   font-weight: 600;
   color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
+  text-shadow: 0 1px 2px rgb(0, 0, 0, 0.2);
   opacity: 0;
   animation: ${fadeIn} 0.5s ease-out forwards;
   animation-delay: calc(${({ animationDelay }) => animationDelay ?? 0}s + 0.5s);
@@ -182,8 +183,8 @@ const ChartLegend = styled.div`
 
 const LegendItem = styled.div<{ animationDelay: number }>`
   display: flex;
-  align-items: center;
   gap: 12px;
+  align-items: center;
   opacity: 0;
   animation: ${fadeIn} 0.5s ease-out forwards;
   animation-delay: ${({ animationDelay }) => animationDelay}s;
@@ -191,17 +192,17 @@ const LegendItem = styled.div<{ animationDelay: number }>`
 
 const LegendIconWrapper = styled.div`
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   color: ${({ theme }) => theme.colors.primary};
-  flex-shrink: 0;
 `
 
 const LegendText = styled.div`
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
-  flex: 1;
 `
 
 const LegendName = styled.span`

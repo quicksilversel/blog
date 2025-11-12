@@ -70,8 +70,8 @@ const Information = styled.div`
   @media (width <= 35.1875rem) {
     display: flex;
     flex-direction: column;
-    margin-top: 24px;
     gap: 16px;
+    margin-top: 24px;
   }
 `
 
@@ -86,9 +86,9 @@ const ImageContainer = styled.div`
   align-self: center;
 
   @media (width <= 35.1875rem) {
+    align-self: flex-start;
     order: -1;
     margin-bottom: 8px;
-    align-self: flex-start;
   }
 `
 
@@ -98,14 +98,14 @@ const StyledImage = styled(Image)`
 `
 
 const Name = styled.h2`
+  margin: 0;
   font-size: var(--font-size-large);
   font-weight: bold;
-  margin: 0;
 `
 
 const Description = styled.p`
-  font-size: var(--font-size-small);
   margin: 0;
+  font-size: var(--font-size-small);
 `
 
 const Links = styled.div`

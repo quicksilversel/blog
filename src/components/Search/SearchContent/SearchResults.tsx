@@ -33,7 +33,9 @@ export const SearchResults = ({ results, onClose }: SearchModalProps) => {
             <ResultContent>
               <ResultTitle>
                 {result.title}
-                {result.type === 'snippet' && <ResultBadge>Snippet</ResultBadge>}
+                {result.type === 'snippet' && (
+                  <ResultBadge>Snippet</ResultBadge>
+                )}
               </ResultTitle>
               {result.description && (
                 <ResultDescription>{result.description}</ResultDescription>

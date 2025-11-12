@@ -63,19 +63,19 @@ const SkillsGrid = styled.div`
 `
 
 const SkillCardLink = styled(Link)`
-  text-decoration: none;
-  color: inherit;
   display: block;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
 `
 
 const SkillCard = styled.div`
+  height: 100%;
   padding: 24px;
+  background: ${({ theme }) => theme.colors.background};
   border: 1px solid ${({ theme }) => theme.colors.muted};
   border-radius: 8px;
-  background: ${({ theme }) => theme.colors.background};
   transition: border-color 0.2s ease;
-  height: 100%;
 
   ${SkillCardLink}:hover & {
     border-color: ${({ theme }) => theme.colors.primary};
@@ -84,36 +84,36 @@ const SkillCard = styled.div`
 
 const SkillHeader = styled.div`
   display: flex;
-  align-items: flex-start;
   gap: 16px;
+  align-items: flex-start;
   margin-bottom: 16px;
 `
 
 const SkillIconWrapper = styled.div`
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   color: ${({ theme }) => theme.colors.primary};
-  flex-shrink: 0;
 `
 
 const SkillInfo = styled.div`
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 4px;
-  flex: 1;
 `
 
 const SkillName = styled.h3`
+  margin: 0;
   font-size: var(--font-size-medium);
   font-weight: 600;
-  margin: 0;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const SkillDescription = styled.p`
-  font-size: var(--font-size-extra-small);
   margin: 0;
+  font-size: var(--font-size-extra-small);
   color: ${({ theme }) => theme.colors.mutedText};
 `
 
@@ -123,8 +123,8 @@ const SkillStats = styled.div`
 
 const ArticleCount = styled.span`
   font-size: var(--font-size-extra-small);
-  color: ${({ theme }) => theme.colors.primary};
   font-weight: 500;
+  color: ${({ theme }) => theme.colors.primary};
 `
 
 const TechList = styled.div`
@@ -134,10 +134,10 @@ const TechList = styled.div`
 `
 
 const TechTag = styled.span`
-  font-size: var(--font-size-extra-small);
   padding: 4px 12px;
-  background: ${({ theme }) => theme.colors.syntaxBackground};
+  font-size: var(--font-size-extra-small);
   color: ${({ theme }) => theme.colors.text};
-  border-radius: 12px;
+  background: ${({ theme }) => theme.colors.syntaxBackground};
   border: 1px solid ${({ theme }) => theme.colors.primary};
+  border-radius: 12px;
 `
