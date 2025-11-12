@@ -1,0 +1,478 @@
+---
+title: 'Deploying Python to GCP Cloud Run: A Guide for AWS Developers'
+description: 'How I deployed a Python Flask app to GCP Cloud Run with GitHub Actions CI/CD, coming from an AWS background. Spoiler: easier than you think.'
+topics: ['Python', 'GCP', 'Cloud Run']
+published: true
+date: '2025-11-11'
+---
+
+## Intro
+
+I've been deploying to AWS for years. Lambda, ECS, API Gateway, you name it. But when I needed to deploy a Python Slack bot integrated with Google's Vertex AI, it made sense to use GCP instead of wrestling with cross-cloud authentication.
+
+The problem? I had no idea how GCP worked.
+
+After a few hours of trial and error, I got my Flask app running on **Cloud Run** with automatic GitHub Actions deployment. Here's everything I learned, with constant AWS comparisons to make the transition easier.
+
+## GCP vs AWS: What You Need to Know
+
+Before diving in, here's how GCP services map to AWS:
+
+| GCP Service                      | AWS Equivalent                   | What It Does                                         |
+| -------------------------------- | -------------------------------- | ---------------------------------------------------- |
+| **Cloud Run**                    | Lambda + API Gateway             | Serverless containers with automatic HTTPS endpoints |
+| **Artifact Registry**            | ECR                              | Docker image registry                                |
+| **Secret Manager**               | Secrets Manager                  | Store API keys and credentials                       |
+| **Workload Identity Federation** | IAM Roles for service-to-service | Keyless authentication for GitHub Actions            |
+| **Vertex AI**                    | Bedrock                          | Managed AI/ML platform                               |
+
+The biggest difference? **Cloud Run uses containers**, not zip files like Lambda. This means you write a Dockerfile instead of bundling your code.
+
+## The Application: Flask + Vertex AI Gemini
+
+The app is a Slack bot that uses Google's Gemini AI to respond to messages:
+
+**Project structure:**
+
+```
+my-slack-bot/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # Flask app
+│   ├── handlers/
+│   │   ├── __init__.py
+│   │   └── slack_events.py        # Slack event handlers
+│   └── services/
+│       ├── __init__.py
+│       └── gemini.py              # Vertex AI integration
+├── .venv/
+├── pyproject.toml
+├── uv.lock
+├── Dockerfile                     # Container definition
+├── .dockerignore
+└── .github/workflows/deploy.yml   # CI/CD pipeline
+```
+
+**Key dependencies** (in `pyproject.toml`):
+
+```toml
+[project]
+dependencies = [
+    "flask>=3.1.2",
+    "python-dotenv>=1.1.1",
+    "slack-bolt>=1.26.0",
+    "google-cloud-aiplatform>=1.121.0",
+]
+```
+
+## The Dockerfile
+
+Unlike Lambda where you zip your code, Cloud Run requires a container image. Here's the Dockerfile:
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install uv (fast Python package manager)
+RUN pip install uv
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies (no dev dependencies for production)
+RUN uv sync --frozen --no-dev
+
+# Copy application code
+COPY app/ ./app/
+
+# Cloud Run sets PORT environment variable
+EXPOSE 8080
+
+# Production settings
+ENV FLASK_ENV=production
+ENV PORT=8080
+
+# Run the app
+CMD uv run python app/main.py
+```
+
+**Key differences from a Lambda deployment:**
+
+- **No zip file** - Your entire app + dependencies are baked into a Docker image
+- **Port 8080** - Cloud Run expects your app to listen on the `PORT` env var (default 8080)
+- **No handler function** - Just run your Flask app normally
+
+**.dockerignore** (keep the image small):
+
+```
+__pycache__/
+*.py[cod]
+.venv/
+.git/
+.github/
+.env
+.env.*
+README.md
+tests/
+.pytest_cache/
+```
+
+## GCP Setup: One-Time Configuration
+
+### 1. Create a GCP Project
+
+```bash
+# Set your project ID
+export PROJECT_ID="your-project-id"
+gcloud config set project $PROJECT_ID
+```
+
+**AWS equivalent:** Creating an AWS account/setting up IAM
+
+### 2. Enable Required APIs
+
+```bash
+gcloud services enable \
+  run.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com \
+  aiplatform.googleapis.com \
+  cloudbuild.googleapis.com
+```
+
+**AWS equivalent:** No action needed - AWS services are enabled by default
+
+### 3. Create Artifact Registry (Docker Registry)
+
+```bash
+gcloud artifacts repositories create my-slack-bot \
+  --repository-format=docker \
+  --location=asia-northeast1 \
+  --description="Container images for Slack bot"
+```
+
+**AWS equivalent:** `aws ecr create-repository`
+
+### 4. Store Secrets
+
+Instead of environment variables, use Secret Manager (like AWS Secrets Manager):
+
+```bash
+# Store Slack credentials
+echo -n "xoxb-your-slack-token" | \
+  gcloud secrets create SLACK_BOT_TOKEN --data-file=-
+
+echo -n "your-slack-signing-secret" | \
+  gcloud secrets create SLACK_SIGNING_SECRET --data-file=-
+
+# Store GCP project ID (needed for Vertex AI)
+echo -n "$PROJECT_ID" | \
+  gcloud secrets create GCP_PROJECT_ID --data-file=-
+```
+
+**Why Secret Manager instead of env vars?**
+
+- Secrets are encrypted at rest
+- Fine-grained IAM permissions
+- Automatic rotation support
+- No secrets in GitHub Actions
+
+### 5. Set Up Workload Identity Federation (GitHub Actions)
+
+This is the GCP equivalent of AWS's OIDC provider for GitHub Actions - it lets GitHub authenticate to GCP without storing service account keys.
+
+**Create service account:**
+
+```bash
+gcloud iam service-accounts create github-actions \
+  --display-name="GitHub Actions Deployment"
+
+# Grant permissions
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:github-actions@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/run.admin"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:github-actions@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:github-actions@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+```
+
+**Create Workload Identity Pool:**
+
+```bash
+# Create pool
+gcloud iam workload-identity-pools create "github" \
+  --location="global" \
+  --display-name="GitHub Actions Pool"
+
+# Create provider
+gcloud iam workload-identity-pools providers create-oidc "github-provider" \
+  --location="global" \
+  --workload-identity-pool="github" \
+  --display-name="GitHub Provider" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner" \
+  --attribute-condition="assertion.repository_owner == 'YOUR_GITHUB_ORG'" \
+  --issuer-uri="https://token.actions.githubusercontent.com"
+
+# Get provider resource name (you'll need this for GitHub secrets)
+gcloud iam workload-identity-pools providers describe "github-provider" \
+  --location="global" \
+  --workload-identity-pool="github" \
+  --format="value(name)"
+
+# Allow GitHub to impersonate service account
+# Replace PROJECT_NUMBER with your actual project number
+# Replace YOUR_GITHUB_ORG/REPO with your repo
+gcloud iam service-accounts add-iam-policy-binding \
+  "github-actions@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/YOUR_GITHUB_ORG/your-repo"
+```
+
+**AWS equivalent:** Setting up OIDC provider and IAM role for GitHub Actions
+
+### 6. Grant Cloud Run Access to Secrets
+
+```bash
+# Get your Cloud Run service account (PROJECT_NUMBER-compute@developer.gserviceaccount.com)
+# Grant it access to secrets
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+**Why?** Cloud Run needs permission to read secrets when your app starts.
+
+## GitHub Actions Workflow
+
+Here's the complete CI/CD pipeline (`.github/workflows/deploy.yml`):
+
+```yaml
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Manual trigger
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE_NAME: my-slack-bot
+  REGION: asia-northeast1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authorize Docker push
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build and Push Container
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} .
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "FLASK_ENV=production" \
+            --set-secrets "SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest" \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 10 \
+            --timeout 60
+
+      - name: Show Service URL
+        run: |
+          gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)'
+```
+
+**GitHub Secrets to configure:**
+
+Go to your repo → Settings → Secrets and variables → Actions:
+
+- `GCP_PROJECT_ID`: Your GCP project ID
+- `WIF_PROVIDER`: Workload Identity Provider resource name from step 5
+- `WIF_SERVICE_ACCOUNT`: `github-actions@YOUR_PROJECT_ID.iam.gserviceaccount.com`
+
+**Key differences from AWS CodePipeline/GitHub Actions:**
+
+| Feature            | AWS                                      | GCP                                 |
+| ------------------ | ---------------------------------------- | ----------------------------------- |
+| Authentication     | OIDC with IAM Role ARN                   | Workload Identity Federation        |
+| Container registry | Push to ECR                              | Push to Artifact Registry           |
+| Deployment         | Update Lambda/ECS                        | Deploy to Cloud Run                 |
+| Secrets            | Environment variables or Parameter Store | Secret Manager with `--set-secrets` |
+
+## Deployment
+
+Once everything is configured, deployment is automatic:
+
+```bash
+git add .
+git commit -m "Deploy to Cloud Run"
+git push origin main
+```
+
+GitHub Actions will:
+
+1. Build your Docker image
+2. Push to Artifact Registry
+3. Deploy to Cloud Run
+4. Output the service URL
+
+**Example output:**
+
+```
+Deploying container to Cloud Run service [my-slack-bot]
+✓ Deploying new service... Done.
+  https://my-slack-bot-abc123-an.a.run.app
+```
+
+That URL is your live endpoint! Update your Slack app's Event Subscriptions URL to `https://your-url.run.app/slack/events`.
+
+## Cost Comparison: Cloud Run vs Lambda
+
+**Cloud Run Pricing (as of 2024):**
+
+- **Free tier:** 2 million requests/month
+- **After free tier:** $0.40 per million requests
+- **Memory:** $0.0000025/GB-second
+- **CPU:** $0.00002400/vCPU-second
+- **Min instances 0:** Scales to zero when idle (free)
+
+**Lambda Pricing:**
+
+- **Free tier:** 1 million requests/month
+- **After free tier:** $0.20 per million requests
+- **Memory:** Similar per GB-second pricing
+- **Min instances 0:** Also scales to zero
+
+**For a small Slack bot:**
+
+- Cloud Run: ~$0-5/month (usually free tier)
+- Lambda + API Gateway: ~$0-5/month
+
+Nearly identical! But Cloud Run's advantage is **simpler deployments** (just Docker) and **better cold start times** for containerized apps.
+
+## Common Gotchas
+
+### 1. Secrets Permission Denied
+
+**Error:**
+
+```
+Permission denied on secret: SLACK_BOT_TOKEN for Revision service account
+```
+
+**Solution:** Grant Secret Manager access to Cloud Run service account:
+
+```bash
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### 2. Import Errors After Deployment
+
+**Error:** Works locally but crashes in Cloud Run with `ModuleNotFoundError`.
+
+**Solution:** Make sure your `Dockerfile` installs the package in editable mode:
+
+```dockerfile
+# Add to Dockerfile
+RUN uv pip install -e .
+```
+
+Or structure your imports correctly using absolute paths.
+
+### 3. Getting PROJECT_NUMBER
+
+You need your project number (not ID) for Workload Identity Federation:
+
+```bash
+gcloud projects describe $PROJECT_ID --format='value(projectNumber)'
+```
+
+## Monitoring and Logs
+
+**View logs:**
+
+```bash
+# Stream logs in real-time
+gcloud run services logs tail my-slack-bot --region asia-northeast1
+
+# View in Cloud Console
+# https://console.cloud.google.com/run
+```
+
+**AWS equivalent:** CloudWatch Logs
+
+The Cloud Run logs UI is actually nicer than CloudWatch - built-in filtering, automatic log grouping, and integrated error reporting.
+
+## Local Testing Before Deployment
+
+**Test with actual GCP credentials:**
+
+```bash
+# Authenticate
+gcloud auth application-default login
+
+# Add to .env
+GCP_PROJECT_ID=your-project-id
+GCP_LOCATION=asia-northeast1
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_SIGNING_SECRET=...
+
+# Run locally
+uv run python app/main.py
+```
+
+Your app will use your personal GCP credentials locally, then switch to the service account when deployed to Cloud Run.
+
+## Wrapping Up
+
+Deploying to GCP Cloud Run as an AWS developer wasn't as scary as I thought. The hardest part was understanding the terminology - once I mapped GCP services to their AWS equivalents, everything clicked.
+
+**Key takeaways:**
+
+1. **Cloud Run = Lambda + API Gateway** but with containers instead of zip files
+2. **Workload Identity Federation** is cleaner than storing service account keys
+3. **Secret Manager** is better than environment variables for production
+4. **Dockerfile** is straightforward if you've used Docker before
+5. **GitHub Actions** setup is very similar to AWS OIDC
+
+The entire setup took me about 2 hours from zero GCP knowledge to a working deployment. Most of that time was understanding Workload Identity Federation and IAM permissions.
+
+If you're an AWS developer looking to use GCP-specific services (like Vertex AI), Cloud Run is a great starting point. The serverless model is familiar, and the deployment process is actually simpler than juggling Lambda + API Gateway + ECR.
+
+In my next article, I'll cover integrating Vertex AI Gemini for the actual Slack bot functionality.
