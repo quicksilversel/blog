@@ -4,8 +4,9 @@ import path from 'path'
 import { NextApiRequest, NextApiResponse } from 'next'
 
 import { getArticles } from '@/libs/getArticles/getArticles'
+import { getProjects } from '@/libs/getProjects/getProjects'
 import { ArticleSearchIndex } from '@/libs/search/searchIndex'
-import { ARTICLE_PATH, SNIPPETS_PATH } from '@/utils/constants'
+import { ARTICLE_PATH, PROJECTS_PATH, SNIPPETS_PATH } from '@/utils/constants'
 
 let cachedIndex: ArticleSearchIndex | null = null
 let lastIndexTime: number = 0
@@ -32,18 +33,53 @@ async function loadContent(slug: string, basePath: string): Promise<string> {
   }
 }
 
+async function loadProjectContent(
+  slug: string,
+  basePath: string,
+): Promise<string> {
+  try {
+    const [projectName, fileName] = slug.split('/')
+    const absolutePath = path.isAbsolute(basePath)
+      ? basePath
+      : path.join(process.cwd(), basePath)
+    const filePath = path.join(absolutePath, projectName, `${fileName}.mdx`)
+    const source = await fs.readFile(filePath, 'utf8')
+
+    const contentWithoutFrontmatter = source
+      .replace(/^---[\s\S]*?---/, '')
+      .trim()
+
+    return contentWithoutFrontmatter
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`Error loading project content for ${slug}:`, error)
+    return ''
+  }
+}
+
 async function buildSearchIndex() {
   try {
-    const [articles, snippets] = await Promise.all([
+    const [articles, snippets, projects] = await Promise.all([
       getArticles(ARTICLE_PATH),
       getArticles(SNIPPETS_PATH),
+      getProjects(),
     ])
+
+    const projectArticles = projects.flatMap((project) => project.articles)
 
     const articlesWithContent = await Promise.all(
       articles.map(async (article) => ({
         ...article,
         type: 'article' as const,
         content: await loadContent(article.slug, ARTICLE_PATH),
+      })),
+    )
+
+    const projectArticlesWithContent = await Promise.all(
+      projectArticles.map(async (article) => ({
+        ...article,
+        type: 'article' as const,
+        content: await loadProjectContent(article.slug, PROJECTS_PATH),
       })),
     )
 
@@ -55,7 +91,11 @@ async function buildSearchIndex() {
       })),
     )
 
-    const allContent = [...articlesWithContent, ...snippetsWithContent]
+    const allContent = [
+      ...articlesWithContent,
+      ...projectArticlesWithContent,
+      ...snippetsWithContent,
+    ]
     return new ArticleSearchIndex(allContent)
   } catch (error) {
     // eslint-disable-next-line no-console

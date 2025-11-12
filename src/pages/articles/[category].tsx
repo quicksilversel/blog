@@ -9,12 +9,18 @@ import type {
 
 import { ArticleCategoryHome } from '@/components/Pages/Article/ArticleCategoryHome'
 import { getArticles } from '@/libs/getArticles'
+import { getProjects } from '@/libs/getProjects'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 let cachedArticles: Article[] | null = null
 async function fetchAllArticles(): Promise<Article[]> {
   if (cachedArticles) return cachedArticles
-  cachedArticles = await getArticles(ARTICLE_PATH)
+  const regularArticles = await getArticles(ARTICLE_PATH)
+  const projects = await getProjects()
+
+  const projectArticles = projects.flatMap((project) => project.articles)
+  cachedArticles = [...regularArticles, ...projectArticles]
+
   return cachedArticles
 }
 

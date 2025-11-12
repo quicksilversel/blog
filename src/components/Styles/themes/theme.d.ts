@@ -10,9 +10,6 @@ declare module '@emotion/react' {
       floating: string
       primary: string
       secondary: string
-      accentOrange: string
-      accentLavender: string
-      skylineBlue: string
       syntaxBackground: string
       backgroundhsl: string
     }

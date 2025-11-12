@@ -5,10 +5,16 @@ import type { Article } from '@/libs/getArticles/types'
 
 import { ArticleHome } from '@/components/Pages/Article/ArticleHome'
 import { getArticles } from '@/libs/getArticles'
+import { getProjects } from '@/libs/getProjects'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getStaticProps() {
-  const allArticles = await getArticles(ARTICLE_PATH)
+  const regularArticles = await getArticles(ARTICLE_PATH)
+  const projects = await getProjects()
+
+  const projectArticles = projects.flatMap((project) => project.articles)
+  const allArticles = [...regularArticles, ...projectArticles]
+
   const articles: Record<string, Article[]> = {}
 
   allArticles.forEach((article) => {
