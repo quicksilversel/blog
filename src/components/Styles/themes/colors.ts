@@ -3,9 +3,6 @@ import type { Theme } from '@emotion/react'
 const commonTheme = {
   primary: 'hsl(325deg, 90%, 72%)',
   secondary: 'hsl(195deg, 100%, 65%)',
-  accentOrange: 'hsl(30deg, 95%, 60%)',
-  accentLavender: 'hsl(270deg, 100%, 85%)',
-  skylineBlue: 'hsl(220deg, 80%, 70%)',
   syntaxBackground: 'hsl(225deg, 15%, 12%)',
 }
 

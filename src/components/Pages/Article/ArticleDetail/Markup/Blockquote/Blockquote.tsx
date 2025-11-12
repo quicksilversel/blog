@@ -10,7 +10,7 @@ const StyledBlockquote = styled.blockquote`
   padding: 16px;
   margin-top: 16px;
   background: ${({ theme }) => theme.colors.floating};
-  border-left: 3px solid ${({ theme }) => theme.colors.skylineBlue};
+  border-left: 3px solid ${({ theme }) => theme.colors.secondary};
   border-radius: 4px;
 
   > p {

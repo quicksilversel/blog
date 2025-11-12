@@ -62,16 +62,23 @@ export const ArticleByCategory = ({ category, articles }: Props) => {
         onTopicSelect={setSelectedTopic}
       />
       <Grid>
-        {filteredArticles.slice(0, ARTICLE_LIMIT).map((article) => (
-          <Card
-            key={article.slug}
-            title={article.title}
-            subtitle={article.readingTime}
-            description={article.description}
-            topics={article.topics}
-            link={`/articles/${article.slug}`}
-          />
-        ))}
+        {filteredArticles.slice(0, ARTICLE_LIMIT).map((article) => {
+          const isProjectArticle = 'project' in article
+          const link = isProjectArticle
+            ? `/projects/${article.slug}`
+            : `/articles/${article.slug}`
+
+          return (
+            <Card
+              key={article.slug}
+              title={article.title}
+              subtitle={article.readingTime}
+              description={article.description}
+              topics={article.topics}
+              link={link}
+            />
+          )
+        })}
       </Grid>
       <ShowMoreContainer>
         <Link href={`/articles/${category}`}>

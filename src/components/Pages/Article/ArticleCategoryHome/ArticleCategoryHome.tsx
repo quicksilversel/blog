@@ -17,16 +17,23 @@ export const ArticleCategoryHome = ({ category, articles }: Props) => {
       </Box.SectionHeader>
 
       <Stack>
-        {articles.map((article) => (
-          <Card
-            key={article.slug}
-            title={article.title}
-            subtitle={article.readingTime}
-            description={article.description}
-            topics={article.topics}
-            link={`/articles/${article.slug}`}
-          />
-        ))}
+        {articles.map((article) => {
+          const isProjectArticle = 'project' in article
+          const link = isProjectArticle
+            ? `/projects/${article.slug}`
+            : `/articles/${article.slug}`
+
+          return (
+            <Card
+              key={article.slug}
+              title={article.title}
+              subtitle={article.readingTime}
+              description={article.description}
+              topics={article.topics}
+              link={link}
+            />
+          )
+        })}
       </Stack>
     </Box>
   )

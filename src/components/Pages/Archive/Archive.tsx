@@ -90,7 +90,9 @@ export function Archive({ articles }: Props) {
                     <MonthSection key={monthKey}>
                       <MonthHeader onClick={() => toggleMonth(monthKey)}>
                         <MonthTitle>
-                          <ToggleIcon isExpanded={expandedMonths.has(monthKey)} />
+                          <ToggleIcon
+                            isExpanded={expandedMonths.has(monthKey)}
+                          />
                           {monthName}
                         </MonthTitle>
                         <PostCount>{articles.length} posts</PostCount>

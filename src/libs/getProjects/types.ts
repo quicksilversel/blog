@@ -9,5 +9,6 @@ export type Project = {
   title: string
   description?: string
   topics?: string[]
+  category?: string
   articles: ProjectArticle[]
 }

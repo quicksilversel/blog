@@ -122,10 +122,13 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
           if (results[selectedIndex]) {
             e.preventDefault()
             const result = results[selectedIndex]
+            const isProjectArticle = 'project' in result
             const path =
               result.type === 'snippet'
                 ? `/snippets/${result.slug}`
-                : `/articles/${result.slug}`
+                : isProjectArticle
+                  ? `/projects/${result.slug}`
+                  : `/articles/${result.slug}`
             router.push(path)
             onClose()
           }

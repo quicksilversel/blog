@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 
 import { serialize } from 'next-mdx-remote/serialize'
+import readingTime from 'reading-time'
 import remarkGfm from 'remark-gfm'
 
 import type { ProjectArticle } from './types'
@@ -11,6 +12,7 @@ import { PROJECTS_PATH } from '@/utils/constants'
 export async function getProjectArticles(
   projectName: string,
   basePath: string = PROJECTS_PATH,
+  category?: string,
 ): Promise<ProjectArticle[]> {
   const projectDir = path.join(basePath, projectName)
 
@@ -31,6 +33,7 @@ export async function getProjectArticles(
           },
         })
 
+        const stats = readingTime(source)
         const slug = `${projectName}/${path.basename(fileName, '.mdx')}`
 
         return {
@@ -38,8 +41,9 @@ export async function getProjectArticles(
           fileName,
           fullPath,
           project: projectName,
-          category: 'project' as const,
+          category: category ?? 'project',
           slug,
+          readingTime: stats.text,
         } as ProjectArticle
       }),
     )

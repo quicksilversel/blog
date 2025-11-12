@@ -20,13 +20,11 @@ export async function getProjects(
 
   const projects = await Promise.all(
     projectDirs.map(async (projectName) => {
-      const articles = await getProjectArticles(projectName, basePath)
-
-      // Try to read index.mdx for project metadata
       let projectMeta: {
         title?: string
         description?: string
         topics?: string[]
+        category?: string
       } = {}
       try {
         const indexPath = path.join(basePath, projectName, 'index.mdx')
@@ -41,6 +39,7 @@ export async function getProjects(
           title: frontmatter.title as string | undefined,
           description: frontmatter.description as string | undefined,
           topics: frontmatter.topics as string[] | undefined,
+          category: frontmatter.category as string | undefined,
         }
       } catch (error) {
         console.warn(
@@ -48,11 +47,18 @@ export async function getProjects(
         )
       }
 
+      const articles = await getProjectArticles(
+        projectName,
+        basePath,
+        projectMeta.category,
+      )
+
       return {
         slug: projectName,
         title: projectMeta.title ?? projectName,
         description: projectMeta.description,
         topics: projectMeta.topics,
+        category: projectMeta.category,
         articles,
       }
     }),

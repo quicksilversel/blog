@@ -15,31 +15,39 @@ interface SearchResult extends Article {
 export const SearchResults = ({ results, onClose }: SearchModalProps) => {
   return (
     <ResultsList>
-      {results.map((result) => (
-        <ResultItem
-          key={`${result.type}-${result.slug}`}
-          href={
-            result.type === 'snippet'
-              ? `/snippets/${result.slug}`
+      {results.map((result) => {
+        const isProjectArticle = 'project' in result
+        const href =
+          result.type === 'snippet'
+            ? `/snippets/${result.slug}`
+            : isProjectArticle
+              ? `/projects/${result.slug}`
               : `/articles/${result.slug}`
-          }
-          onClick={onClose}
-        >
-          <ResultContent>
-            <ResultTitle>
-              {result.title}
-              {result.type === 'snippet' && <ResultBadge>Snippet</ResultBadge>}
-            </ResultTitle>
-            {result.description && (
-              <ResultDescription>{result.description}</ResultDescription>
-            )}
-            <ResultPath>
-              {result.type === 'snippet' ? 'Snippets' : 'Articles'} /{' '}
-              {result.category}
-            </ResultPath>
-          </ResultContent>
-        </ResultItem>
-      ))}
+
+        return (
+          <ResultItem
+            key={`${result.type}-${result.slug}`}
+            href={href}
+            onClick={onClose}
+          >
+            <ResultContent>
+              <ResultTitle>
+                {result.title}
+                {result.type === 'snippet' && (
+                  <ResultBadge>Snippet</ResultBadge>
+                )}
+              </ResultTitle>
+              {result.description && (
+                <ResultDescription>{result.description}</ResultDescription>
+              )}
+              <ResultPath>
+                {result.type === 'snippet' ? 'Snippets' : 'Articles'} /{' '}
+                {result.category}
+              </ResultPath>
+            </ResultContent>
+          </ResultItem>
+        )
+      })}
     </ResultsList>
   )
 }
