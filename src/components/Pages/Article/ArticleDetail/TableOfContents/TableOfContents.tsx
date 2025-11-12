@@ -45,9 +45,9 @@ export function TableOfContents({ content }: Props) {
         <StyledChevronDown aria-hidden="true" />
       </Summary>
       <HeadingList role="navigation" aria-labelledby="toc-title">
-        {headings.map((heading) => {
+        {headings.map((heading, index) => {
           return (
-            <HeadingItem key={heading.id} level={heading.level}>
+            <HeadingItem key={heading.id + index} level={heading.level}>
               <HeadingLink
                 href={`#${heading.id}`}
                 level={heading.level}

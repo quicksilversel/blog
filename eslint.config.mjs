@@ -1,19 +1,7 @@
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import typescriptEslint from '@typescript-eslint/eslint-plugin'
 import typescriptEslintParser from '@typescript-eslint/parser'
-
-import { FlatCompat } from '@eslint/eslintrc'
-import js from '@eslint/js'
+import nextConfig from 'eslint-config-next/core-web-vitals'
 import unusedImports from 'eslint-plugin-unused-imports'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-  recommendedConfig: js.configs.recommended,
-  allConfig: js.configs.all,
-})
 
 // Shared rules for all files
 const sharedRules = {
@@ -70,7 +58,7 @@ const sharedRules = {
 }
 
 const config = [
-  ...compat.extends('next/core-web-vitals'),
+  ...nextConfig,
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     languageOptions: {

@@ -27,8 +27,6 @@ export function ReadingProgress({ height = 4 }: ReadingProgressProps) {
   }, [])
 
   useEffect(() => {
-    calculateProgress()
-
     let ticking = false
     const handleScroll = () => {
       if (!ticking) {
@@ -39,6 +37,10 @@ export function ReadingProgress({ height = 4 }: ReadingProgressProps) {
         ticking = true
       }
     }
+
+    requestAnimationFrame(() => {
+      calculateProgress()
+    })
 
     window.addEventListener('scroll', handleScroll, { passive: true })
     window.addEventListener('resize', calculateProgress)
@@ -84,8 +86,6 @@ export function useReadingProgress(target?: HTMLElement | null) {
   }, [target])
 
   useEffect(() => {
-    calculateProgress()
-
     let ticking = false
     const handleScroll = () => {
       if (!ticking) {
@@ -96,6 +96,10 @@ export function useReadingProgress(target?: HTMLElement | null) {
         ticking = true
       }
     }
+
+    requestAnimationFrame(() => {
+      calculateProgress()
+    })
 
     window.addEventListener('scroll', handleScroll, { passive: true })
     window.addEventListener('resize', calculateProgress)
