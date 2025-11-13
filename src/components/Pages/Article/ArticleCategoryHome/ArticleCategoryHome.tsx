@@ -1,23 +1,35 @@
+import { useState } from 'react'
+
 import type { Article } from '@/libs/getArticles/types'
 
 import { Box } from '@/components/UI/Box'
 import { Card } from '@/components/UI/Card'
 import { Stack } from '@/components/UI/Stack'
 
+import { Pagination } from './Pagination'
+
 type Props = {
   category: string
   articles: Article[]
 }
 
+const ARTICLES_PER_PAGE = 5
+
 export const ArticleCategoryHome = ({ category, articles }: Props) => {
+  const [currentPage, setCurrentPage] = useState(1)
+
+  const totalPages = Math.ceil(articles.length / ARTICLES_PER_PAGE)
+  const startIndex = (currentPage - 1) * ARTICLES_PER_PAGE
+  const endIndex = startIndex + ARTICLES_PER_PAGE
+  const currentArticles = articles.slice(startIndex, endIndex)
+
   return (
     <Box>
       <Box.SectionHeader>
         <Box.Title>{category}</Box.Title>
       </Box.SectionHeader>
-
       <Stack>
-        {articles.map((article) => {
+        {currentArticles.map((article) => {
           const isProjectArticle = 'project' in article
           const link = isProjectArticle
             ? `/projects/${article.slug}`
@@ -35,6 +47,11 @@ export const ArticleCategoryHome = ({ category, articles }: Props) => {
           )
         })}
       </Stack>
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={setCurrentPage}
+      />
     </Box>
   )
 }
