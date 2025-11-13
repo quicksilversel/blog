@@ -1,0 +1,724 @@
+---
+title: 'Integrating Vertex AI Gemini into Flask: Building an AI-Powered Slack Bot'
+description: 'How I added Google Vertex AI Gemini to my Flask Slack bot, with chat sessions, error handling, and troubleshooting permission issues. From zero to working AI in production.'
+topics: ['Python', 'Flask', 'GCP', 'AI']
+published: true
+date: '2025-11-12'
+---
+
+## Intro
+
+After [deploying my Flask app to Cloud Run](/articles/backend/deploying-python-to-gcp-cloud-run), I had a working Slack bot that could receive messages. But it couldn't actually respond intelligently - it just echoed back what you said.
+
+Time to add the AI brain.
+
+I wanted to use **Google's Vertex AI Gemini** (their latest multimodal model) to make the bot conversational.
+
+> The goal: users could @mention the bot or DM it, and it would respond naturally using Gemini.
+
+Here's everything I learned integrating Vertex AI into Flask, including all the permission errors and debugging I had to do along the way.
+
+## What We're Building
+
+**Before:** Bot receives Slack messages but can't respond
+
+**After:** Bot uses Gemini to generate contextual responses, maintaining conversation history per user
+
+**Key features:**
+
+- User-specific chat sessions (conversation context)
+- Works in both DMs and channel mentions
+- Detailed error logging for debugging
+- Local testing support
+
+## Installing Dependencies
+
+First, add the Vertex AI SDK:
+
+```bash
+uv add google-cloud-aiplatform
+```
+
+This installs the `google-cloud-aiplatform` package which includes support for Vertex AI's Generative Models API.
+
+**Updated `pyproject.toml`:**
+
+```toml
+[project]
+dependencies = [
+    "flask>=3.1.2",
+    "python-dotenv>=1.1.1",
+    "slack-bolt>=1.26.0",
+    "google-cloud-aiplatform>=1.121.0",  # New!
+]
+```
+
+## Creating the Gemini Service
+
+I created a service class to encapsulate all Gemini logic in `app/services/gemini.py`:
+
+```python
+import os
+import logging
+from typing import Optional
+import vertexai
+from vertexai.generative_models import GenerativeModel, ChatSession
+
+logger = logging.getLogger(__name__)
+
+
+class GeminiService:
+    """Service for interacting with Vertex AI Gemini"""
+
+    def __init__(self):
+        self.project_id = os.getenv("GCP_PROJECT_ID")
+        # Gemini is not available in all regions as of Nov 2025
+        self.location = "us-central1"
+        self.model_name = "gemini-2.5-flash"
+
+        if not self.project_id:
+            raise ValueError("GCP_PROJECT_ID environment variable is required")
+
+        logger.info(
+            f"Initializing GeminiService - Project: {self.project_id}, "
+            f"Location: {self.location}, Model: {self.model_name}"
+        )
+
+        # Initialize Vertex AI
+        vertexai.init(project=self.project_id, location=self.location)
+
+        # Create model instance
+        self.model = GenerativeModel(self.model_name)
+
+        # Store chat sessions per user
+        self.chat_sessions: dict[str, ChatSession] = {}
+
+        logger.info("GeminiService initialized successfully")
+
+    def get_chat_session(self, user_id: str) -> ChatSession:
+        """Get or create chat session for user"""
+        if user_id not in self.chat_sessions:
+            self.chat_sessions[user_id] = self.model.start_chat()
+        return self.chat_sessions[user_id]
+
+    def clear_chat_session(self, user_id: str) -> None:
+        """Clear chat history for user"""
+        if user_id in self.chat_sessions:
+            del self.chat_sessions[user_id]
+
+    def generate_response_sync(
+        self, user_id: str, message: str, use_context: bool = True
+    ) -> str:
+        """
+        Generate AI response using Gemini
+
+        Args:
+            user_id: Unique identifier for user (preserves conversation context)
+            message: User's message
+            use_context: If True, uses chat history. If False, one-off question.
+
+        Returns:
+            Gemini's response text
+        """
+        try:
+            if use_context:
+                # Use chat session to maintain conversation history
+                chat = self.get_chat_session(user_id)
+                response = chat.send_message(message)
+            else:
+                # One-off question without context
+                response = self.model.generate_content(message)
+
+            return response.text
+
+        except Exception as e:
+            import traceback
+
+            error_trace = traceback.format_exc()
+            logger.error(
+                f"Error generating Gemini response: {e}\n"
+                f"Project: {self.project_id}, Location: {self.location}, "
+                f"Model: {self.model_name}, User: {user_id}\n"
+                f"Full traceback:\n{error_trace}"
+            )
+            return (
+                "Sorry, I encountered an error processing your request. "
+                "Please try again."
+            )
+
+
+# Singleton instance
+_gemini_service: Optional[GeminiService] = None
+
+
+def get_gemini_service() -> GeminiService:
+    """Get or create the Gemini service singleton"""
+    global _gemini_service
+    if _gemini_service is None:
+        _gemini_service = GeminiService()
+    return _gemini_service
+```
+
+## Key Design Decisions
+
+### 1. User-Specific Chat Sessions
+
+The chat sessions dictionary (`self.chat_sessions`) maintains separate conversation histories for each user:
+
+```python
+self.chat_sessions: dict[str, ChatSession] = {}
+```
+
+**Why this matters:**
+
+- User A asks "What's Python?" → Gemini explains Python
+- User A asks "What's it used for?" → Gemini knows "it" refers to Python
+- User B asks "What's it used for?" → Doesn't see User A's history
+
+Each Slack user gets their own context. No cross-user contamination.
+
+### 2. Singleton Pattern
+
+```python
+_gemini_service: Optional[GeminiService] = None
+
+def get_gemini_service() -> GeminiService:
+    global _gemini_service
+    if _gemini_service is None:
+        _gemini_service = GeminiService()
+    return _gemini_service
+```
+
+This ensures we only initialize Vertex AI once per app lifecycle, not on every request. Faster responses, fewer API calls.
+
+### 3. Regional Model Availability
+
+```python
+self.location = "us-central1"
+```
+
+Gemini isn't available in all GCP regions. I initially tried `asia-northeast1` (Tokyo) but got 404 errors.
+
+**Available regions (as of 2025):**
+
+- `us-central1` (Iowa) ✅
+- `us-east4` (Virginia) ✅
+- `europe-west1` (Belgium) ✅
+- `asia-southeast1` (Singapore) ✅
+
+Always check [Vertex AI region availability](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) before choosing a region.
+
+### 4. Detailed Error Logging
+
+```python
+logger.error(
+    f"Error generating Gemini response: {e}\n"
+    f"Project: {self.project_id}, Location: {self.location}, "
+    f"Model: {self.model_name}, User: {user_id}\n"
+    f"Full traceback:\n{error_trace}"
+)
+```
+
+This saved me hours of debugging. When errors occur in Cloud Run, you see exactly:
+
+- What went wrong
+- Which project/region/model
+- Full stack trace
+
+Critical for troubleshooting permission issues (more on that later).
+
+## Integrating with Slack Handlers
+
+Now update the Slack event handlers to use Gemini in `app/handlers/slack_events.py`:
+
+```python
+from app.services.gemini import get_gemini_service
+import re
+
+@app.event("app_mention")
+def handle_mention(event, say, logger):
+    """
+    When someone @mentions the bot
+    Example: "@PromoBot hello"
+    Replies in a thread using Gemini AI
+    """
+    user = event.get("user")
+    text = event.get("text", "")
+    thread_ts = event.get("thread_ts") or event.get("ts")
+
+    logger.info(f"Mention from {user}: {text}")
+
+    # Remove @bot mention from message
+    clean_text = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+
+    try:
+        gemini = get_gemini_service()
+        response = gemini.generate_response_sync(user, clean_text)
+        say(text=response, thread_ts=thread_ts)
+    except Exception as e:
+        logger.error(f"Error with Gemini: {e}")
+        say(
+            text=f"Hi <@{user}>! I'm having trouble connecting to my AI service. "
+            f"Please try again later.",
+            thread_ts=thread_ts,
+        )
+
+@app.event("message")
+def handle_message(event, say, logger):
+    """
+    When someone DMs the bot
+    Only responds to direct messages, not channel messages
+    Uses Gemini AI to generate contextual responses
+    """
+    # Ignore bot messages to prevent loops
+    if event.get("bot_id"):
+        return
+
+    # Only respond to DMs
+    channel_type = event.get("channel_type")
+    if channel_type != "im":
+        return
+
+    user = event.get("user")
+    text = event.get("text", "")
+
+    logger.info(f"DM from {user}: {text}")
+
+    try:
+        gemini = get_gemini_service()
+        response = gemini.generate_response_sync(user, text, use_context=True)
+        say(response)
+    except Exception as e:
+        logger.error(f"Error with Gemini: {e}")
+        say(
+            "I'm having trouble connecting to my AI service. "
+            "Please try again later."
+        )
+```
+
+**Important:** The regex `re.sub(r"<@[A-Z0-9]+>", "", text)` removes the bot mention (`@PromoBot`) from the message before sending to Gemini. Otherwise, Gemini would see messages like "@U12345ABC what is Python?" instead of "what is Python?".
+
+## Configuration: Environment Variables
+
+Add these to your `.env` for local development:
+
+```bash
+FLASK_ENV=development
+PORT=3000
+
+# Slack credentials
+SLACK_BOT_TOKEN=xoxb-your-slack-token
+SLACK_SIGNING_SECRET=your-signing-secret
+
+# GCP Configuration
+GCP_PROJECT_ID=your-project-id
+GCP_LOCATION=us-central1
+```
+
+And configure as secrets in Cloud Run:
+
+```bash
+# Store GCP_PROJECT_ID as secret
+echo -n "your-project-id" | \
+  gcloud secrets create GCP_PROJECT_ID --data-file=-
+```
+
+Update your GitHub Actions deployment to include the secret:
+
+```yaml
+--set-secrets "SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest"
+```
+
+## Local Testing
+
+Create a test endpoint in `app/main.py` for easy local testing without Slack:
+
+```python
+@app.route("/test/chat", methods=["POST"])
+def test_chat():
+    """
+    Test endpoint to simulate Slack messages locally
+    Bypasses Slack signature verification for easy testing
+
+    Usage:
+    curl -X POST http://localhost:3000/test/chat \
+      -H "Content-Type: application/json" \
+      -d '{"user_id": "test-user", "message": "What is Python?"}'
+    """
+    if os.getenv("FLASK_ENV") != "development":
+        return jsonify({"error": "Test endpoint only available in development"}), 403
+
+    from app.services.gemini import get_gemini_service
+
+    data = request.get_json()
+    user_id = data.get("user_id", "test-user")
+    message = data.get("message", "")
+    use_context = data.get("use_context", True)
+
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    try:
+        gemini = get_gemini_service()
+        response = gemini.generate_response_sync(user_id, message, use_context)
+        return jsonify({
+            "user_id": user_id,
+            "message": message,
+            "response": response
+        }), 200
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Error in test endpoint: {e}\n{error_details}")
+        return jsonify({"error": "Internal server error"}), 500
+```
+
+**Test it:**
+
+```bash
+# Start dev server
+make dev
+
+# Test Gemini integration
+curl -X POST http://localhost:3000/test/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is Python?"}'
+```
+
+**Example response:**
+
+```json
+{
+  "user_id": "test-user",
+  "message": "What is Python?",
+  "response": "Python is a high-level, interpreted programming language known for its readability and versatility..."
+}
+```
+
+## The Permission Nightmare (and How to Fix It)
+
+When I first deployed to Cloud Run, I got this error:
+
+```
+403 Permission 'aiplatform.endpoints.predict' denied on resource
+'//aiplatform.googleapis.com/projects/your-project/locations/us-central1/publishers/google/models/gemini-2.5-flash'
+[reason: "IAM_PERMISSION_DENIED"]
+```
+
+**The problem:** Cloud Run's service account didn't have permission to use Vertex AI.
+
+**Why it worked locally:** My personal Google account has owner permissions. Cloud Run uses a service account with limited permissions.
+
+### Solution: Grant Vertex AI Permissions
+
+First, find which service account Cloud Run uses:
+
+```bash
+gcloud run services describe your-service-name \
+  --region=asia-northeast1 \
+  --format="value(spec.template.spec.serviceAccountName)"
+```
+
+**Example output:**
+
+```
+123456789-compute@developer.gserviceaccount.com
+```
+
+Then grant the **Vertex AI User** role:
+
+```bash
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:123456789-compute@developer.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+```
+
+**What this role grants:**
+
+- `aiplatform.endpoints.predict` - Call Gemini models
+- `aiplatform.models.get` - Access model metadata
+- Full access to Vertex AI prediction APIs
+
+After granting this permission, the bot started working immediately - no redeploy needed.
+
+## Common Gotchas
+
+### 1. Model Not Found (404 Error)
+
+**Error:**
+
+```
+404 Publisher Model 'projects/your-project/locations/asia-northeast1/publishers/google/models/gemini-1.5-flash' was not found
+```
+
+**Causes:**
+
+1. **Wrong region** - Gemini not available in that region
+2. **Wrong model name** - Model version doesn't exist
+3. **Terms of service not accepted** - Need to enable Generative AI
+
+**Solutions:**
+
+```bash
+# 1. Use supported region
+self.location = "us-central1"  # Not "asia-northeast1"
+
+# 2. Check model name
+# ✅ gemini-2.5-flash
+# ✅ gemini-1.5-flash
+# ❌ gemini-flash (missing version)
+
+# 3. Enable Generative AI API and accept ToS
+gcloud services enable generativelanguage.googleapis.com
+# Then visit: https://console.cloud.google.com/vertex-ai/generative/language
+# Click "Enable" and accept terms of service
+```
+
+### 2. Works Locally but Fails in Cloud Run
+
+This usually means:
+
+1. **Service account permissions** - Grant `roles/aiplatform.user`
+2. **Environment variable missing** - Check `GCP_PROJECT_ID` is in secrets
+3. **Region mismatch** - Hardcode `us-central1` instead of using env var
+
+### 3. Chat History Not Persisting
+
+**Problem:** Every message is treated as a new conversation.
+
+**Check:**
+
+```python
+# ❌ Creates new service every time
+def handle_message():
+    gemini = GeminiService()  # Don't do this!
+
+# ✅ Use singleton
+def handle_message():
+    gemini = get_gemini_service()  # Reuses same instance
+```
+
+The singleton pattern ensures chat sessions survive across requests.
+
+### 4. Removing All User Mentions
+
+The current regex removes **all** user mentions:
+
+```python
+clean_text = re.sub(r"<@[A-Z0-9]+>", "", text).strip()
+```
+
+If a user writes:
+
+```
+@Bot hey can you help @john with this?
+```
+
+Gemini receives:
+
+```
+hey can you help  with this?
+```
+
+Both `@Bot` and `@john` are removed. If you want to keep other mentions, you'd need to only remove the bot's specific mention.
+
+## Logging Configuration
+
+Add proper logging to `app/main.py`:
+
+```python
+import logging
+
+# Configure logging for Cloud Run
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+```
+
+**Why this matters:** Cloud Run automatically sends `stdout`/`stderr` to Cloud Logging. Using Python's `logging` module ensures proper log levels and formatting.
+
+**View logs in Cloud Run:**
+
+```bash
+gcloud run services logs tail your-service-name --region asia-northeast1
+```
+
+Or in the console: https://console.cloud.google.com/run
+
+## Testing the Full Flow
+
+### 1. Local Testing (with real Gemini)
+
+```bash
+# Authenticate with your Google account
+gcloud auth application-default login
+
+# Run locally
+make dev
+
+# Test endpoint
+curl -X POST http://localhost:3000/test/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is Python?"}'
+```
+
+### 2. Test in Slack (Development)
+
+1. **Set up ngrok** to expose local server:
+
+```bash
+ngrok http 3000
+```
+
+2. **Update Slack Event URL** with ngrok URL:
+
+```
+https://abc123.ngrok.io/slack/events
+```
+
+3. **Send test message** in Slack - @mention your bot or DM it
+
+### 3. Production Testing (Cloud Run)
+
+Deploy and test:
+
+```bash
+git add .
+git commit -m "Add Gemini integration"
+git push origin main
+```
+
+GitHub Actions deploys automatically. Test by messaging the bot in Slack.
+
+## Cost Considerations
+
+**Vertex AI Gemini Pricing (as of 2025):**
+
+For `gemini-1.5-flash` and `gemini-2.5-flash`:
+
+- **Input:** $0.075 per 1M characters
+- **Output:** $0.30 per 1M characters
+- **Free tier:** 1,500 requests/day (limited quota)
+
+**Example calculation** for a small team Slack bot:
+
+- 100 messages/day
+- Average 50 characters input + 200 characters output per message
+
+**Monthly cost:**
+
+```
+Input:  100 × 50 × 30 = 150,000 chars  → $0.01
+Output: 100 × 200 × 30 = 600,000 chars → $0.18
+Total: ~$0.20/month
+```
+
+Nearly free for small teams. Even at 1000+ messages/day, you're looking at less than $5/month.
+
+**Compare to OpenAI:**
+
+- GPT-4: ~$0.03 per message (15x more expensive)
+- GPT-3.5: ~$0.002 per message (similar to Gemini)
+
+Gemini Flash is extremely cost-effective for conversational bots.
+
+## Monitoring and Debugging
+
+**Check if Gemini is being called:**
+
+```bash
+gcloud logging read "resource.type=cloud_run_revision AND textPayload:GeminiService" \
+  --project=your-project-id \
+  --limit=10
+```
+
+**Check for errors:**
+
+```bash
+gcloud logging read "resource.type=cloud_run_revision AND severity>=ERROR" \
+  --project=your-project-id \
+  --limit=20
+```
+
+**Useful log queries:**
+
+```bash
+# All Gemini-related logs
+textPayload:"Gemini"
+
+# Permission errors
+severity>=ERROR AND textPayload:"Permission"
+
+# Model not found errors
+severity>=ERROR AND textPayload:"404"
+```
+
+## Complete File Structure
+
+After adding Gemini integration:
+
+```
+slack-bot/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # Flask app with /test/chat endpoint
+│   ├── handlers/
+│   │   ├── __init__.py
+│   │   └── slack_events.py        # Slack handlers using Gemini
+│   └── services/
+│       ├── __init__.py
+│       └── gemini.py              # Vertex AI Gemini service
+├── .env                           # Local environment variables
+├── .vscode/
+│   └── settings.json              # VSCode Python config
+├── Dockerfile
+├── .dockerignore
+├── .github/workflows/deploy.yml
+├── pyproject.toml
+└── uv.lock
+```
+
+## Next Steps
+
+Now that you have Gemini working:
+
+1. **Add system prompts** to customize bot personality
+2. **Implement conversation reset** (e.g., `/reset` command)
+3. **Add rate limiting** to prevent abuse
+4. **Store conversation history** in a database (currently in-memory)
+5. **Add multimodal support** (images, PDFs) - Gemini supports it!
+
+## Wrapping Up
+
+Integrating Vertex AI Gemini into Flask was easier than expected, once I got past the permission issues. The hardest part was understanding:
+
+1. **Regional availability** - Not all regions support Gemini
+2. **Service account permissions** - Need explicit Vertex AI access
+3. **Chat session management** - Singleton pattern for shared state
+
+**Key takeaways:**
+
+- Use `us-central1` for Gemini (or check region availability)
+- Grant `roles/aiplatform.user` to Cloud Run service account
+- Use singleton pattern for GeminiService to maintain chat sessions
+- Add detailed error logging for debugging in production
+- Create a `/test/chat` endpoint for local testing
+- Gemini is extremely cost-effective for chatbots
+
+The entire integration took about 2 hours, with most time spent debugging permissions. Once that was solved, everything worked smoothly.
+
+If you're building AI-powered apps on GCP, Vertex AI Gemini is a no-brainer - especially if you're already using Cloud Run.
+
+## Pro Tips
+
+**Always log project ID, region, and model name in errors.** This makes troubleshooting 10x faster.
+
+**Use different model versions for dev vs prod.** Test with `gemini-1.5-flash` (stable) before trying newer models.
+
+**Implement conversation reset.** Users need a way to clear context if the bot gets confused.
+
+**Monitor token usage in Cloud Logging.** Vertex AI logs include token counts - useful for cost tracking.
+
+**Use `use_context=False` for one-off questions.** Saves chat session memory and prevents context pollution.
