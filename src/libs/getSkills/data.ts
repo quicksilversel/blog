@@ -17,7 +17,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
   },
   backend: {
     displayName: 'Backend',
-    description: 'APIs, Python, Flask',
+    description: 'Python, Flask',
     icon: 'Server',
     techKeywords: ['Python'],
   },
