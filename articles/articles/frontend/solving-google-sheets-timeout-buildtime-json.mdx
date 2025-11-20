@@ -1,0 +1,210 @@
+---
+title: Solving Google Sheets Timeout Issues with Build-Time Static JSON Generation
+description: 'How I eliminated Google Sheets API timeout errors by generating static JSON files at build time instead of fetching data at runtime.'
+topics: ['Next.js']
+published: true
+date: '2025-11-19'
+---
+
+## The Problem
+
+I was building an application that needed to display data from Google Sheets. The initial approach was straightforward: fetch the data from Google Sheets API whenever a user visits the page. However, this created several issues:
+
+1. **Timeout errors**: The Google Sheets API would sometimes timeout, especially when fetching large datasets
+2. **Rate limiting**: Frequent API calls would hit Google's rate limits
+3. **Slow performance**: Every page load required waiting for the API response
+4. **Unnecessary API calls**: The data doesn't change frequently, yet we were fetching it on every request
+
+The most frustrating part was seeing timeout errors during deployment builds and in production when users tried to view the data:
+
+```
+⨯ node_modules/ky/distribution/utils/timeout.js (9:19) @ Timeout.eval
+⨯ Internal error: TimeoutError: Request timed out: POST https://sheets.googleapis.com/v4/spreadsheets/[ID]/:getByDataFilter
+  at Timeout.eval (./node_modules/ky/distribution/utils/timeout.js:14:20)
+  at listOnTimeout (node:internal/timers:581:17)
+  at process.processTimers (node:internal/timers:519:7)
+digest: "664503010"
+```
+
+## The Solution: Build-Time Static JSON Generation
+
+Instead of fetching data at runtime, I decided to generate a static JSON file during the build process. This approach offers several benefits:
+
+- **No runtime API calls**: The data is pre-fetched and bundled with the application
+- **Instant page loads**: No waiting for external API responses
+- **No timeout issues**: Build-time fetching has more relaxed timeouts
+- **Lower costs**: Significantly fewer API calls to Google Sheets
+
+### Implementation
+
+#### Step 1: Create the Data Fetching Script
+
+I created a script at `scripts/generate-data.ts` that fetches all the data from Google Sheets and saves it as a JSON file:
+
+```typescript
+import * as fs from 'fs'
+import * as path from 'path'
+
+import { fetchAllData } from '../src/libs/googleSheets'
+
+async function generateDataJson() {
+  try {
+    const data = await fetchAllData()
+    const outputPath = path.join(process.cwd(), 'public', 'data.json')
+
+    const publicDir = path.join(process.cwd(), 'public')
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true })
+    }
+
+    fs.writeFileSync(outputPath, JSON.stringify(data, null, 2))
+  } catch (error) {
+    process.exit(1)
+  }
+}
+
+generateDataJson()
+```
+
+The script:
+
+- Fetches all data from Google Sheets
+- Creates the `public` directory if it doesn't exist
+- Writes the data to `public/data.json`
+- Exits with an error code if something goes wrong (failing the build)
+
+#### Step 2: Configure package.json Scripts
+
+I added scripts to run the generator and integrated it into the build process:
+
+```json
+{
+  "scripts": {
+    "generate-data": "tsx scripts/generate-data.ts",
+    "generate-data:local": "NEXT_PUBLIC_APP_ENV=local tsx scripts/generate-data.ts",
+    "prebuild": "npm run generate-data",
+    "build": "npm run prebuild && next build"
+  }
+}
+```
+
+The `prebuild` script runs automatically before every build, ensuring the data is always fresh when deploying.
+
+#### Step 3: Update Components to Use Static JSON
+
+Instead of calling the Google Sheets API from components, I now fetch the static JSON file:
+
+```typescript
+// Before: Runtime API call
+const data = await fetchAllData() // Could timeout
+
+// After: Static JSON file
+const data = await fetch('/data.json').then((res) => res.json())
+```
+
+Since the file is in the `public` directory, it's served as a static asset and loads instantly.
+
+#### Step 4: Handle CI/CD Pipeline
+
+In the GitHub Actions workflow, I made sure to:
+
+1. Set the Google Sheets credentials as environment variables
+2. Run `npm run build` (which triggers the prebuild script automatically)
+
+```yaml
+env:
+  GOOGLE_SHEETS_CREDENTIALS: ${{secrets.GOOGLE_SHEETS_CREDENTIALS}}
+
+steps:
+  - name: Build
+    run: npm run build
+```
+
+The build process now:
+
+1. Runs the `prebuild` script
+2. Fetches data from Google Sheets
+3. Generates `public/data.json`
+4. Builds the Next.js application with the static data
+
+## Optimizing the Google Sheets Fetching
+
+While implementing this solution, I also optimized how I fetch data from Google Sheets to handle large datasets efficiently:
+
+```typescript
+async getAllData(): Promise<Data[]> {
+  const sheet = await this.getSheet()
+  const totalRows = sheet.rowCount
+
+  const BATCH_SIZE = 200
+  const dataArray: Data[] = []
+
+  // Load data in batches to avoid memory issues
+  for (
+    let batchStart = DATA_START_ROW;
+    batchStart < totalRows;
+    batchStart += BATCH_SIZE
+  ) {
+    const batchEnd = Math.min(batchStart + BATCH_SIZE, totalRows)
+
+    await sheet.loadCells({
+      startRowIndex: batchStart,
+      endRowIndex: batchEnd,
+      startColumnIndex: minCol,
+      endColumnIndex: maxCol,
+    })
+
+    // Process batch...
+  }
+
+  return dataArray
+}
+```
+
+Key optimizations:
+
+- **Batch processing**: Load rows in batches instead of all at once
+- **Column filtering**: Only load the columns we need
+- **Memory management**: Process data incrementally to prevent memory issues
+
+## Results
+
+After implementing this solution:
+
+- **Zero timeout errors**: Build-time fetching has never timed out
+- **Faster page loads**: Data loads instantly from the static JSON file
+- **Reduced API costs**: Google Sheets API is only called during builds
+- **Better developer experience**: Local development can use cached data without hitting API limits
+- **Predictable builds**: Builds fail fast if data fetching fails, rather than failing silently in production
+
+## Bonus: Local Development
+
+For local development, I added a separate script that uses local credentials:
+
+```bash
+npm run generate-data:local
+```
+
+This allows developers to generate fresh data locally without needing to set up environment variables for every development session.
+
+## When to Use This Approach
+
+This pattern works well when:
+
+- Data doesn't change frequently
+- You're experiencing timeout or rate limit issues
+- You want faster page loads
+- The data size is manageable as a static file
+
+This pattern might not be ideal when:
+
+- Data needs to be real-time
+- Different users need different data
+- Data changes very frequently
+- Data is too large to bundle in the application
+
+## Conclusion
+
+By moving the Google Sheets data fetching from runtime to build time, I eliminated timeout issues, improved performance, and reduced API costs. The trade-off is that data is only as fresh as the last deployment, but for my use case, this is perfectly acceptable.
+
+The key takeaway: not all data needs to be fetched at runtime. If your data is relatively static, consider generating it at build time and serving it as a static asset.
