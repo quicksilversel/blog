@@ -1,0 +1,445 @@
+---
+title: Integrating BigQuery with Next.js - From Google Sheets to Scalable Data Fetching
+description: 'How I migrated from Google Sheets to BigQuery for analytics data in a Next.js application, including authentication, querying, and build-time data generation.'
+topics: ['Node.js', 'BigQuery']
+published: true
+date: '2025-11-25'
+---
+
+## The Problem
+
+I previously wrote about [solving Google Sheets timeout issues](/articles/backend/solving-google-sheets-timeout-buildtime-json) by generating static JSON at build time. While that solved the timeout problem, I still had limitations:
+
+- Google Sheets wasn't designed as a database
+- Complex queries required loading entire sheets into memory
+- Data aggregation happened in JavaScript rather than at the database level
+- Limited to 2000 rows due to memory constraints
+
+The solution? Migrate to BigQuery and fetch data directly from the data warehouse.
+
+## Why BigQuery?
+
+BigQuery is Google's serverless data warehouse that offers:
+
+- **SQL queries**: Complex aggregations and joins happen at the database level
+- **Scalability**: Can handle millions of rows without memory issues
+- **Performance**: Distributed query processing is much faster than processing in Node.js
+- **Integration**: Works seamlessly with Google Cloud authentication
+
+## Implementation
+
+### Step 1: Install BigQuery Client
+
+```bash
+npm install @google-cloud/bigquery
+```
+
+### Step 2: Set Up Authentication
+
+Create a BigQuery reader class that handles authentication for both local development and production:
+
+```typescript
+import * as fs from 'fs'
+import * as path from 'path'
+import { BigQuery } from '@google-cloud/bigquery'
+
+type Credentials = {
+  client_email: string
+  private_key: string
+  project_id?: string
+}
+
+export class BigQueryReader {
+  private credentials: Credentials
+  private bigQueryClient: BigQuery
+
+  constructor() {
+    this.credentials = this.loadCredentials()
+    this.bigQueryClient = new BigQuery({
+      projectId: 'your-project-id',
+      credentials: {
+        client_email: this.credentials.client_email,
+        private_key: this.credentials.private_key,
+      },
+    })
+  }
+
+  private loadCredentials(): Credentials {
+    const credsJson = this.getCredentialsJson()
+
+    try {
+      const parsed = JSON.parse(credsJson)
+
+      if (!parsed.client_email || !parsed.private_key) {
+        throw new Error(
+          'BIGQUERY_CREDENTIALS must contain client_email and private_key',
+        )
+      }
+
+      return {
+        client_email: parsed.client_email,
+        private_key: parsed.private_key,
+        project_id: parsed.project_id,
+      }
+    } catch (e) {
+      throw new Error(
+        `Invalid JSON in BIGQUERY_CREDENTIALS: ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+  }
+
+  private getCredentialsJson(): string {
+    // For local development, read from JSON file
+    if (process.env.NEXT_PUBLIC_APP_ENV === 'local') {
+      const credentialsPath = path.join(
+        process.cwd(),
+        'bigQueryCredentials.json',
+      )
+
+      if (fs.existsSync(credentialsPath)) {
+        try {
+          return fs.readFileSync(credentialsPath, 'utf-8')
+        } catch (e) {
+          throw new Error(
+            `Failed to read bigQueryCredentials.json: ${e instanceof Error ? e.message : String(e)}`,
+          )
+        }
+      }
+    }
+
+    // For production, use environment variable
+    const envCreds = process.env.BIGQUERY_CREDENTIALS
+
+    if (!envCreds) {
+      throw new Error(
+        'BIGQUERY_CREDENTIALS environment variable not set and bigQueryCredentials.json not found',
+      )
+    }
+
+    return envCreds
+  }
+}
+```
+
+### Step 3: Write SQL Queries
+
+Define your queries in a config file. Here's an example that aggregates data:
+
+```sql
+WITH items AS (
+  SELECT
+    item_id,
+    item_name,
+    reference_key,
+    period_start,
+    period_end
+  FROM `project.dataset.items`
+),
+
+metrics_a AS (
+  SELECT
+    reference_key,
+    period_start,
+    period_end,
+    SUM(metric_value) AS total_metric_a
+  FROM `project.dataset.metrics_table_a`
+  WHERE record_date >= "2022-01-01"
+  GROUP BY reference_key, period_start, period_end
+),
+
+metrics_b AS (
+  SELECT
+    reference_key,
+    period_start,
+    period_end,
+    SUM(value_1) AS total_value_1,
+    SUM(value_2) AS total_value_2,
+    SUM(value_3) AS total_value_3,
+    SUM(amount) AS total_amount
+  FROM `project.dataset.metrics_table_b`
+  WHERE record_date >= "2022-01-01"
+  GROUP BY reference_key, period_start, period_end
+)
+
+SELECT
+  items.item_id,
+  SUM(metrics_a.total_metric_a) AS metric_a,
+  SUM(metrics_b.total_value_1) AS value_1,
+  SUM(metrics_b.total_value_2) AS value_2,
+  SUM(metrics_b.total_value_3) AS value_3,
+  SUM(metrics_b.total_amount) AS amount,
+  ROUND(SAFE_DIVIDE(SUM(metrics_b.total_value_1), SUM(metrics_a.total_metric_a)) * 100, 1) AS rate_percentage
+FROM items
+LEFT JOIN metrics_a
+  ON items.reference_key = metrics_a.reference_key
+  AND items.period_start = metrics_a.period_start
+LEFT JOIN metrics_b
+  ON items.reference_key = metrics_b.reference_key
+  AND items.period_start = metrics_b.period_start
+GROUP BY items.item_id
+ORDER BY items.item_id DESC
+```
+
+You can store this in a TypeScript config file as a string constant:
+
+```typescript
+export const DATA_QUERY = `...` // SQL above
+```
+
+**Key SQL techniques:**
+
+1. **CTEs (Common Table Expressions)**: Use `WITH` to break down complex queries into readable chunks
+2. **Aggregation with GROUP BY**: Combine multiple time periods per item
+3. **LEFT JOINs**: Ensure all items are included even if metrics data is missing
+4. **SAFE_DIVIDE**: Prevents division by zero errors
+5. **Percentage calculation**: Multiply by 100 and round for readable rates
+
+### Step 4: Query BigQuery and Map Results
+
+```typescript
+type BigQueryRow = {
+  item_id: string
+  metric_a: number
+  value_1: number
+  value_2: number
+  value_3: number
+  amount: number
+  rate_percentage: number
+}
+
+export type DataItem = {
+  id: string
+  metricA: string
+  value1: string
+  value2: string
+  value3: string
+  amount: string
+  ratePercentage: string
+}
+
+export class BigQueryReader {
+  // ... previous code ...
+
+  async getAllData(): Promise<DataItem[]> {
+    try {
+      const [rows] = await this.bigQueryClient.query({
+        query: DATA_QUERY,
+        location: 'US', // or your dataset location
+      })
+
+      return rows.map((row: BigQueryRow) => this.mapRowToData(row))
+    } catch (error) {
+      console.error('Error fetching data from BigQuery:', error)
+      throw error
+    }
+  }
+
+  private mapRowToData(row: BigQueryRow): DataItem {
+    return {
+      id: String(row.item_id || ''),
+      metricA: row.metric_a !== null ? String(row.metric_a) : '',
+      value1: row.value_1 !== null ? String(row.value_1) : '',
+      value2: row.value_2 !== null ? String(row.value_2) : '',
+      value3: row.value_3 !== null ? String(row.value_3) : '',
+      amount: row.amount !== null ? String(row.amount) : '',
+      ratePercentage:
+        row.rate_percentage !== null ? String(row.rate_percentage) : '',
+    }
+  }
+}
+
+export const fetchAllData = async (): Promise<DataItem[]> => {
+  const reader = new BigQueryReader()
+  return reader.getAllData()
+}
+```
+
+### Step 5: Generate Static JSON at Build Time
+
+Create a script to fetch BigQuery data and save it as JSON:
+
+```typescript
+// scripts/generate-data.ts
+import * as fs from 'fs'
+import * as path from 'path'
+import { fetchAllData } from '../src/libs/bigQuery'
+
+async function generateDataJson() {
+  try {
+    const data = await fetchAllData()
+    const outputPath = path.join(process.cwd(), 'public', 'data.json')
+
+    const publicDir = path.join(process.cwd(), 'public')
+    if (!fs.existsSync(publicDir)) {
+      fs.mkdirSync(publicDir, { recursive: true })
+    }
+
+    fs.writeFileSync(outputPath, JSON.stringify(data, null, 2))
+  } catch (error) {
+    console.error('Failed to generate data JSON:', error)
+    process.exit(1)
+  }
+}
+
+generateDataJson()
+```
+
+Update `package.json`:
+
+```json
+{
+  "scripts": {
+    "generate-data": "tsx scripts/generate-data.ts",
+    "generate-data:local": "NEXT_PUBLIC_APP_ENV=local tsx scripts/generate-data.ts",
+    "prebuild": "npm run generate-data",
+    "build": "npm run prebuild && next build"
+  }
+}
+```
+
+### Step 6: GitHub Actions Setup
+
+For CI/CD, you have two authentication options:
+
+**Option A: Service Account Key (simpler)**
+
+```yaml
+env:
+  BIGQUERY_CREDENTIALS: ${{secrets.BIGQUERY_CREDENTIALS}}
+
+steps:
+  - name: Checkout
+    uses: actions/checkout@v4
+
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: 20
+
+  - name: Install Dependencies
+    run: npm ci
+
+  - name: Build
+    run: npm run build
+```
+
+**Option B: Workload Identity Federation (more secure)**
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - name: Checkout
+    uses: actions/checkout@v4
+
+  - name: Authenticate to Google Cloud
+    uses: google-github-actions/auth@v2
+    with:
+      workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+      service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: 20
+
+  - name: Build
+    run: npm run build
+```
+
+## Required IAM Roles
+
+Your service account needs these roles on the BigQuery project:
+
+1. **BigQuery Job User** (`roles/bigquery.jobUser`) - to create and run queries
+2. **BigQuery Data Viewer** (`roles/bigquery.dataViewer`) - to read table data
+
+Without these roles, you'll get permission errors like:
+
+```
+Access Denied: User does not have bigquery.jobs.create permission
+```
+
+## Common Issues and Solutions
+
+### Issue 1: Duplicate IDs with Different Metrics
+
+**Problem**: Same ID appearing multiple times due to multiple time periods or categories.
+
+**Solution**: Use `GROUP BY` to aggregate at the ID level:
+
+```sql
+SELECT
+  items.item_id,
+  SUM(metric_a) AS total_metric_a,
+  SUM(value_1) AS total_value_1,
+  ROUND(SAFE_DIVIDE(SUM(value_1), SUM(metric_a)) * 100, 1) AS rate
+FROM items
+LEFT JOIN metrics ON ...
+GROUP BY items.item_id  -- Aggregate all periods per ID
+```
+
+### Issue 2: BigQuery API Not Enabled
+
+**Error**: `BigQuery API has not been used in project [ID] before or it is disabled`
+
+**Solution**: Enable the BigQuery API for your service account's project:
+
+```
+https://console.developers.google.com/apis/api/bigquery.googleapis.com/overview?project=PROJECT_ID
+```
+
+### Issue 3: Rate Displaying as Decimal
+
+**Problem**: Rate shows as `0.042` instead of `4.2%`
+
+**Solution**: Multiply by 100 in the SQL query:
+
+```sql
+ROUND(SAFE_DIVIDE(value_1, metric_a) * 100, 1) AS rate_percentage
+```
+
+## Performance Comparison
+
+**Before (Google Sheets):**
+
+- Query time: 30-60 seconds (with timeouts)
+- Memory usage: High (loading entire sheets)
+- Row limit: ~2000 rows
+- Aggregation: In JavaScript
+
+**After (BigQuery):**
+
+- Query time: 3-5 seconds
+- Memory usage: Low (streaming results)
+- Row limit: Millions of rows
+- Aggregation: In SQL (much faster)
+
+## Local Development
+
+Test locally with:
+
+```bash
+# Make sure bigQueryCredentials.json exists in project root
+npm run generate-data:local
+```
+
+Add to `.gitignore`:
+
+```
+bigQueryCredentials.json
+```
+
+## Conclusion
+
+Migrating from Google Sheets to BigQuery brought significant improvements:
+
+- ✅ **Faster queries**: 3-5 seconds vs 30-60 seconds
+- ✅ **Better aggregation**: SQL handles complex queries efficiently
+- ✅ **No row limits**: Can scale to millions of records
+- ✅ **Cleaner code**: SQL logic separated from application code
+- ✅ **No more timeouts**: BigQuery is built for large datasets
+
+The key insight: **Use the right tool for the job**. Google Sheets is great for collaboration, but for production data pipelines, a proper data warehouse like BigQuery is the way to go.
