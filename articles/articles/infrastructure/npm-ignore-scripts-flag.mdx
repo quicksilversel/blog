@@ -1,0 +1,136 @@
+---
+title: '[npm] Using --ignore-scripts for Faster and Safer Installs'
+description: 'What I learned about using npm ci --ignore-scripts in production, including which libraries need special handling and which ones work fine without postinstall scripts.'
+topics: ['npm', 'Next.js', 'CI/CD']
+published: true
+date: '2025-12-01'
+---
+
+## What is --ignore-scripts?
+
+The `--ignore-scripts` flag tells npm to skip lifecycle scripts (`preinstall`, `postinstall`, `prepare`) during installation.
+
+```bash
+npm ci --ignore-scripts
+```
+
+## Why Use It?
+
+### Security
+
+Lifecycle scripts can execute arbitrary code on your machine. A compromised package could run malicious scripts during installation. By ignoring scripts, you reduce this attack surface significantly.
+
+### Speed
+
+Skipping scripts makes installs faster. No compilation, no downloading binaries, no running setup tasks. This is especially noticeable in CI/CD pipelines where every second counts.
+
+### Reproducibility
+
+Script execution can introduce non-determinism. Network requests during postinstall might fail, binary downloads might differ between environments. Skipping scripts makes builds more predictable.
+
+## What to Watch Out For
+
+Here's what I learned from implementing `--ignore-scripts` in a Next.js production project.
+
+### Datadog's dd-trace
+
+`dd-trace` needs its postinstall script. It downloads native binaries required for tracing. If you use `--ignore-scripts`, you need to install it separately:
+
+```bash
+npm ci --ignore-scripts && npm install dd-trace
+```
+
+The second `npm install dd-trace` runs without `--ignore-scripts`, allowing its postinstall to execute. This pattern works for any library that requires lifecycle scripts.
+
+### Sentry with Next.js (v8+)
+
+Here's something I discovered: `@sentry/nextjs` v8 and above uses `@sentry/bundler-plugin-core` for source map uploads. This plugin communicates with Sentry's API directly during the build process.
+
+**It doesn't require the `@sentry/cli` binary.**
+
+This means unless you're using Sentry's telemetry features that specifically need the CLI, `npm ci --ignore-scripts` works fine without any additional installation steps for Sentry.
+
+Before v8, Sentry relied on `@sentry/cli` which was downloaded during postinstall. That's no longer the case.
+
+### husky
+
+husky uses the `prepare` script to set up Git hooks:
+
+```json
+{
+  "scripts": {
+    "prepare": "husky install"
+  }
+}
+```
+
+With `--ignore-scripts`, this doesn't run. But here's the thing: **you don't need husky in production builds**. Git hooks are only relevant for local development.
+
+For local development, after cloning the repo, developers need to either:
+
+1. Run `npm install` without `--ignore-scripts` once
+2. Or manually run `npx husky install`
+
+In CI/CD for production builds, you can safely use `--ignore-scripts` and ignore husky entirely.
+
+### devDependencies
+
+Don't worry about devDependencies. In production builds, you typically run:
+
+```bash
+npm ci --ignore-scripts --omit=dev
+```
+
+Or the container only includes production dependencies. Either way, devDependency scripts won't run in production regardless.
+
+## My Workflow
+
+In production CI/CD:
+
+```bash
+# Install dependencies without scripts
+npm ci --ignore-scripts
+
+# Install specific packages that need postinstall
+npm install dd-trace
+```
+
+For local development:
+
+```bash
+# Full install with scripts (for husky, etc.)
+npm install
+```
+
+Note: `npm ci` is designed for CI/CD - it deletes `node_modules` and does a clean install from the lockfile. For local development, `npm install` is the standard choice.
+
+## Which Libraries Need Special Handling?
+
+When evaluating a package, check:
+
+1. **Does it have a `postinstall` script in package.json?**
+2. **Does it download native binaries?** (like `esbuild`, `swc`, `sharp`)
+3. **Does it compile native code?** (packages with `node-gyp`)
+
+Common packages that typically need their scripts:
+
+- `dd-trace` - Downloads native tracing binaries (@datadog/native-metrics, @datadog/pprof)
+- `playwright` - Downloads browser binaries (Chromium, Firefox, WebKit). You can skip this with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and install browsers separately with `npx playwright install`
+- `sharp` - Downloads libvips binaries
+- `bcrypt` - Compiles native code
+- `sqlite3` - Compiles native bindings
+- `esbuild` - Downloads platform-specific binary. However, if you're using Next.js 12+, you likely don't need it since Next.js uses SWC (not esbuild) as its default compiler. esbuild in your dependencies is probably from other tools like Vite, tsup, or bundlers
+
+Common packages that work fine without scripts:
+
+- `@sentry/nextjs` (v8+) - Uses JS-based bundler plugin
+- `husky` - Only needed for local dev
+- Most pure JavaScript packages
+
+## Conclusion
+
+`--ignore-scripts` is a powerful flag for production builds. It improves security, speeds up installs, and reduces non-determinism.
+
+The key is knowing which packages in your dependency tree actually need their lifecycle scripts. For most pure JavaScript packages, you don't need them. For packages that download or compile native code, install them separately.
+
+Check your `package.json`, identify the packages that need scripts, and construct your install command accordingly.
