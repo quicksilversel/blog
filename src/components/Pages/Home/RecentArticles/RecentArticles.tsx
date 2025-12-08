@@ -33,7 +33,7 @@ export const RecentArticles = ({ articles }: Props) => {
     <Box>
       <Box.SectionHeader>
         <Box.Title>Recent Articles</Box.Title>
-        <Box.Link href="/archive">View All Articles</Box.Link>
+        <Box.Link href="/articles">View All Articles</Box.Link>
       </Box.SectionHeader>
       <TopicFilter
         topics={topics}

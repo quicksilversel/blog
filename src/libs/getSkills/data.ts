@@ -33,6 +33,7 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
       'GCP',
       'Akamai',
       'Terraform',
+      'CI/CD',
     ],
   },
   observability: {

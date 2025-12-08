@@ -26,6 +26,7 @@ function MyApp({ Component, pageProps }: AppProps) {
       window.matchMedia('(prefers-color-scheme: light)').matches
 
     if (savedTheme) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTheme(savedTheme === 'dark' ? 'dark' : 'light')
     }
 

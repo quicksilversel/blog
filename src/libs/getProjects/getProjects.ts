@@ -1,11 +1,9 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 
-import { serialize } from 'next-mdx-remote/serialize'
-import remarkGfm from 'remark-gfm'
-
 import type { Project } from './types'
 
+import { parseMdxFile } from '@/libs/utils'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 import { getProjectArticles } from './getProjectArticles'
@@ -26,15 +24,10 @@ export async function getProjects(
         topics?: string[]
         category?: string
       } = {}
+
       try {
         const indexPath = path.join(basePath, projectName, 'index.mdx')
-        const indexContent = await fs.readFile(indexPath, 'utf8')
-        const { frontmatter } = await serialize(indexContent, {
-          parseFrontmatter: true,
-          mdxOptions: {
-            remarkPlugins: [remarkGfm],
-          },
-        })
+        const { frontmatter } = await parseMdxFile(indexPath)
         projectMeta = {
           title: frontmatter.title as string | undefined,
           description: frontmatter.description as string | undefined,

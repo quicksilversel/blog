@@ -27,10 +27,12 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true)
   }, [])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsDrawerOpen(false)
   }, [router.pathname])
 
