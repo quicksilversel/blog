@@ -1,0 +1,559 @@
+---
+title: 'Adding GCS Memory to Gemini: Teaching Your Bot with Markdown Files'
+description: 'How I integrated Google Cloud Storage as a knowledge base for Gemini, allowing the bot to answer questions from markdown documentation without redeploying.'
+topics: ['Python', 'Flask', 'GCS', 'Vertex AI']
+published: true
+date: '2025-12-08'
+---
+
+## Intro
+
+After [integrating Gemini into my Slack bot](/projects/slack-gemini-bot/integrating-gemini-vertex-ai), I had a conversational AI that could chat with users. But it only knew general knowledge - it couldn't answer questions specific to our team, like "How do I use the office coffee machine?"
+
+I wanted to give Gemini a **knowledge base** - documents it could reference when answering questions.
+
+> The goal: Store FAQ and documentation as markdown files in GCS, and have Gemini automatically use them as context when responding.
+
+Here's how I set up GCS as Gemini's "memory" - and the IAM permission rabbit hole I fell into along the way.
+
+## What We're Building
+
+**Before:** Bot answers from general knowledge only
+
+**After:** Bot loads markdown files from GCS and uses them as context for answers
+
+**Key features:**
+
+- Markdown files in GCS as knowledge base
+- System prompt stored separately from code
+- No redeploy needed to update knowledge
+- Automatic caching for performance
+
+## Why Markdown?
+
+I considered several formats for storing knowledge:
+
+| Format           | Pros                                       | Cons                               |
+| ---------------- | ------------------------------------------ | ---------------------------------- |
+| **Markdown**     | Human-readable, hierarchical, LLM-friendly | None really                        |
+| **Spreadsheets** | Good for tabular data                      | Flat structure, parsing overhead   |
+| **JSON**         | Structured                                 | Less readable, hard to add context |
+| **Plain text**   | Simple                                     | No structure                       |
+
+**Markdown won** because:
+
+1. Gemini naturally understands markdown structure (headers, lists, tables)
+2. Easy to edit without special tools
+3. Version controllable with git
+4. Can include explanations and context
+
+Example knowledge file:
+
+```markdown
+# Office Coffee Machine Guide
+
+## Common Questions
+
+### Q: How do I use the coffee machine?
+
+### Q: The coffee tastes weird, what's wrong?
+
+## Answer
+
+### Making Coffee
+
+1. Fill the water tank (left side)
+2. Add beans to the hopper (not pre-ground!)
+3. Select your drink size on the touchscreen
+4. Place cup on the drip tray
+
+| Drink     | Button           | Time   |
+| --------- | ---------------- | ------ |
+| Espresso  | Single cup icon  | 25 sec |
+| Americano | Cup + water drop | 45 sec |
+| Latte     | Cup + milk icon  | 60 sec |
+
+### Troubleshooting
+
+**Bitter taste?** Beans might be stale. Check the roast date on the bag.
+
+**No water coming out?** The tank is empty. Dave from accounting always forgets to refill it.
+
+**Weird grinding noise?** Someone put flavored beans in again. Please don't.
+```
+
+Gemini can parse this structure and provide accurate answers.
+
+## Architecture Overview
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   User asks     │────▶│  GeminiService  │────▶│     Gemini      │
+│   question      │     │                 │     │                 │
+└─────────────────┘     │  System prompt  │     │  Answers using  │
+                        │  + GCS memory   │     │  memory context │
+                        └────────┬────────┘     └─────────────────┘
+                                 │
+                                 ▼
+                        ┌─────────────────┐
+                        │  MemoryService  │
+                        │  (loads from    │
+                        │   GCS bucket)   │
+                        └─────────────────┘
+```
+
+Two sources of context:
+
+1. **System prompt** (in codebase) - Defines bot personality, requires deploy to change
+2. **GCS memory** (in bucket) - Knowledge base, editable without deploy
+
+## Setting Up GCS
+
+### 1. Create the Bucket
+
+```bash
+gsutil mb -l asia-northeast1 gs://your-bot-memory
+```
+
+I used the same region as Cloud Run for lower latency.
+
+### 2. Grant Permissions
+
+Your Cloud Run service account needs read access:
+
+```bash
+gcloud projects add-iam-policy-binding your-project \
+  --member="serviceAccount:your-service-account@your-project.iam.gserviceaccount.com" \
+  --role="roles/storage.objectViewer"
+```
+
+### 3. Upload Knowledge Files
+
+```bash
+gsutil cp knowledge/faq.md gs://your-bot-memory/
+gsutil cp knowledge/processes.md gs://your-bot-memory/
+```
+
+## Installing Dependencies
+
+Add the GCS client library:
+
+```bash
+uv add google-cloud-storage
+```
+
+**Updated `pyproject.toml`:**
+
+```toml
+[project]
+dependencies = [
+    "flask>=3.1.2",
+    "google-cloud-aiplatform>=1.121.0",
+    "google-cloud-storage>=2.18.0",  # New!
+    "python-dotenv>=1.1.1",
+]
+```
+
+### Mypy Gotcha
+
+If you're using mypy for type checking, you might get:
+
+```
+Module "google.cloud" has no attribute "storage"  [attr-defined]
+```
+
+**Fix:** Use direct module import instead of attribute access:
+
+```python
+# ❌ mypy can't resolve this
+from google.cloud import storage
+
+# ✅ This works
+import google.cloud.storage as storage
+```
+
+The namespace package `google.cloud` confuses mypy, but direct import works fine.
+
+## Creating the Memory Service
+
+Create `app/services/memory.py`:
+
+```python
+import os
+import logging
+from typing import Optional
+import google.cloud.storage as storage
+
+logger = logging.getLogger(__name__)
+
+
+class MemoryService:
+    """Service for loading knowledge from GCS."""
+
+    def __init__(self) -> None:
+        self.bucket_name = os.getenv("GCS_MEMORY_BUCKET")
+
+        if not self.bucket_name:
+            raise ValueError("GCS_MEMORY_BUCKET environment variable is required")
+
+        # Uses Application Default Credentials (ADC)
+        # In Cloud Run: uses service account
+        # Locally: uses gcloud auth
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(self.bucket_name)
+
+        # Cache loaded content to avoid repeated GCS calls
+        self._cache: dict[str, str] = {}
+
+        logger.info(f"MemoryService initialized - Bucket: {self.bucket_name}")
+
+    def _load_file(self, blob_name: str) -> Optional[str]:
+        """Load single file from GCS with caching."""
+        if blob_name in self._cache:
+            return self._cache[blob_name]
+
+        try:
+            blob = self.bucket.blob(blob_name)
+            content = blob.download_as_text()
+            self._cache[blob_name] = content
+            logger.info(f"Loaded and cached: {blob_name}")
+            return content
+        except Exception as e:
+            logger.error(f"Failed to load {blob_name}: {e}")
+            return None
+
+    def load_all_memory(self) -> str:
+        """Load all markdown files from bucket."""
+        contents = []
+
+        try:
+            blobs = self.client.list_blobs(self.bucket_name)
+
+            for blob in blobs:
+                if blob.name.endswith(".md"):
+                    content = self._load_file(blob.name)
+                    if content:
+                        filename = blob.name.split("/")[-1]
+                        contents.append(f"--- {filename} ---\n{content}")
+
+            logger.info(f"Loaded {len(contents)} memory files")
+        except Exception as e:
+            logger.error(f"Failed to list memory files: {e}")
+
+        return "\n\n".join(contents)
+
+    def clear_cache(self) -> None:
+        """Clear cache to force reload from GCS."""
+        self._cache.clear()
+
+    def refresh(self) -> str:
+        """Clear cache and reload all memory."""
+        self.clear_cache()
+        return self.load_all_memory()
+
+
+# Singleton instance
+_memory_service: Optional[MemoryService] = None
+
+
+def get_memory_service() -> MemoryService:
+    """Get or create the MemoryService singleton."""
+    global _memory_service
+    if _memory_service is None:
+        _memory_service = MemoryService()
+    return _memory_service
+```
+
+### Key Design Decisions
+
+**1. Caching:** GCS files are cached in memory to avoid network calls on every request. The cache persists for the Cloud Run instance lifetime.
+
+**2. Graceful degradation:** If GCS fails, the bot still works - just without memory context.
+
+**3. Singleton pattern:** Same as GeminiService, ensures one instance per app.
+
+## Storing the System Prompt
+
+I moved the system prompt from inline code to a separate file for cleaner separation:
+
+**`prompts/system_prompt.md`:**
+
+```markdown
+You are a helpful support assistant for our team.
+When answering questions, refer to the knowledge base provided below.
+If relevant information exists in the knowledge base, use it to answer.
+If the information is not available, either use general knowledge or let the user know you don't have that information.
+Keep responses concise and clear.
+```
+
+This defines the bot's personality and how it should use the knowledge base.
+
+## Integrating Memory with Gemini
+
+Update `app/services/gemini.py`:
+
+```python
+import os
+import logging
+from pathlib import Path
+from typing import Optional
+import vertexai
+from vertexai.generative_models import GenerativeModel, ChatSession
+
+from app.services.memory import get_memory_service
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts" / "system_prompt.md"
+
+logger = logging.getLogger(__name__)
+
+
+class GeminiService:
+    """Service for interacting with Vertex AI Gemini"""
+
+    def __init__(self) -> None:
+        self.project_id = os.getenv("GCP_PROJECT_ID")
+        self.location = "us-central1"
+        self.model_name = "gemini-2.5-flash"
+
+        if not self.project_id:
+            raise ValueError("GCP_PROJECT_ID environment variable is required")
+
+        vertexai.init(project=self.project_id, location=self.location)
+
+        # Load memory from GCS
+        self.memory_content = self._load_memory()
+
+        # Build system instruction with memory
+        self.system_instruction = self._build_system_instruction()
+
+        # Initialize model with system instruction
+        self.model = GenerativeModel(
+            self.model_name,
+            system_instruction=self.system_instruction
+        )
+
+        self.chat_sessions: dict[str, ChatSession] = {}
+        logger.info("GeminiService initialized successfully")
+
+    def _load_memory(self) -> str:
+        """Load memory content from GCS."""
+        try:
+            memory_service = get_memory_service()
+            content = memory_service.load_all_memory()
+            logger.info(f"Loaded memory: {len(content)} characters")
+            return content
+        except Exception as e:
+            logger.warning(f"Failed to load memory: {e}")
+            return ""
+
+    def _load_system_prompt(self) -> str:
+        """Load base system prompt from file."""
+        try:
+            return SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.error(f"Failed to load system prompt: {e}")
+            raise
+
+    def _build_system_instruction(self) -> str:
+        """Build system instruction with memory context."""
+        base_instruction = self._load_system_prompt()
+
+        if self.memory_content:
+            return f"{base_instruction}\n\n{self.memory_content}"
+        else:
+            return base_instruction
+
+    def reload_memory(self) -> None:
+        """Reload memory from GCS and update model."""
+        self.memory_content = self._load_memory()
+        self.system_instruction = self._build_system_instruction()
+        self.model = GenerativeModel(
+            self.model_name,
+            system_instruction=self.system_instruction
+        )
+        self.chat_sessions.clear()
+        logger.info("Memory reloaded, chat sessions cleared")
+
+    # ... rest of the methods unchanged
+```
+
+### How It Works
+
+1. On startup, `GeminiService` loads all `.md` files from GCS
+2. Memory content is appended to the system prompt
+3. Gemini receives the combined instruction when generating responses
+4. User's question is matched against the knowledge base
+
+## Configuration
+
+### Environment Variables
+
+Add to `.env`:
+
+```bash
+# GCS Memory Configuration
+GCS_MEMORY_BUCKET=your-bot-memory
+```
+
+### Cloud Run Deployment
+
+Update `deploy.yml`:
+
+```yaml
+--set-env-vars "FLASK_ENV=production,GCS_MEMORY_BUCKET=your-bot-memory"
+```
+
+### Dockerfile
+
+Don't forget to copy the prompts directory:
+
+```dockerfile
+COPY app/ ./app/
+COPY prompts/ ./prompts/  # Add this line!
+```
+
+I spent 30 minutes debugging "file not found" errors before realizing this.
+
+## Testing Locally
+
+```bash
+# Authenticate
+gcloud auth application-default login
+
+# Set environment
+export GCS_MEMORY_BUCKET=your-bot-memory
+
+# Run app
+make dev
+
+# Test
+curl -X POST http://localhost:3000/test/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How do I make a latte?"}'
+```
+
+Expected response should include information from your markdown files.
+
+## Updating Knowledge Without Redeploying
+
+The best part: to update the knowledge base, just:
+
+```bash
+# Edit your markdown locally
+vim knowledge/coffee-machine.md
+
+# Upload to GCS
+gsutil cp knowledge/coffee-machine.md gs://your-bot-memory/
+
+# Optional: Force reload (or wait for new Cloud Run instance)
+# The cache clears when instances restart
+```
+
+No code changes, no deployment, no downtime.
+
+## File Structure
+
+After adding GCS memory:
+
+```
+slack-bot/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── handlers/
+│   │   └── slack_events.py
+│   └── services/
+│       ├── gemini.py        # Updated with memory integration
+│       └── memory.py        # New! GCS memory service
+├── prompts/
+│   └── system_prompt.md     # New! Bot personality
+├── memory/                   # Local copies of knowledge files
+│   └── coffee-machine.md
+├── .env
+├── Dockerfile               # Updated to copy prompts/
+├── pyproject.toml
+└── uv.lock
+```
+
+## Gotchas and Tips
+
+### 1. Dockerfile Must Copy prompts/
+
+```dockerfile
+COPY prompts/ ./prompts/
+```
+
+Forgot this and spent time debugging "No such file" errors in Cloud Run.
+
+### 2. Cache Behavior
+
+Memory is cached for the Cloud Run instance lifetime. To force refresh:
+
+- Scale to zero and back up
+- Deploy a new revision
+- Call `reload_memory()` programmatically
+
+### 3. Large Knowledge Bases
+
+For small teams (< 50 files), loading everything into context works fine. For larger knowledge bases, consider:
+
+- Vertex AI Search for semantic retrieval
+- Vector embeddings for similarity search
+- Only loading relevant files based on query
+
+### 4. Markdown Best Practices for LLMs
+
+Structure matters:
+
+```markdown
+# Main Topic
+
+## Question Section
+
+### Q: Exact question users might ask?
+
+## Answer
+
+Clear, structured answer with:
+
+- Bullet points
+- Code blocks
+- Tables for structured data
+
+**Important notes** stand out with bold.
+```
+
+Gemini picks up on this structure when matching questions to answers.
+
+## Cost Impact
+
+GCS costs for a small knowledge base:
+
+- **Storage:** < $0.01/month for a few markdown files
+- **Operations:** ~$0.004 per 10,000 reads
+
+Essentially free for this use case.
+
+## Next Steps
+
+Now that the bot has memory:
+
+1. **Add more knowledge files** - FAQ, processes, troubleshooting guides
+2. **Implement memory refresh command** - `/refresh-knowledge` slash command
+3. **Add memory search** - For large knowledge bases, semantic search
+4. **Version knowledge** - Use GCS versioning for rollback
+5. **Monitor usage** - Track how often memory is used in responses
+
+## Wrapping Up
+
+Adding GCS as Gemini's memory transformed my bot from a generic AI to a team-specific assistant. The key insight: **separate what changes frequently (knowledge) from what changes rarely (code)**.
+
+**Key takeaways:**
+
+- Markdown is the ideal format for LLM knowledge bases
+- GCS provides cheap, simple storage with easy updates
+- System prompts should be in version control, knowledge can be external
+- Don't forget to copy all required files in your Dockerfile
+
+Now when someone asks "How do I make a latte?", the bot actually knows the answer - and can even tell you about Dave from accounting.
