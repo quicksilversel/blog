@@ -1,5 +1,7 @@
 import type { Article } from './types'
 
+import { sortByDateDesc } from '@/libs/utils'
+
 import { getArticles } from './getArticles'
 
 interface ArticleIdentifier {
@@ -62,10 +64,9 @@ export function getArticlesByTopic(
   allArticles: Article[],
   excludeSlug?: string,
 ): Article[] {
-  return allArticles
-    .filter(
-      (article) =>
-        article.slug !== excludeSlug && article.topics?.includes(topic),
-    )
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  const filtered = allArticles.filter(
+    (article) =>
+      article.slug !== excludeSlug && article.topics?.includes(topic),
+  )
+  return sortByDateDesc(filtered)
 }

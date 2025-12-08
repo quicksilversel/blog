@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import { useState } from 'react'
+
 import styled from '@emotion/styled'
+
+const INITIAL_DISPLAY_LIMIT = 8
 
 type Props = {
   topics: string[]
@@ -12,13 +16,20 @@ export const TopicFilter = ({
   selectedTopic,
   onTopicSelect,
 }: Props) => {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  const hasMoreTopics = topics.length > INITIAL_DISPLAY_LIMIT
+  const visibleTopics = isExpanded
+    ? topics
+    : topics.slice(0, INITIAL_DISPLAY_LIMIT)
+
   return (
     <Container>
       <TagContainer>
         <Tag isActive={!selectedTopic} onClick={() => onTopicSelect(null)}>
           All
         </Tag>
-        {topics.map((topic) => (
+        {visibleTopics.map((topic) => (
           <Tag
             key={topic}
             isActive={selectedTopic === topic}
@@ -27,6 +38,13 @@ export const TopicFilter = ({
             {topic}
           </Tag>
         ))}
+        {hasMoreTopics && (
+          <MoreButton onClick={() => setIsExpanded(!isExpanded)}>
+            {isExpanded
+              ? 'Show less'
+              : `+${topics.length - INITIAL_DISPLAY_LIMIT} more`}
+          </MoreButton>
+        )}
       </TagContainer>
     </Container>
   )
@@ -62,5 +80,20 @@ const Tag = styled.button<{ isActive: boolean }>`
   &:hover {
     background: ${({ theme, isActive }) =>
       isActive ? theme.colors.primary : theme.colors.muted};
+  }
+`
+
+const MoreButton = styled.button`
+  padding: 0.5rem 1rem;
+  font-size: var(--font-size-extra-small);
+  color: ${({ theme }) => theme.colors.primary};
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed ${({ theme }) => theme.colors.primary};
+  border-radius: 20px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.muted};
   }
 `

@@ -16,7 +16,7 @@ type Props = {
   articles: Article[]
 }
 
-const ARTICLE_LIMIT = 2
+const ARTICLE_LIMIT = 4
 
 const extractAllTopics = (articles: Article[]): string[] => {
   const topicsSet = new Set<string>()

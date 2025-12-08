@@ -13,7 +13,10 @@ type Props = {
 
 export const ArticleHome = ({ articles }: Props) => {
   const categories = useMemo(
-    () => Object.entries(articles).sort(([a], [b]) => a.localeCompare(b)),
+    () =>
+      Object.entries(articles).sort(
+        ([, articlesA], [, articlesB]) => articlesB.length - articlesA.length,
+      ),
     [articles],
   )
 

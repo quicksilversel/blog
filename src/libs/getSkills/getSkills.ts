@@ -2,6 +2,8 @@ import type { SkillCategory } from './types'
 import type { Article } from '../getArticles/types'
 import type { Project } from '../getProjects/types'
 
+import { sortByDateDesc } from '@/libs/utils'
+
 import { CATEGORY_CONFIG } from './data'
 
 const CATEGORY_DISPLAY_LIMIT = 6
@@ -13,7 +15,9 @@ export function getSkills(
   const categoryCounts: Record<string, number> = {}
   const categoryTechs: Record<string, Set<string>> = {}
 
-  articles.forEach((article) => {
+  const sortedArticles = sortByDateDesc(articles)
+
+  sortedArticles.forEach((article) => {
     const category = article.category || 'other'
     categoryCounts[category] = (categoryCounts[category] || 0) + 1
 
@@ -29,21 +33,18 @@ export function getSkills(
   })
 
   projects.forEach((project) => {
-    const category = project.category || 'other'
-    categoryCounts[category] =
-      (categoryCounts[category] || 0) + project.articles.length
+    const projectCategory = project.category || 'other'
 
-    if (!categoryTechs[category]) {
-      categoryTechs[category] = new Set()
-    }
+    const sortedProjectArticles = sortByDateDesc(project.articles)
 
-    if (project.topics) {
-      project.topics.forEach((topic) => {
-        categoryTechs[category].add(topic)
-      })
-    }
+    sortedProjectArticles.forEach((article) => {
+      const category = article.category || projectCategory
+      categoryCounts[category] = (categoryCounts[category] || 0) + 1
 
-    project.articles.forEach((article) => {
+      if (!categoryTechs[category]) {
+        categoryTechs[category] = new Set()
+      }
+
       if (article.topics) {
         article.topics.forEach((topic) => {
           categoryTechs[category].add(topic)
@@ -62,19 +63,19 @@ export function getSkills(
         techKeywords: [],
       }
 
-      const allTechs = Array.from(categoryTechs[category] || [])
+      const techKeywords = config.techKeywords || []
+      const articleTopics = Array.from(categoryTechs[category] || []).filter(
+        (topic) =>
+          !techKeywords.some((kw) => kw.toLowerCase() === topic.toLowerCase()),
+      )
+
       const relevantTechs = [
-        ...new Set([
-          ...allTechs,
-          ...config.techKeywords.filter((keyword) =>
-            allTechs.some((tech) =>
-              tech.toLowerCase().includes(keyword.toLowerCase()),
-            ),
-          ),
-        ]),
+        ...techKeywords.slice(0, CATEGORY_DISPLAY_LIMIT),
+        ...articleTopics.slice(
+          0,
+          Math.max(0, CATEGORY_DISPLAY_LIMIT - techKeywords.length),
+        ),
       ]
-        .slice(0, CATEGORY_DISPLAY_LIMIT)
-        .sort()
 
       return {
         name: category,

@@ -1,39 +1,32 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 
-import { serialize } from 'next-mdx-remote/serialize'
-import readingTime from 'reading-time'
-import remarkGfm from 'remark-gfm'
-
 import type { ProjectArticle } from './types'
 
+import {
+  filterMdxFiles,
+  filterPublished,
+  parseMdxFile,
+  sortByDateAsc,
+} from '@/libs/utils'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 export async function getProjectArticles(
   projectName: string,
   basePath: string = PROJECTS_PATH,
-  category?: string,
+  projectCategory?: string,
 ): Promise<ProjectArticle[]> {
   const projectDir = path.join(basePath, projectName)
 
   try {
     const allFiles = await fs.readdir(projectDir)
-    const mdxFiles = allFiles.filter(
-      (file) => file.toLowerCase().endsWith('.mdx') && file !== 'index.mdx',
-    )
+    const mdxFiles = filterMdxFiles(allFiles, { excludeIndex: true })
 
     const articles = await Promise.all(
       mdxFiles.map(async (fileName) => {
         const fullPath = path.join(projectDir, fileName)
-        const source = await fs.readFile(fullPath, 'utf8')
-        const { frontmatter } = await serialize(source, {
-          parseFrontmatter: true,
-          mdxOptions: {
-            remarkPlugins: [remarkGfm],
-          },
-        })
+        const { frontmatter, readingTime } = await parseMdxFile(fullPath)
 
-        const stats = readingTime(source)
         const slug = `${projectName}/${path.basename(fileName, '.mdx')}`
 
         return {
@@ -41,16 +34,17 @@ export async function getProjectArticles(
           fileName,
           fullPath,
           project: projectName,
-          category: category ?? 'project',
+          category:
+            (frontmatter.category as string | undefined) ??
+            projectCategory ??
+            'project',
           slug,
-          readingTime: stats.text,
+          readingTime,
         } as ProjectArticle
       }),
     )
 
-    return articles
-      .filter((article) => article.published !== false)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    return sortByDateAsc(filterPublished(articles))
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Error getting project articles:', error)

@@ -33,7 +33,9 @@ async function getCategories(): Promise<string[]> {
 
 async function getArticlesByCategory(category: string): Promise<Article[]> {
   const articles = await fetchAllArticles()
-  return articles.filter((a) => a.category === category)
+  return articles
+    .filter((a) => a.category === category)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 }
 
 export const getStaticPaths: GetStaticPaths = async () => {
