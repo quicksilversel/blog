@@ -1,0 +1,220 @@
+---
+title: 'Building a Custom SVG Chart Generator: Architecture Decisions and Lessons Learned'
+description: 'Reflections on building a custom chart generator: why I chose SheetJS despite its vulnerabilities, how Storybook changed my development workflow, and the architectural patterns that emerged from managing component complexity.'
+topics: ['Next.js', 'SheetJS']
+published: true
+date: '2025-12-15'
+---
+
+## Intro
+
+Our designers were spending hours creating financial charts by hand. Each chart required manually positioning bars, calculating scales, aligning labels, and ensuring visual consistency across dozens of slides. A single quarterly report could take days of designer time.
+
+I built a chart generator that reads Excel files and outputs styled SVG charts ready for export. Designers now upload their data and get production-ready charts in seconds. The tool paid for itself within the first week.
+
+This isn't a tutorial. It's more of a reflection on the technical decisions I made along the way.
+
+## Choosing SheetJS Despite Its Vulnerabilities
+
+For Excel parsing, I went with [SheetJS](https://www.npmjs.com/package/xlsx) (`xlsx` on npm).
+It's the most downloaded spreadsheet library (~18M downloads/month), but it has known security issues:
+
+```bash
+npm audit
+xlsx  *
+Severity: high
+Prototype Pollution - GHSA-4r6h-8v6p-xvw6
+ReDoS - GHSA-5pgg-2g8v-p4x9
+No fix available
+```
+
+The npm package is essentially unmaintained. So why use it?
+
+**Context matters.** The Prototype Pollution vulnerability lets a malicious spreadsheet modify JavaScript's built-in object prototypes. On a server, this could be catastrophic (affecting all requests, potentially leading to RCE). But my app runs entirely client-side. The blast radius is one browser tab. Worst case: the user refreshes.
+
+The ReDoS vulnerability could freeze the browser on a crafted file. Again, for a server processing uploads from untrusted users, this is a denial-of-service vector. For an internal tool where I know who's uploading files, it's a minor annoyance.
+
+I considered [ExcelJS](https://github.com/exceljs/exceljs) (~13M downloads/month), which is actively maintained with no known vulnerabilities. But SheetJS's API was simpler for my read-only use case, and the risk profile was acceptable.
+
+**The lesson:** Security decisions aren't absolute. They're about understanding your threat model and making informed trade-offs. "Has vulnerabilities" doesn't automatically mean "don't use."
+
+## Why Storybook Was Worth the Setup
+
+I initially saw Storybook as overhead. Another tool to configure, another thing to maintain. But with 20+ SVG components that needed to work together precisely, I couldn't develop them effectively in the main app.
+
+The problem with developing chart components in-app:
+
+- You need data to see anything render
+- Small changes require navigating through the whole flow
+- Debugging alignment issues means switching between code and browser constantly
+- You can't easily test edge cases (empty data, huge numbers, long labels)
+
+Storybook solved all of this. Each component gets its own isolated environment where I can:
+
+- See it render immediately with mock data
+- Test edge cases by tweaking props
+- Verify visual details without app navigation
+
+### The SVG Decorator Pattern
+
+SVG components need a parent `<svg>` element. Rather than adding this to every story, I used Storybook's decorator pattern:
+
+```typescript
+const meta: Meta<typeof BarSegment> = {
+  title: 'Charts/Bar/BarSegment',
+  component: BarSegment,
+  decorators: [
+    (Story) => (
+      <svg width={200} height={300}>
+        <g transform="translate(20, 20)">
+          <Story />
+        </g>
+      </svg>
+    ),
+  ],
+}
+```
+
+For composed stories showing multiple components together, I'd create custom render functions that set up the full SVG context with realistic dimensions and transforms.
+
+### Catching Integration Bugs Early
+
+The real payoff came when integrating components.
+I had an X-axis that looked perfect in isolation but misaligned with the bars in the actual chart.
+The issue? I was calculating label positions as `barSlotWidth * index` but the bars used `index * (barSlotWidth + barGap)`.
+
+Because I had a story that rendered axes and bars together, I caught this immediately instead of debugging it in the full app with real data.
+
+## Component Architecture: The Patterns That Emerged
+
+I didn't start with a grand architecture plan. The patterns emerged iteratively as I identified friction points and refactored.
+
+### Pattern 1: Components Should Own Their Visual Elements
+
+My initial version of Chart.tsx had too many responsibilities:
+
+```tsx
+// Chart.tsx coordinating everything
+<YAxisLine x={0} chartHeight={chartHeight} />
+<XAxis chartWidth={chartWidth} chartHeight={chartHeight} />
+<YAxis ticks={leftTicks} yScale={leftScale} />
+<AxisUnit unit="$B" axis="left" zeroPosition={...} alignPosition={-12} />
+<AxisUnit unit="FY" axis="x" zeroPosition={0} alignPosition={chartHeight + 25} />
+{labels.map((label, i) => (
+  <XAxisLabel x={getPosition(i)} y={chartHeight + 20} label={label} />
+))}
+```
+
+Chart.tsx was coordinating the axis line, the ticks, the unit label, and the x-axis labels, all things that conceptually belong to the axes themselves. This works, but it distributes axis logic across multiple locations.
+
+The refined approach:
+
+```tsx
+<XAxis
+  chartWidth={chartWidth}
+  chartHeight={chartHeight}
+  labels={labels}
+  barSlotWidth={barSlotWidth}
+  barGap={barGap}
+  unit="FY"
+/>
+<YAxis
+  ticks={leftTicks}
+  yScale={leftScale}
+  chartHeight={chartHeight}
+  unit="$B"
+/>
+```
+
+Now XAxis internally renders its line, labels, and unit. YAxis renders its line, ticks, and unit. Chart.tsx just orchestrates the high-level layout.
+
+**Why this matters:** When I needed to add a right Y-axis, I just added another `<YAxis isRight />`.
+The component knew not to render the axis line for the right side and to position ticks differently. If the axis line rendering was still in Chart.tsx, I'd have to add conditional logic there too.
+
+### Pattern 2: Nest Sub-Components Thoughtfully
+
+BarSegment has two sub-components: SegmentLabel (the percentage text) and SegmentSeparator (the line between stacked segments). These are tightly coupled to BarSegment and don't make sense anywhere else.
+
+```
+bar/BarSegment/
+├── BarSegment.tsx
+├── BarSegment.stories.tsx
+├── index.ts
+├── SegmentLabel/
+│   ├── SegmentLabel.tsx
+│   └── index.ts
+└── SegmentSeparator/
+    └── ...
+```
+
+By nesting them inside BarSegment's folder, I'm signaling that these are implementation details, not public components. If someone wants to use bar charts, they import `Bar`, not `SegmentLabel`.
+
+## PNG Export: Two Non-Obvious Gotchas
+
+### Gotcha 1: foreignObject Taints the Canvas
+
+My first implementation of the legend used `foreignObject` to embed HTML inside SVG. It rendered correctly in the browser:
+
+```tsx
+<foreignObject x={0} y={0} width={400} height={50}>
+  <div style={{ display: 'flex', gap: '16px' }}>
+    {items.map((item) => (
+      <LegendItem key={item.id} {...item} />
+    ))}
+  </div>
+</foreignObject>
+```
+
+But when I tried to export to PNG, nothing. The canvas was "tainted" and `toDataURL()` threw a security error.
+
+**Why:** `foreignObject` embeds external content (HTML) into the SVG. Browsers treat this as a potential security risk since the HTML could reference external resources, execute scripts, etc. So they taint the canvas to prevent data exfiltration.
+
+**The fix:** Rewrite the legend using native SVG elements (`<text>`, `<rect>`, `<g>`). More verbose, but it exports cleanly.
+
+### Gotcha 2: External Fonts Also Taint the Canvas
+
+After fixing the foreignObject issue, exports still failed. This time the culprit was fonts loaded via CSS `@font-face`.
+
+The browser considers external font files as cross-origin resources. When the SVG references them (even indirectly through computed styles), the canvas gets tainted.
+
+**The fix:** Embed fonts directly in the SVG as base64 data URLs:
+
+```typescript
+const embedFontInSvg = (svgElement: SVGSVGElement, fontBase64: string) => {
+  const clonedSvg = svgElement.cloneNode(true)
+  if (!(clonedSvg instanceof SVGSVGElement)) return null
+
+  const styleElement = document.createElementNS(
+    'http://www.w3.org/2000/svg',
+    'style',
+  )
+  styleElement.textContent = `
+    @font-face {
+      font-family: 'CustomFont';
+      src: url('${fontBase64}') format('woff');
+    }
+  `
+
+  clonedSvg.insertBefore(styleElement, clonedSvg.firstChild)
+
+  return new XMLSerializer().serializeToString(clonedSvg)
+}
+```
+
+One more detail: SVGs have transparent backgrounds by default. Add a white fill before drawing:
+
+```typescript
+ctx.fillStyle = '#ffffff'
+ctx.fillRect(0, 0, canvas.width, canvas.height)
+ctx.drawImage(img, 0, 0)
+```
+
+## Takeaways
+
+**On library choices:** Evaluate security vulnerabilities in context. A "high severity" CVE might be irrelevant for your specific use case.
+
+**On Storybook:** The overhead is worth it for component-heavy projects. Being able to develop and test components in isolation fundamentally changes the development experience.
+
+**On architecture:** Don't over-engineer upfront. Let patterns emerge from pain points. When something feels messy, that's a signal to refactor, not to add more abstraction.
+
+**On canvas exports:** If you're doing SVG-to-PNG conversion, avoid `foreignObject` entirely and embed any custom fonts.
