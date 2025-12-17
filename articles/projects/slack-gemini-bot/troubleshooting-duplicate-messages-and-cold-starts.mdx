@@ -1,0 +1,333 @@
+---
+title: 'Slack Bot Troubleshooting: Duplicate Messages, Cold Starts, and Gemini Latency'
+description: 'Fixing Slack retry duplicates with event deduplication, eliminating Cloud Run cold starts with min-instances, and dealing with cross-region Gemini API latency.'
+topics: ['Python', 'GCP']
+published: true
+date: '2025-12-17'
+---
+
+## Intro
+
+After deploying my [Gemini-powered Slack bot](/projects/slack-gemini-bot/integrating-gemini-vertex-ai), everything seemed fine... until users started complaining.
+
+"The bot is sending the same message 4 times!"
+
+At first I thought it was a bug in my code. Maybe an infinite loop? Maybe I was calling `say()` multiple times?
+
+Turns out, neither. The culprit was **Slack's retry mechanism**.
+
+## 1. Duplicate Messages
+
+### The Symptom
+
+Users would @mention the bot, and instead of getting one response, they'd get 2-4 identical responses:
+
+```
+User: @Bot what is Python?
+
+Bot: Python is a high-level programming language...
+Bot: Python is a high-level programming language...
+Bot: Python is a high-level programming language...
+Bot: Python is a high-level programming language...
+```
+
+### Finding the Root Cause
+
+I checked Cloud Run logs:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="your-service"' \
+  --project=your-project \
+  --limit=30
+```
+
+The logs revealed everything:
+
+```
+08:40:10.594 POST /slack/events 200
+08:40:10.593 POST /slack/events 200
+08:40:10.590 POST /slack/events 200
+08:40:10.582 POST /slack/events 200
+```
+
+**Four requests within 12 milliseconds.** All for the same message.
+
+### Why This Happens
+
+Slack has a built-in retry mechanism:
+
+1. Slack sends an event to your webhook
+2. If it doesn't receive a 200 response within **3 seconds**, it retries
+3. It retries up to **3 times** (4 total requests)
+
+My bot's flow was:
+
+```
+Slack Event → Handler → Call Gemini (5+ seconds) → Send Response → Return 200
+```
+
+Gemini takes 3-5 seconds to respond (even longer with cross-region latency since Gemini isn't available in `asia-northeast1` yet). By the time we return 200 to Slack, it has already sent 3 retry requests. Each retry triggers another Gemini call. Four responses.
+
+### The Fix: Event Deduplication
+
+The solution is to track which events we've already processed and skip duplicates:
+
+```python
+import time
+from collections import OrderedDict
+
+_processed_events: OrderedDict[str, float] = OrderedDict()
+_CACHE_TTL_SECONDS = 60
+_CACHE_MAX_SIZE = 1000
+
+
+def _is_duplicate(event_id: str) -> bool:
+    now = time.time()
+
+    # Clean old entries
+    while _processed_events:
+        oldest_id, oldest_time = next(iter(_processed_events.items()))
+        if now - oldest_time > _CACHE_TTL_SECONDS:
+            _processed_events.pop(oldest_id)
+        else:
+            break
+
+    if event_id in _processed_events:
+        return True
+
+    _processed_events[event_id] = now
+
+    # Limit cache size
+    while len(_processed_events) > _CACHE_MAX_SIZE:
+        _processed_events.popitem(last=False)
+
+    return False
+
+
+@app.event("app_mention")
+def handle_mention(event, say, logger):
+    event_ts = event.get("event_ts") or event.get("ts")
+    if _is_duplicate(f"mention:{event_ts}"):
+        return  # Skip duplicate
+
+    # ... process normally
+```
+
+The `event_ts` is unique per event. If we see the same `event_ts` twice within 60 seconds, we know it's a retry and skip it.
+
+**Downsides:**
+
+- Retries still hit your server (wasted CPU)
+- Need to maintain an in-memory cache
+- Cache doesn't work across multiple instances (would need Redis for that)
+
+But for a single-instance bot, this works well.
+
+### Alternative: Lazy Listeners
+
+A cleaner solution exists: **lazy listeners**. Instead of processing the event synchronously, you acknowledge Slack immediately and process in the background.
+
+```python
+def _process_mention(event, say, logger):
+    """Runs in background after ack."""
+    # Heavy processing here...
+    gemini = get_gemini_service()
+    response = gemini.generate_response_sync(user, clean_text)
+    say(text=response, thread_ts=thread_ts)
+
+
+@app.event("app_mention", lazy=[_process_mention])
+def handle_mention():
+    pass  # Ack immediately, processing happens in lazy listener
+```
+
+How it works:
+
+1. Slack sends event
+2. `handle_mention()` runs → returns immediately
+3. Slack gets 200 response → **no retries**
+4. `_process_mention()` runs in background
+
+No deduplication cache needed. Much cleaner.
+
+**The catch:** Lazy listeners only work with **FaaS (Function-as-a-Service) adapters**:
+
+- `slack_bolt.adapter.aws_lambda`
+- `slack_bolt.adapter.google_cloud_functions`
+
+If you're using **Flask on Cloud Run** (like me), lazy listeners won't work. The Flask adapter doesn't support the `lazy` parameter - you'll get a runtime error:
+
+```
+TypeError: App.event() got an unexpected keyword argument 'lazy'
+```
+
+For more details, see the [Slack Bolt lazy listeners documentation](https://docs.slack.dev/tools/bolt-python/concepts/lazy-listeners).
+
+#### Type Errors with Lazy Listeners
+
+Even if you're using a supported adapter (Lambda, Cloud Functions), you might hit a mypy error:
+
+```
+error: Unexpected keyword argument "lazy" for "event" of "App"  [call-arg]
+```
+
+The `lazy` parameter works at runtime but isn't included in slack-bolt's type stubs. You'll need to suppress the error:
+
+```python
+@app.event("app_mention", lazy=[_process_mention])  # type: ignore[call-arg]
+def handle_mention():
+    pass
+```
+
+I opened an issue for this: [slackapi/bolt-python#1412](https://github.com/slackapi/bolt-python/issues/1412)
+
+### Which Should You Use?
+
+| Setup                  | Solution            |
+| ---------------------- | ------------------- |
+| AWS Lambda             | Lazy listeners      |
+| Google Cloud Functions | Lazy listeners      |
+| Flask + Cloud Run      | Event deduplication |
+| Flask + any server     | Event deduplication |
+
+If your app is **stateful** (like mine, with chat sessions in memory), Cloud Run with deduplication is actually better - Cloud Functions would lose state between invocations.
+
+## 2. Cold Start Problem
+
+Even after fixing duplicates, I noticed the **first request after idle was extremely slow** (5-10 seconds).
+
+This is the classic **cold start problem** with Cloud Run.
+
+### What's Happening
+
+Cloud Run scales to zero when idle. When a new request comes in:
+
+1. Cloud Run spins up a new container (~2-3 seconds)
+2. Python loads all modules
+3. GeminiService initializes and loads memory from GCS
+4. Gemini API call happens (~3-5 seconds)
+
+Total: 5-10 seconds for the first request.
+
+### The Fix: Min Instances
+
+Tell Cloud Run to keep at least one instance warm:
+
+```bash
+gcloud run services update your-service-name \
+  --min-instances=1 \
+  --region=asia-northeast1 \
+  --project=your-project
+```
+
+**What this does:**
+
+- Cloud Run always keeps 1 instance running
+- No cold starts for normal traffic
+- Costs ~$5-10/month depending on instance size (with CPU throttling, idle instances cost almost nothing)
+
+**Before:**
+
+```
+Cold start + Gemini = 5-10 seconds
+```
+
+**After:**
+
+```
+Just Gemini = 2-4 seconds
+```
+
+## 3. Gemini Regional Latency
+
+Even with deduplication and warm instances, responses still take 3-5 seconds. Why?
+
+### The Problem
+
+My Cloud Run service runs in `asia-northeast1` (Tokyo) to be close to users. But Gemini via Vertex AI isn't available in that region yet. I have to call `us-central1` (Iowa):
+
+```python
+# In config.py
+GEMINI_LOCATION = "us-central1"  # Gemini not available in asia-northeast1
+```
+
+This adds ~200-400ms round-trip latency on top of Gemini's processing time.
+
+### Why Not Move Everything to us-central1?
+
+I considered moving Cloud Run to `us-central1` too, but:
+
+- Users are in Japan - Slack webhook latency would increase
+- GCS bucket for memory is in `asia-northeast1`
+- The Gemini API call is the bottleneck, not the network hop
+
+### The Reality
+
+There's no fix for this until Google expands Gemini's regional availability. The cross-region latency is unavoidable for now.
+
+**Current response times:**
+
+```
+Cloud Run (Tokyo) → Gemini API (Iowa) → Response
+Total: 3-5 seconds typical
+```
+
+This is acceptable for a chatbot, but something to be aware of if you're building latency-sensitive applications with Gemini.
+
+## Wrapping Up
+
+The duplicate message issue was frustrating because the code looked correct. The lesson: **always check your infrastructure's timeout and retry behavior**.
+
+**Key takeaways:**
+
+1. **Slack retries events** if it doesn't get 200 within 3 seconds
+2. **Gemini is slow** (3-5 seconds typical, worse with cross-region calls)
+3. **Use event deduplication** for Flask/Cloud Run setups
+4. **Use lazy listeners** if you're on Lambda or Cloud Functions
+5. **Use min-instances=1** to eliminate cold starts
+6. **Check logs first** - `gcloud logging read` is your friend
+
+## Quick Reference
+
+**Set min instances:**
+
+```bash
+gcloud run services update SERVICE_NAME \
+  --min-instances=1 \
+  --region=REGION
+```
+
+**Check Cloud Run logs:**
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision"' \
+  --project=PROJECT_ID \
+  --limit=50
+```
+
+**Deduplication pattern:**
+
+```python
+def _is_duplicate(event_id: str) -> bool:
+    if event_id in _processed_events:
+        return True
+    _processed_events[event_id] = time.time()
+    return False
+
+@app.event("app_mention")
+def handle_mention(event, say, logger):
+    if _is_duplicate(event.get("event_ts")):
+        return
+    # process...
+```
+
+**Lazy listener pattern (Lambda/Cloud Functions only):**
+
+```python
+def _process_event(event, say, logger):
+    # Heavy processing here
+
+@app.event("event_type", lazy=[_process_event])  # type: ignore[call-arg]
+def handle_event():
+    pass  # Ack immediately
+```

@@ -1,5 +1,3 @@
-import React from 'react'
-
 import Head from 'next/head'
 
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'

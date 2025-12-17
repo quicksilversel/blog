@@ -1,5 +1,4 @@
-import React from 'react'
-import { ComponentProps } from 'react'
+import type { ComponentProps } from 'react'
 
 import styled from '@emotion/styled'
 import { MDXRemote } from 'next-mdx-remote'

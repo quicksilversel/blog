@@ -1,5 +1,3 @@
-import React from 'react'
-
 import type { Project } from '@/libs/getProjects'
 
 import { Box } from '@/components/UI/Box'

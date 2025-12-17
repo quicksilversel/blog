@@ -1,10 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 
-import React from 'react'
-
 import Head from 'next/head'
 import { serialize } from 'next-mdx-remote/serialize'
+import readingTime from 'reading-time'
 import remarkGfm from 'remark-gfm'
 
 import type { GetStaticProps, InferGetStaticPropsType } from 'next'
@@ -50,12 +49,14 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
 
     const projects = await getProjects()
     const project = projects.find((p) => p.slug === projectName)
+    const stats = readingTime(postFile)
 
     return {
       props: {
         source: mdxSource,
         project,
         currentSlug: slug.join('/'),
+        readingTime: stats.text,
       },
     }
   } catch (error) {
@@ -71,11 +72,12 @@ export default function ProjectArticle({
   source,
   project,
   currentSlug,
+  readingTime: readingTimeText,
 }: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
     <>
       <Head>
-        <title>{String(source.frontmatter.title)} - Project</title>
+        <title>{`${source.frontmatter.title} - Project`}</title>
         <meta
           name="description"
           content={String(source.frontmatter.description)}
@@ -89,6 +91,7 @@ export default function ProjectArticle({
       <ArticleDetail
         source={source}
         isProject
+        readingTime={readingTimeText}
         project={{
           ...project,
           currentSlug,

@@ -1,8 +1,6 @@
 import fs from 'fs'
 import path from 'path'
 
-import React from 'react'
-
 import Head from 'next/head'
 import { serialize } from 'next-mdx-remote/serialize'
 import remarkGfm from 'remark-gfm'
