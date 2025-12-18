@@ -54,6 +54,7 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
     return {
       props: {
         source: mdxSource,
+        rawContent: postFile,
         project,
         currentSlug: slug.join('/'),
         readingTime: stats.text,
@@ -70,6 +71,7 @@ export const getStaticProps: GetStaticProps = async ({ params }) => {
 
 export default function ProjectArticle({
   source,
+  rawContent,
   project,
   currentSlug,
   readingTime: readingTimeText,
@@ -90,6 +92,7 @@ export default function ProjectArticle({
       </Head>
       <ArticleDetail
         source={source}
+        rawContent={rawContent}
         isProject
         readingTime={readingTimeText}
         project={{

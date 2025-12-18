@@ -6,6 +6,8 @@ import Link from 'next/link'
 
 import type { ProjectArticle } from '@/libs/getProjects'
 
+import { H2 } from '../Article/ArticleDetail/Markup'
+
 type Props = {
   articles: ProjectArticle[]
   currentSlug: string
@@ -16,30 +18,33 @@ export function ProjectNavigation({ articles, currentSlug, title }: Props) {
   const [isExpanded, setIsExpanded] = useState(true)
 
   return (
-    <Container>
-      <Header onClick={() => setIsExpanded(!isExpanded)}>
-        <Title>Series: {title}</Title>
-        <ToggleIcon isExpanded={isExpanded} />
-      </Header>
-      {isExpanded && (
-        <ArticleList>
-          {articles.map((article, index) => {
-            const isCurrentArticle = article.slug === currentSlug
-            return (
-              <ArticleItem key={article.slug} isActive={isCurrentArticle}>
-                <ArticleLink
-                  href={`/projects/${article.slug}`}
-                  isActive={isCurrentArticle}
-                >
-                  <ArticleNumber>{index + 1}.</ArticleNumber>
-                  <ArticleTitle>{article.title}</ArticleTitle>
-                </ArticleLink>
-              </ArticleItem>
-            )
-          })}
-        </ArticleList>
-      )}
-    </Container>
+    <>
+      <H2>Project Navigation</H2>
+      <Container>
+        <Header onClick={() => setIsExpanded(!isExpanded)}>
+          <Title>Series: {title}</Title>
+          <ToggleIcon isExpanded={isExpanded} />
+        </Header>
+        {isExpanded && (
+          <ArticleList>
+            {articles.map((article, index) => {
+              const isCurrentArticle = article.slug === currentSlug
+              return (
+                <ArticleItem key={article.slug} isActive={isCurrentArticle}>
+                  <ArticleLink
+                    href={`/projects/${article.slug}`}
+                    isActive={isCurrentArticle}
+                  >
+                    <ArticleNumber>{index + 1}.</ArticleNumber>
+                    <ArticleTitle>{article.title}</ArticleTitle>
+                  </ArticleLink>
+                </ArticleItem>
+              )
+            })}
+          </ArticleList>
+        )}
+      </Container>
+    </>
   )
 }
 

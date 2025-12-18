@@ -67,8 +67,7 @@ export const ArticleDetail = ({
           }
           readingTime={readingTime}
         />
-        {isProject && project && <ProjectNavigation {...project} />}
-        {!isProject && rawContent && <TableOfContents content={rawContent} />}
+        {rawContent && <TableOfContents content={rawContent} />}
         <ArticleBody>
           <MDXRemote
             {...source}
@@ -94,6 +93,7 @@ export const ArticleDetail = ({
             }}
           />
         </ArticleBody>
+        {isProject && project && <ProjectNavigation {...project} />}
         {!isProject && relatedArticles && relatedArticles.length > 0 && (
           <RelatedArticles articles={relatedArticles} />
         )}

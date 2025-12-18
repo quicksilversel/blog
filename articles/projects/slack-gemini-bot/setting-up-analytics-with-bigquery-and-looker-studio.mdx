@@ -1,0 +1,402 @@
+---
+title: 'Setting Up Analytics with BigQuery and Looker Studio'
+description: 'Adding structured logging Python Slack bot, stream logs to BigQuery, and visualize usage with Looker Studio dashboards.'
+topics: ['Python', 'GCP', 'BigQuery', 'Looker Studio']
+published: true
+date: '2025-12-18'
+---
+
+## Intro
+
+After running my [Gemini-powered Slack bot](/projects/slack-gemini-bot/integrating-gemini-vertex-ai) for a while, I wanted to understand how it was being used:
+
+- How many questions are users asking?
+- What's the average response time?
+- Which users are most active?
+- Are there any errors I'm missing?
+
+Cloud Run logs are great for debugging, but not for analytics. I needed structured data I could query and visualize.
+
+Here's how I set up a complete analytics pipeline: **Structured Logging → BigQuery → Looker Studio**.
+
+## 1. Adding Structured Logging
+
+Cloud Logging can automatically parse JSON printed to stdout as structured `jsonPayload`. This makes it queryable in BigQuery.
+
+### The Analytics Module
+
+I created a reusable analytics module:
+
+```python
+# app/utils/analytics.py
+import json
+import sys
+import time
+from contextlib import contextmanager
+from typing import Optional
+
+
+def _log_json(data: dict) -> None:
+    """Output structured JSON for Cloud Logging."""
+    log_entry = {
+        "severity": "INFO",
+        "message": "bot_analytics",
+        **data,
+    }
+    print(json.dumps(log_entry, ensure_ascii=False), file=sys.stdout, flush=True)
+
+
+@contextmanager
+def track_response(event_type: str, user_id: str, channel: str, question: str):
+    """Context manager to track bot response timing."""
+    start_time = time.time()
+    tracker = ResponseTracker(event_type, user_id, channel, question, start_time)
+    try:
+        yield tracker
+        tracker.log_success()
+    except Exception as e:
+        tracker.log_error(str(e))
+        raise
+
+
+class ResponseTracker:
+    def __init__(self, event_type, user_id, channel, question, start_time):
+        self.event_type = event_type
+        self.user_id = user_id
+        self.channel = channel
+        self.question = question[:500]
+        self.start_time = start_time
+        self.response: Optional[str] = None
+
+    def set_response(self, response: str) -> None:
+        self.response = response[:500]
+
+    def _elapsed_ms(self) -> int:
+        return int((time.time() - self.start_time) * 1000)
+
+    def log_success(self) -> None:
+        _log_json({
+            "event_type": self.event_type,
+            "user_id": self.user_id,
+            "channel": self.channel,
+            "question": self.question,
+            "response": self.response,
+            "response_time_ms": self._elapsed_ms(),
+            "success": True,
+        })
+
+    def log_error(self, error: str) -> None:
+        _log_json({
+            "event_type": self.event_type,
+            "user_id": self.user_id,
+            "channel": self.channel,
+            "question": self.question,
+            "response_time_ms": self._elapsed_ms(),
+            "success": False,
+            "error": error[:200],
+        })
+```
+
+### Using It in Handlers
+
+The context manager makes logging clean and automatic:
+
+```python
+from app.utils.analytics import track_response
+
+@app.event("app_mention")
+def handle_mention(event, say, logger):
+    user = event.get("user")
+    channel = event.get("channel")
+    text = event.get("text", "")
+
+    try:
+        with track_response("mention_response", user, channel, text) as tracker:
+            response = gemini.generate_response_sync(user, text)
+            tracker.set_response(response)
+        say(text=response)
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        say(text=ERROR_MESSAGE)
+```
+
+The context manager automatically:
+
+- Starts timing when entering
+- Logs success with response time on normal exit
+- Logs error on exception (and re-raises)
+
+### What Gets Logged
+
+Each request produces a structured log entry:
+
+```json
+{
+  "severity": "INFO",
+  "message": "bot_analytics",
+  "event_type": "mention_response",
+  "user_id": "U1234567890",
+  "channel": "C0123456789",
+  "question": "What is the release checklist?",
+  "response": "Here's the release checklist...",
+  "response_time_ms": 4523,
+  "success": true
+}
+```
+
+## 2. Setting Up BigQuery
+
+### Create a Dataset
+
+In the GCP Console:
+
+1. Go to **BigQuery**
+2. Click your project → **Create dataset**
+3. Settings:
+   - **Dataset ID**: `slack_bot_logs`
+   - **Location**: `asia-northeast1` (same region as Cloud Run)
+   - **Default table expiration**: Leave blank or set to 90 days
+
+Or via CLI:
+
+```bash
+bq mk --dataset --location=asia-northeast1 YOUR_PROJECT:slack_bot_logs
+```
+
+### Create a Log Sink
+
+A log sink routes matching logs from Cloud Logging to BigQuery.
+
+1. Go to **Logging** → **Log Router**
+2. Click **Create Sink**
+3. Configure:
+   - **Sink name**: `your-bot-analytics`
+   - **Sink destination**: BigQuery dataset → select your dataset
+   - **Inclusion filter**:
+   ```
+   resource.type="cloud_run_revision"
+   resource.labels.service_name="your-service"
+   jsonPayload.message="bot_analytics"
+   ```
+4. Click **Create Sink**
+
+### Grant Permissions
+
+The sink creates a service account that needs write access to BigQuery.
+
+Find the service account:
+
+```bash
+gcloud logging sinks describe your-bot-analytics --format="value(writerIdentity)"
+# Output: serviceAccount:service-XXXX@gcp-sa-logging.iam.gserviceaccount.com
+```
+
+Grant it access (or do this in the Console under BigQuery → Dataset → Sharing → Permissions):
+
+```bash
+bq add-iam-policy-binding \
+  --member="serviceAccount:service-XXXX@gcp-sa-logging.iam.gserviceaccount.com" \
+  --role="roles/bigquery.dataEditor" \
+  YOUR_PROJECT:slack_bot_logs
+```
+
+### Verify Data Is Flowing
+
+After sending a few messages to your bot, check BigQuery:
+
+```sql
+SELECT
+  timestamp,
+  jsonPayload.event_type,
+  jsonPayload.user_id,
+  jsonPayload.question,
+  jsonPayload.response_time_ms,
+  jsonPayload.success
+FROM `YOUR_PROJECT.slack_bot_logs.run_googleapis_com_stdout_*`
+WHERE jsonPayload.message = "bot_analytics"
+ORDER BY timestamp DESC
+LIMIT 10
+```
+
+Tables are auto-created based on log structure. It may take 5-10 minutes for the first data to appear.
+
+## 3. Creating Looker Studio Dashboards
+
+### Connect to BigQuery
+
+1. Go to [lookerstudio.google.com](https://lookerstudio.google.com)
+2. Click **Create** → **Report**
+3. Click **Add data** → **BigQuery**
+4. Navigate to your dataset and select the table
+5. Click **Add**
+
+### Useful Calculated Fields
+
+Create these calculated fields for better analysis:
+
+**Response Time Bucket** (for histograms):
+
+```
+CASE
+  WHEN jsonPayload.response_time_ms < 3000 THEN "0-3s"
+  WHEN jsonPayload.response_time_ms < 5000 THEN "3-5s"
+  WHEN jsonPayload.response_time_ms < 10000 THEN "5-10s"
+  WHEN jsonPayload.response_time_ms < 15000 THEN "10-15s"
+  ELSE "15s+"
+END
+```
+
+**Timestamp (JST)** (convert from UTC):
+
+```
+DATETIME_ADD(timestamp, INTERVAL 9 HOUR)
+```
+
+**Hour of Day**:
+
+```
+HOUR(timestamp)
+```
+
+### Suggested Charts
+
+**1. Scorecard - Total Requests**
+
+- Metric: `Record Count`
+
+**2. Scorecard - Average Response Time**
+
+- Metric: `AVG(jsonPayload.response_time_ms)`
+
+**3. Time Series - Requests Over Time**
+
+- Dimension: `timestamp` (set to Date or Date Hour)
+- Metric: `Record Count`
+
+**4. Bar Chart - Response Time Distribution**
+
+- Dimension: `Response Time Bucket` (calculated field)
+- Metric: `Record Count`
+
+**5. Table - Recent Queries**
+
+- Dimensions: `timestamp`, `jsonPayload.user_id`, `jsonPayload.question`, `jsonPayload.response_time_ms`
+- Sort: `timestamp` descending
+
+**6. Pie Chart - Success vs Error**
+
+- Dimension: `jsonPayload.success`
+- Metric: `Record Count`
+
+### Add a Date Range Control
+
+1. **Insert** → **Date range control**
+2. Place it at the top of your report
+3. Set default to "Last 7 days"
+
+All charts automatically filter when you change the date range.
+
+### Timezone Considerations
+
+All timestamps are stored in UTC. Looker Studio may auto-convert to your local timezone, but for consistency:
+
+1. Use the JST calculated field for display
+2. Or go to **Resource** → **Manage added data sources** → **Edit** to check timezone settings
+
+## Cost Considerations
+
+**BigQuery:**
+
+- Log ingestion: ~$0.50/GB
+- Storage: ~$0.02/GB/month
+- Queries: First 1TB/month free, then $5/TB
+
+**Looker Studio:**
+
+- Free!
+
+For a low-traffic bot, expect **less than $1/month**.
+
+## Example Queries
+
+**Average response time by day:**
+
+```sql
+SELECT
+  DATE(timestamp) as date,
+  COUNT(*) as requests,
+  AVG(jsonPayload.response_time_ms) as avg_response_ms
+FROM `YOUR_PROJECT.slack_bot_logs.run_googleapis_com_stdout_*`
+WHERE jsonPayload.message = "bot_analytics"
+GROUP BY date
+ORDER BY date DESC
+```
+
+**Most active users:**
+
+```sql
+SELECT
+  jsonPayload.user_id,
+  COUNT(*) as question_count
+FROM `YOUR_PROJECT.slack_bot_logs.run_googleapis_com_stdout_*`
+WHERE jsonPayload.message = "bot_analytics"
+GROUP BY jsonPayload.user_id
+ORDER BY question_count DESC
+LIMIT 10
+```
+
+**Error rate:**
+
+```sql
+SELECT
+  COUNTIF(jsonPayload.success = false) as errors,
+  COUNT(*) as total,
+  ROUND(COUNTIF(jsonPayload.success = false) / COUNT(*) * 100, 2) as error_rate_pct
+FROM `YOUR_PROJECT.slack_bot_logs.run_googleapis_com_stdout_*`
+WHERE jsonPayload.message = "bot_analytics"
+```
+
+## Wrapping Up
+
+Setting up analytics took about 30 minutes:
+
+1. **Structured logging** - Print JSON to stdout with a `message` field for filtering
+2. **BigQuery dataset + Log sink** - Route logs automatically
+3. **Looker Studio** - Connect and build dashboards
+
+Now I can see at a glance:
+
+- How many questions users are asking
+- Whether response times are acceptable
+- If there are any errors to investigate
+
+The best part: it's almost free and fully automated. Every bot response is logged, streamed to BigQuery, and ready to query.
+
+## Quick Reference
+
+**Log sink filter:**
+
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name="YOUR_SERVICE"
+jsonPayload.message="bot_analytics"
+```
+
+**Basic BigQuery query:**
+
+```sql
+SELECT * FROM `PROJECT.DATASET.run_googleapis_com_stdout_*`
+WHERE jsonPayload.message = "bot_analytics"
+ORDER BY timestamp DESC
+LIMIT 100
+```
+
+**Structured log format:**
+
+```python
+print(json.dumps({
+    "severity": "INFO",
+    "message": "bot_analytics",
+    "your_field": "your_value",
+}, ensure_ascii=False), flush=True)
+```
