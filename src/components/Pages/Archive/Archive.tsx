@@ -9,6 +9,8 @@ import type { Article } from '@/libs/getArticles/types'
 
 import { Box } from '@/components/UI/Box'
 
+import { GrowthChart } from './GrowthChart'
+
 type ArchiveItem = Article & {
   isProject: boolean
 }
@@ -64,6 +66,7 @@ export function Archive({ articles }: Props) {
         <Title>Archive</Title>
         <TotalCount>{totalArticles} posts</TotalCount>
       </Header>
+      <GrowthChart articles={articles} />
       {Object.entries(articlesByYear)
         .sort(([yearA], [yearB]) => Number(yearB) - Number(yearA))
         .map(([year, monthsData]) => {
