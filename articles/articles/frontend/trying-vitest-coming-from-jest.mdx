@@ -1,0 +1,331 @@
+---
+title: 'Jest vs Vitest: Architecture, Migration Gotchas, and When to Use Which'
+description: 'A deep dive into how Jest and Vitest differ under the hood, from module systems and isolation to mock hoisting and timer APIs, plus practical migration tips.'
+topics: ['vitest', 'jest', 'testing']
+published: true
+date: '2025-12-22'
+---
+
+I've been using Jest for years. It's reliable, well-documented, and just works with most setups. But I recently set up Storybook in a Next.js project, and it came with Vitest pre-configured for component testing. Instead of maintaining two test runners, I figured I'd try Vitest for my unit tests too.
+
+## The Setup That Led Me Here
+
+My project is a Next.js app with Storybook. When I ran `npx storybook@latest init`, it automatically set up Vitest with the `@storybook/addon-vitest` plugin. The config looked like this:
+
+```ts
+// vitest.config.ts
+import { storybookTest } from '@storybook/addon-vitest/vitest-plugin'
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    projects: [
+      {
+        extends: true,
+        plugins: [storybookTest({ configDir: '.storybook' })],
+        test: {
+          name: 'storybook',
+          browser: {
+            enabled: true,
+            headless: true,
+          },
+        },
+      },
+    ],
+  },
+})
+```
+
+Since Vitest was already there, adding unit tests was just a matter of adding another project:
+
+```ts
+{
+  extends: true,
+  test: {
+    name: 'unit',
+    include: ['**/*.test.ts'],
+    environment: 'node',
+  },
+}
+```
+
+With Jest, I would've needed a separate `jest.config.js`, plus `ts-jest` or SWC transforms. Having one config for both Storybook and unit tests felt cleaner.
+
+## Syntax: Almost Identical
+
+The test syntax is nearly the same. The main difference is that Vitest requires explicit imports:
+
+```ts
+// Jest - globals, no imports needed
+describe('myFunction', () => {
+  it('should work', () => {
+    expect(1 + 1).toBe(2)
+  })
+})
+
+// Vitest - explicit imports
+import { describe, it, expect } from 'vitest'
+
+describe('myFunction', () => {
+  it('should work', () => {
+    expect(1 + 1).toBe(2)
+  })
+})
+```
+
+Vitest can use globals too if you set `globals: true` in the config, but I prefer explicit imports. It's clearer what's being used and plays nicer with TypeScript.
+
+## How They Work Under the Hood
+
+This is where things get interesting.
+
+### Jest's Architecture
+
+Jest uses its own transform pipeline. When you run a test:
+
+1. Jest reads your test file
+2. Transforms it using Babel (or ts-jest/SWC) based on your config
+3. Runs it in a sandboxed VM with its own module system
+4. Each test file gets its own isolated environment
+
+Jest was built before native ES modules were widely supported, so it implemented its own module system. This is why you sometimes run into weird ESM issues with Jest, like needing `transformIgnorePatterns` for node_modules that ship ES modules.
+
+### Vitest's Architecture
+
+Vitest uses Vite's dev server pipeline:
+
+1. Vitest spins up Vite's transform pipeline
+2. Uses esbuild for TypeScript/JSX transformation (way faster than Babel)
+3. Leverages native ES modules
+4. Shares the same module graph and caching as Vite
+
+Because Vite was built with ESM in mind, there's no fighting with module systems. TypeScript and JSX work out of the box without extra configuration.
+
+### The Speed Difference
+
+Vitest is noticeably faster, especially on larger test suites. The reasons:
+
+1. **esbuild vs Babel**: esbuild is written in Go and is 10-100x faster than Babel for transpilation
+2. **Smart caching**: Vite caches transformed modules, so re-runs only process changed files
+3. **Native ESM**: No overhead from simulating a module system
+
+For my small test suite (around 50 tests), the difference is marginal. But I've seen benchmarks where Vitest is 2-3x faster on larger codebases.
+
+## Key Differences When Migrating
+
+If you're moving from Jest to Vitest, these are the things that will trip you up.
+
+### Path Aliases: moduleNameMapper vs resolve.alias
+
+In Jest, path aliases like `@/` are configured with `moduleNameMapper`:
+
+```js
+// jest.config.js
+module.exports = {
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/$1',
+  },
+}
+```
+
+In Vitest, it uses Vite's `resolve.alias`:
+
+```ts
+// vitest.config.ts
+import path from 'node:path'
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname),
+    },
+  },
+})
+```
+
+The Vitest approach is cleaner since it's just standard Vite config. If you're already using Vite for your app, the alias is probably already defined and Vitest inherits it automatically.
+
+### Test Isolation: Different Defaults
+
+Jest runs each test file in a separate process by default. You can disable this with `--runInBand` to run everything in a single process (useful for debugging).
+
+Vitest does the opposite. By default, it runs tests in a single process using worker threads. You can enable full isolation with:
+
+```ts
+// vitest.config.ts
+export default defineConfig({
+  test: {
+    isolate: true, // Isolate each test file
+    fileParallelism: false, // Run files sequentially
+  },
+})
+```
+
+Why does this matter? In Jest, if one test file pollutes global state, it won't affect other files. In Vitest, without `isolate: true`, global state can leak between test files. This is worth knowing if your tests share global state.
+
+There's also `poolOptions.threads.isolate` for more granular control:
+
+```ts
+export default defineConfig({
+  test: {
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        isolate: true, // Each thread gets fresh environment
+      },
+    },
+  },
+})
+```
+
+### Snapshot Testing: Same Concept, Different Files
+
+Both support snapshot testing with nearly identical syntax:
+
+```ts
+// Works in both
+expect(component).toMatchSnapshot()
+expect(data).toMatchInlineSnapshot()
+```
+
+The difference is file format. Jest creates `.snap` files:
+
+```
+// __snapshots__/myTest.test.ts.snap
+exports[`should render correctly 1`] = `"<div>Hello</div>"`;
+```
+
+Vitest uses the same format by default, so existing snapshots work. But Vitest also supports inline snapshots that update the source file directly:
+
+```ts
+expect(data).toMatchInlineSnapshot(`
+  {
+    "name": "test",
+    "value": 123,
+  }
+`)
+```
+
+When you run `vitest -u`, it updates the snapshot right in your test file. I find inline snapshots more readable for small objects since you don't have to open a separate file.
+
+### Mock Hoisting: jest.mock vs vi.mock
+
+This is where things get tricky. Both Jest and Vitest hoist mock declarations to the top of the file, but they behave differently.
+
+In Jest:
+
+```ts
+import { myFunction } from './myModule'
+
+jest.mock('./myModule', () => ({
+  myFunction: jest.fn(() => 'mocked'),
+}))
+
+// This works because jest.mock is hoisted above the import
+```
+
+In Vitest:
+
+```ts
+import { myFunction } from './myModule'
+
+vi.mock('./myModule', () => ({
+  myFunction: vi.fn(() => 'mocked'),
+}))
+
+// Also works - vi.mock is hoisted too
+```
+
+The gotcha is with variables. In Jest, you can't use variables defined in the same file inside `jest.mock` because of hoisting:
+
+```ts
+const mockValue = 'test'
+
+jest.mock('./myModule', () => ({
+  myFunction: jest.fn(() => mockValue), // Error: mockValue is not defined
+}))
+```
+
+You have to use `jest.doMock` for dynamic mocks, or define the variable inside the mock factory.
+
+Vitest has the same limitation, but provides `vi.hoisted()` to handle it:
+
+```ts
+const { mockValue } = vi.hoisted(() => ({
+  mockValue: 'test',
+}))
+
+vi.mock('./myModule', () => ({
+  myFunction: vi.fn(() => mockValue), // Works!
+}))
+```
+
+The `vi.hoisted()` function runs before imports, so the variable is available in the mock factory. It's more explicit than Jest's approach.
+
+### Timer Mocks
+
+Both have fake timers, but the API differs slightly:
+
+```ts
+// Jest
+jest.useFakeTimers()
+jest.advanceTimersByTime(1000)
+jest.runAllTimers()
+jest.useRealTimers()
+
+// Vitest
+vi.useFakeTimers()
+vi.advanceTimersByTime(1000)
+vi.runAllTimers()
+vi.useRealTimers()
+```
+
+Straightforward find-and-replace. But Vitest also supports `vi.setSystemTime()` for mocking `Date`:
+
+```ts
+vi.useFakeTimers()
+vi.setSystemTime(new Date('2024-01-01'))
+
+expect(new Date().getFullYear()).toBe(2024)
+
+vi.useRealTimers()
+```
+
+Jest requires additional setup with `@sinonjs/fake-timers` or manual `Date` mocking for this.
+
+## Interesting Facts
+
+A few things I learned while digging into this:
+
+### Jest's Name Origin
+
+Jest was created at Facebook (now Meta) in 2014. The name comes from the idea that testing should be "delightful" and not feel like a chore, like a jester making things fun.
+
+### Vitest's Relationship with Vite
+
+Vitest was created by Anthony Fu (a core Vite team member) in 2021. It started as a proof of concept to see if Vite's transform pipeline could be used for testing. Turns out it could, and it was fast.
+
+### Compatibility Mode
+
+Vitest has a Jest compatibility mode that makes migration easier. It can even read `jest.config.js` files with some configuration. The API is intentionally similar because most developers already know Jest.
+
+### Watch Mode by Default
+
+Running `vitest` starts watch mode by default, while Jest requires `jest --watch`. I actually prefer this, since during development I'm almost always watching for changes.
+
+## When I'd Still Use Jest
+
+Despite liking Vitest, there are cases where Jest makes more sense:
+
+1. **Next.js without Storybook**: The `next/jest` package handles all the configuration automatically. Zero setup.
+2. **Existing large Jest codebase**: Migration has a cost, and Jest works fine.
+3. **Teams unfamiliar with Vite**: Jest has more Stack Overflow answers and documentation.
+
+## My Takeaway
+
+Vitest isn't a revolutionary change in how I write tests. The syntax is the same, the assertions are the same. But the setup is simpler when you're already in the Vite ecosystem, and the speed is a nice bonus.
+
+If you're starting a new Vite or Storybook project, Vitest is the obvious choice. If you're on Next.js with no Vite tooling, Jest with `next/jest` is still the path of least resistance.
+
+For me, having Storybook already set up with Vitest made the decision easy. One test runner, one config, and it just works.
