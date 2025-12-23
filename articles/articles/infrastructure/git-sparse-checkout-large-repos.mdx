@@ -1,0 +1,185 @@
+---
+title: 'Cloning Just What You Need: Sparse Checkout for Large Repositories'
+description: 'How to use Git sparse checkout with shallow clone to work with massive repos without waiting hours for a full clone.'
+topics: ['git']
+published: true
+date: '2025-12-19'
+---
+
+I needed to fix a broken CI/CD pipeline, and it was blocking deploys. The problem? The repository was around 30GB, and a full clone would've taken hours. All I needed was the `.github` directory.
+
+This is exactly what Git's sparse checkout was designed for. Combined with shallow cloning, it lets you clone just the directories you need in seconds instead of hours. It's not a workaround or a hack. It's the right tool for targeted changes in large repositories.
+
+## The Commands
+
+Here's what worked for me:
+
+```bash
+# Shallow clone with no files checked out
+git clone --depth 1 --filter=blob:none --sparse git@github.com:org/repo.git
+
+cd repo
+
+# Only checkout .github directory
+git sparse-checkout set .github
+```
+
+Let me break down what each flag does:
+
+- `--depth 1`: Only fetch the latest commit (shallow clone)
+- `--filter=blob:none`: Don't download file contents until needed (partial clone)
+- `--sparse`: Don't checkout any files initially
+
+After running `git sparse-checkout set .github`, only the `.github` directory exists in my working tree. The `.git` folder is tiny since we skipped most of the blob data.
+
+## Working with Partial History
+
+Since you're working with a subset of the repository, some Git commands behave differently. This isn't a limitation. It's just a different workflow that matches what you're trying to do: targeted edits, not full-repo operations.
+
+### Switching Branches
+
+The usual `git checkout other-branch` doesn't work because remote tracking refs aren't fully set up in a shallow clone:
+
+```bash
+git fetch origin develop
+git checkout develop
+
+# fatal: 'origin/develop' is not a commit and a branch 'develop' cannot be created from it
+```
+
+Instead, use `FETCH_HEAD` to reference what you just fetched:
+
+```bash
+git fetch origin develop
+git checkout -b develop FETCH_HEAD
+```
+
+This creates a local branch from the fetched commit directly.
+
+### Getting Files from Other Branches
+
+With a partial clone, traditional merging doesn't make sense. You don't have the full file tree, so there's nothing to merge into. If you try:
+
+```bash
+git merge origin/feature-branch
+
+# fatal: refusing to merge unrelated histories
+```
+
+Git refuses because the shallow clone has no common commit history. Even with `--allow-unrelated-histories`, you'll get conflicts from files that aren't in your working directory.
+
+The right approach is to checkout specific files directly:
+
+```bash
+# Fetch the branch first
+git fetch origin feature-branch:refs/remotes/origin/feature-branch
+
+# Checkout just the file you need
+git checkout origin/feature-branch -- .github/workflows/deploy.yml
+```
+
+This grabs exactly what you need without trying to reconcile the entire repository.
+
+### Pushing Changes: Use Pull Requests
+
+For production branches, always use pull requests. I made my changes to the sparse checkout, committed them, pushed to a feature branch, and opened a PR. The PR had no conflicts because I was only modifying files within my sparse checkout scope.
+
+For non-production branches (like a development environment), you can push directly since the stakes are lower. But PRs are still the cleaner workflow.
+
+### Adding Files Outside Sparse Checkout
+
+If you create a new file in a directory that's not in your sparse checkout, Git will complain:
+
+```bash
+git add some-other-folder/test.txt
+
+# error: The following paths are not covered by your sparse-checkout:
+#   some-other-folder/test.txt
+# hint: If you intend to update such entries, try one of the following:
+# hint: * Use the --sparse option.
+# hint: * Disable or modify the sparsity rules.
+```
+
+The fix is in the hint. Use the `--sparse` flag:
+
+```bash
+git add --sparse some-other-folder/test.txt
+```
+
+Or expand your sparse checkout to include that directory:
+
+```bash
+git sparse-checkout add some-other-folder
+```
+
+## When to Use This
+
+Sparse checkout with shallow clone is the right tool when:
+
+- **Urgent fixes in large repos**: CI/CD pipelines breaking, config changes needed now
+- **Scoped changes**: You're only touching files in one directory
+- **Monorepo contributions**: Documentation, workflows, or configs that don't require the full codebase
+- **CI/CD environments**: Many CI systems use sparse checkout by default for faster builds
+
+It's not the right tool when:
+
+- **Feature development**: If you need multiple directories or full context
+- **Complex rebasing**: You'll want full history for that
+- **Code review context**: Understanding surrounding code requires more of the repo
+
+## Expanding When Needed
+
+If you start with a sparse shallow clone and later realize you need more history or files, you can incrementally fetch them:
+
+```bash
+# Get full history (but still sparse files)
+git fetch --unshallow
+
+# Or just deepen by N commits
+git fetch --depth=100
+```
+
+And if you need more directories:
+
+```bash
+# Add another directory to sparse checkout
+git sparse-checkout add src/config
+
+# Or switch to full checkout
+git sparse-checkout disable
+```
+
+## Quick Reference
+
+```bash
+# Initial sparse shallow clone
+git clone --depth 1 --filter=blob:none --sparse <repo-url>
+git sparse-checkout set <directory>
+
+# Checkout a branch
+git fetch origin <branch>
+git checkout -b <branch> FETCH_HEAD
+
+# Get a file from another branch
+git fetch origin <branch>:refs/remotes/origin/<branch>
+git checkout origin/<branch> -- path/to/file
+
+# Add file outside sparse checkout
+git add --sparse path/to/file
+
+# Expand sparse checkout
+git sparse-checkout add <another-directory>
+
+# Convert to full clone
+git fetch --unshallow
+git sparse-checkout disable
+```
+
+This approach saved me hours and unblocked a critical deploy. It's not a replacement for full clones in day-to-day development, but for scoped, urgent changes in large repositories, it's exactly what Git designed these features for.
+
+## References
+
+- [Git sparse-checkout documentation](https://git-scm.com/docs/git-sparse-checkout)
+- [Get up to speed with partial clone and shallow clone - GitHub Blog](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/)
+- [Bring your monorepo down to size with sparse-checkout - GitHub Blog](https://github.blog/open-source/git/bring-your-monorepo-down-to-size-with-sparse-checkout/)
+- [How to handle big repositories with Git - Atlassian](https://www.atlassian.com/git/tutorials/big-repositories)
