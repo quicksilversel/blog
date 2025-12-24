@@ -1,0 +1,422 @@
+---
+title: 'Building a Slack Bot for Akamai Cache Purge with AWS Lambda'
+description: 'How I automated CDN cache purging through a Slack bot, eliminating late-night manual operations while maintaining security with Slack signature verification and channel restrictions.'
+topics: ['Node.js', 'Slack', 'AWS', 'Akamai', 'Caching']
+published: true
+date: '2025-04-15'
+---
+
+## Intro
+
+Our team frequently received requests to purge Akamai CDN cache. Sometimes these requests came late at night when something urgent needed to go live. The manual process involved logging into the Akamai console, navigating to the right property, and executing the purge. It was tedious and error-prone.
+
+The solution: a Slack bot that lets authorized team members purge cache directly from a private channel.
+
+Why not AWS Chatbot or Bedrock? We already had a Lambda function for other Akamai operations, so adding a new endpoint was the path of least resistance.
+
+## Architecture Overview
+
+The system involves four components: Slack, AWS Lambda, Akamai, and the Slack API for responses.
+
+![Sequence diagram showing the flow from Slack Bot to Lambda to Akamai](/slack-cache-purge/sequence-diagram.png)
+
+The flow works like this:
+
+1. User sends a message in the private Slack channel with cache purge details
+2. Slack sends an HTTP request to Lambda with signature headers
+3. Lambda verifies the signature, channel ID, and bot ID
+4. If valid, Lambda calls Akamai's purge API
+5. Lambda posts the result back to Slack as a thread reply
+
+## Security Considerations
+
+Since cache purging can be expensive (millions of new requests if someone purges everything), security was critical:
+
+1. **Slack Signature Verification** - Verify requests actually come from Slack using HMAC-SHA256
+2. **Channel Restriction** - Only accept requests from a specific private channel
+3. **Bot ID Validation** - Ensure the request is from our specific bot
+4. **Timestamp Validation** - Reject requests older than 5 minutes to prevent replay attacks
+5. **Input Validation** - Validate cache type and path format
+
+### Slack Request Verification
+
+Slack signs every request with a secret. The verification follows [Slack's official docs](https://api.slack.com/authentication/verifying-requests-from-slack):
+
+```typescript
+const crypto = require('crypto')
+
+export const isValidSignature = async (
+  event: APIGatewayProxyEvent,
+): Promise<boolean> => {
+  const headers = event.headers
+  const rawBody = event.body
+
+  const body = JSON.parse(rawBody)
+
+  // Restrict to specific channel and bot
+  const botId = body?.event?.bot_id
+  const channelId = body?.event?.channel
+
+  if (botId !== BOT_ID || channelId !== CHANNEL_ID) {
+    return false
+  }
+
+  const slackSignature =
+    headers['x-slack-signature'] || headers['X-Slack-Signature']
+  const slackTimestamp =
+    headers['x-slack-request-timestamp'] || headers['X-Slack-Request-Timestamp']
+
+  if (!slackSignature || !slackTimestamp) {
+    return false
+  }
+
+  const secrets = await getSecretsFromSecretManager()
+  const SLACK_SIGNING_SECRET = secrets[SECRET_KEYS.slackSigningSecret]
+
+  // Prevent replay attacks (5 min window)
+  const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 60 * 5
+  if (parseInt(slackTimestamp, 10) < fiveMinutesAgo) {
+    return false
+  }
+
+  // Create base string: v0:timestamp:body
+  const sigBaseString = `v0:${slackTimestamp}:${rawBody}`
+
+  // Compute HMAC-SHA256
+  const hmac = crypto.createHmac('sha256', SLACK_SIGNING_SECRET)
+  hmac.update(sigBaseString, 'utf8')
+  const mySignature = `v0=${hmac.digest('hex')}`
+
+  // Use timing-safe comparison to prevent timing attacks
+  const signatureIsValid = crypto.timingSafeEqual(
+    Buffer.from(mySignature, 'utf8'),
+    Buffer.from(slackSignature, 'utf8'),
+  )
+
+  return !!signatureIsValid
+}
+```
+
+The key steps:
+
+1. Check channel ID and bot ID first (fast fail)
+2. Validate timestamp is within 5 minutes
+3. Construct the signature base string: `v0:{timestamp}:{body}`
+4. Compute HMAC-SHA256 with the signing secret
+5. Use `timingSafeEqual` to prevent timing attacks
+
+## Lambda Handler
+
+The main handler orchestrates everything:
+
+```typescript
+import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda'
+const EdgeGrid = require('akamai-edgegrid')
+
+export const lambdaHandler = async (
+  event: APIGatewayProxyEvent,
+): Promise<APIGatewayProxyResult> => {
+  const payload = JSON.parse(event.body)
+
+  // Verify Slack signature
+  if (!(await isValidSignature(event))) {
+    return {
+      statusCode: 403,
+      body: JSON.stringify({ message: 'Forbidden' }),
+    }
+  }
+
+  // Handle Slack URL verification challenge
+  if (payload.type === 'url_verification') {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ challenge: payload.challenge }),
+    }
+  }
+
+  // Parse the message to extract cache type and target path
+  // The structure depends on your Slack Workflow form configuration
+  const { cacheType, targetPath } = parseSlackMessage(payload)
+  const isCacheTag = cacheType === 'tag'
+
+  // Validate input
+  if (!targetPath || cacheType === undefined) {
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ message: 'Invalid Payload' }),
+    }
+  }
+
+  // Validate cache tag length (Akamai limit)
+  if (isCacheTag && targetPath.length > 128) {
+    sendMessageToSlack({
+      threadTs: payload.event.ts,
+      targetPath,
+      message: 'Invalid Cache Tag',
+      hasError: true,
+    })
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ message: 'Invalid Cache Tag' }),
+    }
+  }
+
+  // Create .edgerc file for Akamai authentication
+  await createEdgercFile()
+
+  const response = await getSecretsFromSecretManager()
+  const AKAMAI_HOST = response[SECRET_KEYS.akamaiHost]
+  const PATH = `https://${AKAMAI_HOST}/ccu/v3/delete/${isCacheTag ? 'tag' : 'url'}/production`
+
+  const eg = new EdgeGrid({
+    path: EDGERC_FILE_PATH,
+    section: 'default',
+  })
+
+  return new Promise((resolve, reject) => {
+    eg.auth({
+      path: PATH,
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ objects: [targetPath] }),
+    })
+
+    eg.send((error, response, body) => {
+      if (response) {
+        sendMessageToSlack({
+          threadTs: payload.event.ts,
+          targetPath,
+          hasError: false,
+        })
+        resolve({
+          statusCode: 200,
+          body: JSON.stringify({
+            message: `Successfully purged cache with ${targetPath}`,
+          }),
+        })
+      } else {
+        sendMessageToSlack({
+          threadTs: payload.event.ts,
+          targetPath,
+          message: 'Error sending request to EdgeGrid',
+          hasError: true,
+        })
+        reject(error || new Error('Unknown error occurred'))
+      }
+    })
+  })
+}
+```
+
+## Akamai EdgeGrid Authentication
+
+Akamai uses EdgeGrid for API authentication. The `akamai-edgegrid` npm package handles the signature generation, but it requires a `.edgerc` config file.
+
+Since Lambda doesn't have persistent storage, we use [Lambda's ephemeral storage](https://docs.aws.amazon.com/lambda/latest/dg/configuration-ephemeral-storage.html) (`/tmp` directory) to write the config file. The exact lifespan of ephemeral storage isn't guaranteed—it persists across warm invocations but gets cleared when the execution environment is recycled. To avoid unnecessary writes, we check if the file exists before creating it:
+
+```typescript
+import fs from 'fs/promises'
+
+const EDGERC_FILE_PATH = '/tmp/.edgerc'
+
+const fileExists = async (path: string): Promise<boolean> => {
+  try {
+    await fs.access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const createEdgercFile = async (): Promise<void> => {
+  // Skip if file already exists (reuse across warm invocations)
+  if (await fileExists(EDGERC_FILE_PATH)) {
+    return
+  }
+
+  const secrets = await getSecretsFromSecretManager()
+
+  const edgercContent = `[default]
+client_secret = ${secrets.akamai_client_secret}
+host = ${secrets.akamai_host}
+access_token = ${secrets.akamai_access_token}
+client_token = ${secrets.akamai_client_token}`
+
+  await fs.writeFile(EDGERC_FILE_PATH, edgercContent, 'utf-8')
+}
+```
+
+The credentials are stored in AWS Secrets Manager. For Akamai, I created API credentials scoped only to cache purge operations for the specific property, following the principle of least privilege.
+
+The Akamai purge API endpoint format is:
+
+```
+POST /ccu/v3/delete/{type}/production
+```
+
+Where `{type}` is either `url` (for URL-based purge) or `tag` (for cache tag purge). The request body contains an array of objects to purge:
+
+```json
+{
+  "objects": ["https://example.com/path/to/purge"]
+}
+```
+
+## Sending Results Back to Slack
+
+After purging (or failing), the bot replies in the thread so users know what happened:
+
+```typescript
+const axios = require('axios')
+
+export const sendMessageToSlack = async ({
+  threadTs,
+  targetPath,
+  message,
+  hasError,
+}: {
+  threadTs: string
+  targetPath: string
+  message?: string
+  hasError: boolean
+}): Promise<void> => {
+  const secrets = await getSecretsFromSecretManager()
+  const SLACK_BOT_TOKEN = secrets[SECRET_KEYS.slackBotToken]
+
+  await axios.post(
+    'https://slack.com/api/chat.postMessage',
+    {
+      channel: CHANNEL_ID,
+      thread_ts: threadTs,
+      text: `${hasError ? 'Failed to Purge' : 'Successfully Purged'} ${targetPath}${hasError ? `\nCause: ${message}` : ''}`,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    },
+  )
+}
+```
+
+The `thread_ts` parameter ensures the response appears as a thread reply rather than a new message, keeping the channel clean.
+
+## AWS Infrastructure
+
+The Lambda is defined in SAM template:
+
+```yaml
+AkamaiCachePurgeForSlackFunction:
+  Type: AWS::Serverless::Function
+  Properties:
+    FunctionName: my-akamai-cache-purge-slack-lambda
+    Handler: dist/handlers/akamaiCachePurgeForSlackHandler.lambdaHandler
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+    Events:
+      AkamaiCachePurgeApi:
+        Type: Api
+        Properties:
+          RestApiId: !Ref Api
+          Path: /akamai-cache-purge-for-slack
+          Method: post
+          Auth:
+            ApiKeyRequired: false
+    Role: !Sub arn:aws:iam::${AWS::AccountId}:role/my-lambda-execution-role
+```
+
+Note that `ApiKeyRequired: false` because authentication is handled by Slack signature verification instead.
+
+## Secrets Management
+
+All sensitive values are stored in AWS Secrets Manager:
+
+```typescript
+import {
+  SecretsManagerClient,
+  GetSecretValueCommand,
+} from '@aws-sdk/client-secrets-manager'
+
+const SECRET_NAME = 'my-project/akamai-cache-purge'
+
+const client = new SecretsManagerClient({ region: 'ap-northeast-1' })
+
+export const getSecretsFromSecretManager = async () => {
+  const response = await client.send(
+    new GetSecretValueCommand({
+      SecretId: SECRET_NAME,
+      VersionStage: 'AWSCURRENT',
+    }),
+  )
+  return JSON.parse(response.SecretString)
+}
+```
+
+The secret contains:
+
+- `akamai_client_secret` - Akamai API client secret
+- `akamai_host` - Akamai API host
+- `akamai_access_token` - Akamai API access token
+- `akamai_client_token` - Akamai API client token
+- `slack_signing_secret` - For verifying Slack requests
+- `slack_bot_token` - For posting messages back to Slack
+
+## Slack Workflow Setup
+
+The Slack side uses a Workflow Builder form that captures:
+
+1. **Executor** - Who is requesting the purge (auto-filled)
+2. **Cache Type** - Dropdown to select between cache tag or URL purge
+3. **Target Path** - The URL or cache tag to purge
+
+The workflow sends a formatted message to the channel, which triggers the bot. This structured input makes parsing reliable and prevents malformed requests.
+
+## Retrospective
+
+### What Worked Well
+
+- **Private channel restriction** - Only team members with access can trigger purges
+- **Thread replies** - Results appear in-thread, keeping the channel clean
+- **Validation** - Bad input gets caught early with clear error messages
+
+### What I'd Do Differently
+
+In retrospect, I could have used the [Slack Bolt](https://slack.dev/bolt-js) package to simplify the authentication flow. Bolt handles signature verification automatically:
+
+```typescript
+// With Bolt (what I could have done)
+import { App } from '@slack/bolt'
+
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+})
+
+app.message('purge', async ({ message, say }) => {
+  // Bolt handles all the signature verification
+  await purgeCache(message.text)
+  await say({ text: 'Cache purged!', thread_ts: message.ts })
+})
+```
+
+But I didn't know about Bolt at the time, and the manual implementation taught me a lot about how Slack authentication actually works.
+
+## Impact
+
+This automation eliminated:
+
+- Late-night manual cache purges
+- The need to share Akamai console access
+- Human error in cache purge operations
+
+Team members can now purge cache in seconds from Slack, with full audit trail (Slack message history) and access control (private channel membership)
+
+## Resources
+
+- [Slack Request Verification](https://api.slack.com/authentication/verifying-requests-from-slack)
+- [Akamai Purge Cache API](https://techdocs.akamai.com/purge-cache/reference/post-delete-url)
+- [akamai-edgegrid npm package](https://www.npmjs.com/package/akamai-edgegrid)
+- [Slack Bolt for JavaScript](https://slack.dev/bolt-js)
+- [AWS Lambda Ephemeral Storage](https://docs.aws.amazon.com/lambda/latest/dg/configuration-ephemeral-storage.html)

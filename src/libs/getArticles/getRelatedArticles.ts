@@ -10,21 +10,62 @@ interface ArticleIdentifier {
   category: string
 }
 
+function calculateTopicIDF(articles: Article[]): Map<string, number> {
+  const topicCounts = new Map<string, number>()
+
+  for (const article of articles) {
+    const topics = article.topics || []
+    for (const topic of topics) {
+      topicCounts.set(topic, (topicCounts.get(topic) || 0) + 1)
+    }
+  }
+
+  const idfWeights = new Map<string, number>()
+  const totalArticles = articles.length
+
+  for (const [topic, count] of topicCounts) {
+    const idf = Math.log(totalArticles / count)
+    idfWeights.set(topic, idf)
+  }
+
+  return idfWeights
+}
+
 function calculateSimilarity(
   current: ArticleIdentifier,
   other: Article,
+  topicIDF: Map<string, number>,
 ): number {
-  const topics1 = new Set(current.topics || [])
-  const topics2 = new Set(other.topics || [])
+  const currentTopics = current.topics || []
+  const otherTopics = new Set(other.topics || [])
 
-  if (topics1.size === 0 || topics2.size === 0) return 0
+  if (currentTopics.length === 0 || otherTopics.size === 0) return 0
 
-  const commonTopics = [...topics1].filter((topic) => topics2.has(topic)).length
+  let matchedWeight = 0
+  let totalWeight = 0
+  let rareMatchCount = 0
 
-  const union = new Set([...topics1, ...topics2]).size
-  const similarity = commonTopics / union
+  for (const topic of currentTopics) {
+    const weight = topicIDF.get(topic) || 1
+    totalWeight += weight
 
-  const categoryBoost = current.category === other.category ? 0.2 : 0
+    if (otherTopics.has(topic)) {
+      matchedWeight += weight
+      if (weight > 2.0) {
+        rareMatchCount++
+      }
+    }
+  }
+
+  if (totalWeight === 0) return 0
+
+  let similarity = matchedWeight / totalWeight
+
+  if (rareMatchCount >= 2) {
+    similarity += 0.1
+  }
+
+  const categoryBoost = current.category === other.category ? 0.05 : 0
 
   return Math.min(similarity + categoryBoost, 1)
 }
@@ -36,6 +77,8 @@ export async function getRelatedArticles(
   maxResults: number = 3,
 ): Promise<Article[]> {
   const allArticles = await getArticles()
+
+  const topicIDF = calculateTopicIDF(allArticles)
 
   const current: ArticleIdentifier = {
     slug: currentSlug,
@@ -49,7 +92,7 @@ export async function getRelatedArticles(
 
   const articlesWithScores = otherArticles.map((article) => ({
     article,
-    score: calculateSimilarity(current, article),
+    score: calculateSimilarity(current, article, topicIDF),
   }))
 
   return articlesWithScores

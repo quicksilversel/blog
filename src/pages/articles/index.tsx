@@ -25,6 +25,12 @@ export async function getStaticProps() {
     articles[category].push(article)
   })
 
+  for (const category of Object.keys(articles)) {
+    articles[category].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    )
+  }
+
   return {
     props: {
       articles,
