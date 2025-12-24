@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "tsx scripts/generate-rss.ts && next build --turbopack",
+    "generate-rss": "tsx scripts/generate-rss.ts",
     "start": "next start",
     "lint": "next lint",
     "lint:js": "eslint \"./src/**/*.{ts,tsx}\"",
@@ -21,6 +22,7 @@
     "@emotion/react": "^11.11.4",
     "@emotion/server": "^11.11.0",
     "@emotion/styled": "^11.11.5",
+    "feed": "^5.1.0",
     "lucide-react": "^0.544.0",
     "next": "^16.0.7",
     "next-mdx-remote": "^5.0.0",
@@ -48,6 +50,7 @@
     "stylelint-config-standard": "^39.0.0",
     "stylelint-no-unsupported-browser-features": "^8.0.4",
     "stylelint-order": "^7.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
