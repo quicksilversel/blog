@@ -1,0 +1,246 @@
+---
+title: 'Migrating to React 19: Lessons from Three Production Apps'
+description: 'A comprehensive look at the challenges faced when upgrading multiple Next.js apps to version 16 with React 19 - from Recoil incompatibility to MDX issues and MUI updates.'
+date: 2025-12-30
+topics: ['React', 'Next.js']
+published: true
+---
+
+## The Upgrade Journey
+
+Recently, I decided to upgrade several Next.js apps from version 14 to the latest version 16, which also meant upgrading from React 18 to React 19. What I expected to be straightforward version bumps turned into interesting learning experiences about the evolving React ecosystem.
+
+Each codebase had its own set of challenges. Here's what I encountered and how I solved them.
+
+## App A: The Recoil Catastrophe
+
+The first app was a data browsing tool built with Next.js App Router and Recoil for state management. The upgrade path was Next.js 14.0.4 → 16.1.1 and React 18 → 19. This one gave me the most trouble.
+
+### Why I Originally Chose Recoil
+
+When I first built this app, I chose [Recoil](https://recoiljs.org/) for state management. At the time, it felt like a breath of fresh air compared to the traditional Context API approach. Here's what attracted me to it:
+
+**Atomic State Model**: Recoil's atom-based approach felt intuitive. Instead of having one giant context provider with all your state, you could create small, independent pieces of state that components could subscribe to individually.
+
+```tsx
+export const filtersAtom = atom<FilterState>({
+  key: 'filtersAtom',
+  default: {},
+})
+
+export const pageAtom = atom({
+  key: 'pageAtom',
+  default: 1,
+})
+```
+
+**Familiar API**: The `useRecoilState` hook felt just like `useState`, making it easy to adopt:
+
+```tsx
+const [filters, setFilters] = useRecoilState(filtersAtom)
+```
+
+### The React 19 Compatibility Issue
+
+When I ran my first build after upgrading to React 19, I was greeted with this error:
+
+```
+TypeError: Cannot destructure property 'ReactCurrentDispatcher'
+of 'React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED'
+as it is undefined.
+```
+
+The error message is quite telling - Recoil was relying on React's internal APIs that were never meant to be used by external libraries. These internals changed in React 19, breaking compatibility completely.
+
+### The State of Recoil
+
+Looking into this further, I discovered that the Recoil repository has been archived. The library served the React community well during a time when React's built-in state management options were more limited, but it's no longer being actively maintained.
+
+This isn't a criticism of Recoil - it was a genuinely innovative library that influenced how we think about state management in React. Sometimes libraries fulfill their purpose and make way for new approaches.
+
+### The Solution: Back to Context
+
+With Recoil no longer an option, I needed to migrate to something else. I considered a few alternatives:
+
+- **Jotai**: Similar atomic model to Recoil, actively maintained
+- **Zustand**: Simple, minimal API, very popular
+- **React Context**: Built into React, no external dependencies
+
+I ended up choosing React Context for three reasons: zero dependencies to maintain, future-proof compatibility since it's part of React itself, and it was sufficient for my use case (filters, pagination, UI state).
+
+The migration was surprisingly straightforward. I created a single context that held all my state:
+
+```tsx
+'use client'
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  type ReactNode,
+} from 'react'
+
+type AppState = {
+  items: Item[]
+  filters: FilterState
+  page: number
+  sort: SortOption
+}
+
+const AppContext = createContext<AppContextType | null>(null)
+
+export function AppProvider({ children, initialData = [] }: AppProviderProps) {
+  const [state, setState] = useState<AppState>({
+    items: initialData,
+    filters: {},
+    page: 1,
+    sort: 'newest',
+  })
+
+  // ... setters with useCallback
+
+  return (
+    <AppContext.Provider value={{ state, ...setters }}>
+      {children}
+    </AppContext.Provider>
+  )
+}
+```
+
+Then I created convenience hooks that mirrored the Recoil API:
+
+```tsx
+export function useFilters() {
+  const { state, setFilters } = useAppContext()
+  return [state.filters, setFilters] as const
+}
+
+export function usePage() {
+  const { state, setPage } = useAppContext()
+  return [state.page, setPage] as const
+}
+```
+
+This meant the component changes were minimal - just updating imports:
+
+```tsx
+// Before
+import { useRecoilState } from 'recoil'
+import { filtersAtom } from '@/state/atoms'
+const [filters, setFilters] = useRecoilState(filtersAtom)
+
+// After
+import { useFilters } from '@/context/AppContext'
+const [filters, setFilters] = useFilters()
+```
+
+## App B: The MDX Dilemma
+
+The second app was this very blog, which was still using the Pages Router with `next-mdx-remote` for rendering markdown content. This migration was more involved because it combined two changes: Pages Router to App Router, and MDX to plain markdown.
+
+### The Problem with next-mdx-remote
+
+`next-mdx-remote` was designed for the Pages Router era. It serializes MDX content in `getStaticProps` and hydrates it on the client. This architecture fundamentally conflicts with React Server Components:
+
+- Server Components don't hydrate - they render once on the server
+- The `MDXRemote` component requires client-side React context
+- Passing serialized MDX through the RSC wire format causes issues
+
+### The Solution: gray-matter + react-markdown
+
+I realized I was using MDX as overkill - my blog posts were plain markdown with frontmatter, no embedded React components. So I switched to a simpler stack:
+
+- **gray-matter**: Parse YAML frontmatter from markdown files
+- **react-markdown**: Render markdown to React components
+
+This combination works naturally with Server Components and eliminated the serialization/hydration complexity.
+
+For the full technical deep-dive including how these libraries work under the hood and why I chose them over alternatives like `marked` or `markdown-it`, see [Next.js App Router Migration: From next-mdx-remote to gray-matter](/articles/frontend/nextjs-app-router-migration-mdx-to-markdown).
+
+## App C: The MUI Version Dance
+
+The third app was an internal tool built with MUI (Material-UI). The upgrade path was Next.js 14.2.14 → 16.1.1 and React 18 → 19. This one was the smoothest migration, but still required attention.
+
+### The Compatibility Issue
+
+After upgrading to React 19, I encountered runtime errors with MUI. The existing version (5.15.14) wasn't compatible with React 19's changes. MUI 5.15 was built with peer dependencies targeting React 17 and 18 only.
+
+### The Solution: Targeted Version Bump
+
+I updated MUI from 5.15.14 to 5.18.0:
+
+```diff
+{
+-  "@mui/icons-material": "^5.15.14",
+-  "@mui/material": "^5.15.14",
++  "@mui/icons-material": "^5.18.0",
++  "@mui/material": "^5.18.0",
+}
+```
+
+Version 5.18.0 was the first to add React 19 to its peer dependencies (`^17.0.0 || ^18.0.0 || ^19.0.0`). I considered upgrading to MUI 7+, but decided against it because:
+
+- MUI 7 has breaking API changes that would require significant refactoring
+- The app is stable and working - no need for new features
+- Version 5.18.0 provides React 19 compatibility without API changes
+
+Sometimes the best upgrade is the smallest one that solves the problem.
+
+## Common Issues Across All Apps
+
+Beyond the library-specific issues, there were several common patterns I encountered:
+
+### JSX.Element Type Removed
+
+React 19 moved the JSX namespace. If you had explicit return types like `Promise<JSX.Element>`, you'll need to remove them or use `React.JSX.Element`:
+
+```tsx
+// Before
+export default async function Page(): Promise<JSX.Element> {
+
+// After - just remove the explicit return type
+export default async function Page() {
+```
+
+### useSearchParams Requires Suspense
+
+Components using `useSearchParams()` now need to be wrapped in a Suspense boundary:
+
+```tsx
+<Suspense fallback={null}>
+  <ComponentUsingSearchParams />
+</Suspense>
+```
+
+### next.config.js Updates
+
+- `swcMinify: true` is now the default and deprecated as an option
+- Image `remotePatterns.hostname` should not include the protocol
+
+### ESLint 9 Compatibility
+
+If you're also upgrading ESLint to v9, make sure to update `eslint-plugin-storybook` to `^0.12.0` or later, as older versions only support ESLint 8.
+
+## Lessons Learned
+
+**Dependencies on React Internals Are Risky**: Libraries that rely on `__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED` (yes, that's the actual name) are inherently fragile. The name is a warning for a reason. Recoil's complete breakage is a cautionary tale.
+
+**Sometimes "Boring" Is Better**: React Context might not be as elegant as Recoil's atomic model, but it's stable, well-documented, and guaranteed to work with future React versions. Plain markdown might not be as powerful as MDX, but it's simpler and more compatible.
+
+**Check Maintenance Status Before Adopting**: Before adding a dependency, check if the project is actively maintained. An archived repository is a clear signal. Recoil being archived meant there would be no fix coming.
+
+**Minimal Upgrades Can Be Strategic**: With MUI, I chose the minimum version bump (5.15.14 → 5.18.0) instead of jumping to the latest major version. This solved the compatibility issue without introducing new breaking changes.
+
+**The Migration Wasn't That Bad**: What I thought would be painful refactors took only a few hours each. Creating hooks that mirror old APIs, using well-supported alternatives, and making targeted version bumps all contributed to smooth migrations.
+
+## Wrapping Up
+
+Upgrading to React 19 across three different apps taught me that every codebase has its own challenges. The key is to:
+
+- Identify which dependencies rely on React internals (they'll break)
+- Look for simpler alternatives when complex libraries become incompatible
+- Make minimal changes that solve the problem without over-engineering
+- Test incrementally and verify each change before moving on
+
+If you're facing similar migrations, don't stress too much. The React ecosystem has matured, and there are usually straightforward paths forward - even when your favorite library stops working.
