@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { useRouter } from 'next/router'
+import { usePathname, useRouter } from 'next/navigation'
 
 import type { Article } from '@/libs/getArticles/types'
 
@@ -15,6 +15,7 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
+  const pathname = usePathname()
 
   const searchArticles = useCallback(async (searchQuery: string) => {
     if (!searchQuery.trim()) {
@@ -125,7 +126,7 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
             const isProjectArticle = 'project' in result
             const path =
               result.type === 'snippet'
-                ? `/snippets/${result.slug}`
+                ? `/snippets/${result.category}/${result.fileName.replace('.mdx', '')}`
                 : isProjectArticle
                   ? `/projects/${result.slug}`
                   : `/articles/${result.slug}`
@@ -140,16 +141,13 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, results, selectedIndex, onClose, router])
 
+  // Close modal on route change
   useEffect(() => {
-    const handleRouteChange = () => {
-      if (isOpen) {
-        onClose()
-      }
+    if (isOpen) {
+      onClose()
     }
-
-    router.events.on('routeChangeStart', handleRouteChange)
-    return () => router.events.off('routeChangeStart', handleRouteChange)
-  }, [router.events, isOpen, onClose])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
 
   return {
     query,

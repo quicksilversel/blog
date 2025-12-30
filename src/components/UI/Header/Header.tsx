@@ -1,40 +1,28 @@
-import { useEffect, useState } from 'react'
+'use client'
+
+import { useState } from 'react'
 
 import styled from '@emotion/styled'
-import { Search, X, Menu, Moon, Sun } from 'lucide-react'
+import { Search, X, Menu } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/router'
-
-import type { ThemeContext } from '@/pages/_app'
+import { usePathname } from 'next/navigation'
 
 import { SearchModal } from '@/components/Search'
 
 import { Drawer } from '../Drawer'
 
-export const Header = ({ theme, setTheme }: ThemeContext) => {
-  const router = useRouter()
-  const [mounted, setMounted] = useState(false)
+export const Header = () => {
+  const pathname = usePathname()
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
-
-  const toggleTheme = () => {
-    setTheme(theme === 'light' ? 'dark' : 'light')
-    localStorage.setItem('theme', theme === 'light' ? 'dark' : 'light')
-  }
 
   const handleSearchClick = () => {
     setIsSearchOpen(true)
   }
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  const handleNavClick = () => {
     setIsDrawerOpen(false)
-  }, [router.pathname])
+  }
 
   const navItems = [
     { href: '/about', label: 'About' },
@@ -54,75 +42,56 @@ export const Header = ({ theme, setTheme }: ThemeContext) => {
               <NavLink
                 key={item.href}
                 href={item.href}
-                isActive={router.pathname === item.href}
+                isActive={pathname === item.href}
               >
                 {item.label}
               </NavLink>
             ))}
           </DesktopNav>
         </LeftSection>
-        {mounted && (
-          <RightSection>
-            <SearchButton
-              type="button"
-              onClick={handleSearchClick}
-              title="Search"
-              aria-label="Search"
-            >
-              <Search />
-            </SearchButton>
-            <ThemeButton
-              type="button"
-              onClick={toggleTheme}
-              title={
-                theme === 'dark'
-                  ? 'Switch to light mode'
-                  : 'Switch to dark mode'
-              }
-              aria-label={
-                theme === 'dark'
-                  ? 'Switch to light mode'
-                  : 'Switch to dark mode'
-              }
-            >
-              {theme === 'dark' ? <Moon /> : <Sun />}
-            </ThemeButton>
-            <MobileMenuButton
-              type="button"
-              onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-              aria-label="Open menu"
-            >
-              <Menu />
-            </MobileMenuButton>
-          </RightSection>
-        )}
+        <RightSection>
+          <SearchButton
+            type="button"
+            onClick={handleSearchClick}
+            title="Search"
+            aria-label="Search"
+          >
+            <Search />
+          </SearchButton>
+          <MobileMenuButton
+            type="button"
+            onClick={() => setIsDrawerOpen(!isDrawerOpen)}
+            aria-label="Open menu"
+          >
+            <Menu />
+          </MobileMenuButton>
+        </RightSection>
       </Container>
-      {mounted && (
-        <Drawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
-          <DrawerContent>
-            <DrawerHeader>
-              <DrawerTitle>Menu</DrawerTitle>
-              <CloseButton
-                onClick={() => setIsDrawerOpen(false)}
-                aria-label="Close menu"
+      <Drawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Menu</DrawerTitle>
+            <CloseButton
+              onClick={() => setIsDrawerOpen(false)}
+              aria-label="Close menu"
+            >
+              <X />
+            </CloseButton>
+          </DrawerHeader>
+          <DrawerNav>
+            {navItems.map((item) => (
+              <DrawerNavLink
+                key={item.href}
+                href={item.href}
+                isActive={pathname === item.href}
+                onClick={handleNavClick}
               >
-                <X />
-              </CloseButton>
-            </DrawerHeader>
-            <DrawerNav>
-              {navItems.map((item) => (
-                <DrawerNavLink
-                  key={item.href}
-                  href={item.href}
-                  isActive={router.pathname === item.href}
-                >
-                  {item.label}
-                </DrawerNavLink>
-              ))}
-            </DrawerNav>
-          </DrawerContent>
-        </Drawer>
-      )}
+                {item.label}
+              </DrawerNavLink>
+            ))}
+          </DrawerNav>
+        </DrawerContent>
+      </Drawer>
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -236,32 +205,6 @@ const SearchButton = styled.button`
   cursor: pointer;
   background: transparent;
   border: none;
-  border-radius: 8px;
-  transition: background-color 0.2s ease;
-
-  &:hover {
-    background-color: ${({ theme }) => theme.colors.muted}20;
-  }
-
-  svg {
-    width: 24px;
-    height: 24px;
-  }
-
-  @media (width <= 768px) {
-    svg {
-      width: 20px;
-      height: 20px;
-    }
-  }
-`
-
-const ThemeButton = styled.button`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  cursor: pointer;
   border-radius: 8px;
   transition: background-color 0.2s ease;
 

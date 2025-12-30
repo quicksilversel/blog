@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useMemo } from 'react'
 
 import styled from '@emotion/styled'
@@ -5,7 +7,7 @@ import Link from 'next/link'
 
 import type { Article } from '@/libs/getArticles/types'
 
-import { Box } from '@/components/UI/Box'
+import { BoxSectionHeader, BoxTitle } from '@/components/UI/Box'
 import { Card } from '@/components/UI/Card'
 import { Grid } from '@/components/UI/Grid'
 
@@ -53,9 +55,9 @@ export const ArticleByCategory = ({ category, articles }: Props) => {
 
   return (
     <Container>
-      <Box.SectionHeader>
-        <Box.Title>{category}</Box.Title>
-      </Box.SectionHeader>
+      <BoxSectionHeader>
+        <BoxTitle>{category}</BoxTitle>
+      </BoxSectionHeader>
       <TopicFilter
         topics={availableTopics}
         selectedTopic={selectedTopic}

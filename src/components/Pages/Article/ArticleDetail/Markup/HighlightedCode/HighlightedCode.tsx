@@ -1,3 +1,5 @@
+'use client'
+
 import { ReactNode, isValidElement, useState } from 'react'
 
 import styled from '@emotion/styled'

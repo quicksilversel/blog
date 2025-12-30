@@ -1,6 +1,6 @@
 import type { Project } from '@/libs/getProjects'
 
-import { Box } from '@/components/UI/Box'
+import { Box, BoxSectionHeader, BoxTitle, BoxLink } from '@/components/UI/Box'
 import { Card } from '@/components/UI/Card'
 import { Grid } from '@/components/UI/Grid'
 
@@ -15,10 +15,10 @@ export function Projects({ projects }: Props) {
 
   return (
     <Box>
-      <Box.SectionHeader>
-        <Box.Title>Projects</Box.Title>
-        <Box.Link href="/projects">View All Projects</Box.Link>
-      </Box.SectionHeader>
+      <BoxSectionHeader>
+        <BoxTitle>Projects</BoxTitle>
+        <BoxLink href="/projects">View All Projects</BoxLink>
+      </BoxSectionHeader>
       <Grid>
         {projects.slice(0, 3).map((project) => (
           <Card

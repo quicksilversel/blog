@@ -1,7 +1,11 @@
+'use client'
+
 import { useEffect, useRef } from 'react'
 
 import styled from '@emotion/styled'
 import { createPortal } from 'react-dom'
+
+import { useIsClient } from '@/components/hooks'
 
 interface DrawerProps {
   isOpen: boolean
@@ -12,6 +16,7 @@ interface DrawerProps {
 export const Drawer = ({ isOpen, onClose, children }: DrawerProps) => {
   const overlayRef = useRef<HTMLDivElement>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
+  const isClient = useIsClient()
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -37,7 +42,7 @@ export const Drawer = ({ isOpen, onClose, children }: DrawerProps) => {
     }
   }, [isOpen])
 
-  if (typeof window === 'undefined') {
+  if (!isClient) {
     return null
   }
 

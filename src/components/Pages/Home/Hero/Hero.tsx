@@ -1,3 +1,5 @@
+'use client'
+
 import styled from '@emotion/styled'
 import { Github, Linkedin, Codepen } from 'lucide-react'
 import Image from 'next/image'

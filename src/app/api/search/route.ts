@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 
-import { NextApiRequest, NextApiResponse } from 'next'
+import { NextRequest, NextResponse } from 'next/server'
 
 import { getArticles } from '@/libs/getArticles/getArticles'
 import { getProjects } from '@/libs/getProjects/getProjects'
@@ -104,18 +104,16 @@ async function buildSearchIndex() {
   }
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' })
-  }
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams
+  const query = searchParams.get('q')
+  const limit = searchParams.get('limit') || '10'
 
-  const { q: query, limit = '10' } = req.query
-
-  if (!query || typeof query !== 'string') {
-    return res.status(400).json({ error: 'Query parameter is required' })
+  if (!query) {
+    return NextResponse.json(
+      { error: 'Query parameter is required' },
+      { status: 400 },
+    )
   }
 
   try {
@@ -125,7 +123,7 @@ export default async function handler(
       lastIndexTime = now
     }
 
-    const results = cachedIndex.search(query, parseInt(limit as string, 10))
+    const results = cachedIndex.search(query, parseInt(limit, 10))
 
     const formattedResults = results.map((result) => ({
       ...result.article,
@@ -134,7 +132,7 @@ export default async function handler(
       highlights: result.highlights,
     }))
 
-    res.status(200).json({
+    return NextResponse.json({
       results: formattedResults,
       query,
       count: formattedResults.length,
@@ -142,6 +140,9 @@ export default async function handler(
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Search error:', error)
-    res.status(500).json({ error: 'Failed to perform search' })
+    return NextResponse.json(
+      { error: 'Failed to perform search' },
+      { status: 500 },
+    )
   }
 }

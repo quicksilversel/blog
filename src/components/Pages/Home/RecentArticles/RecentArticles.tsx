@@ -1,8 +1,10 @@
+'use client'
+
 import { useState, useMemo } from 'react'
 
 import type { Article } from '@/libs/getArticles/types'
 
-import { Box } from '@/components/UI/Box'
+import { Box, BoxSectionHeader, BoxTitle, BoxLink } from '@/components/UI/Box'
 import { Card } from '@/components/UI/Card'
 import { Grid } from '@/components/UI/Grid'
 
@@ -31,10 +33,10 @@ export const RecentArticles = ({ articles }: Props) => {
 
   return (
     <Box>
-      <Box.SectionHeader>
-        <Box.Title>Recent Articles</Box.Title>
-        <Box.Link href="/articles">View All Articles</Box.Link>
-      </Box.SectionHeader>
+      <BoxSectionHeader>
+        <BoxTitle>Recent Articles</BoxTitle>
+        <BoxLink href="/articles">View All Articles</BoxLink>
+      </BoxSectionHeader>
       <TopicFilter
         topics={topics}
         selectedTopic={selectedTopic}

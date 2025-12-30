@@ -1,1 +1,1 @@
-export { Box } from './Box'
+export { Box, BoxSectionHeader, BoxTitle, BoxLink } from './Box'

@@ -5,19 +5,6 @@ const nextConfig: NextConfig = {
     cacheMaxMemorySize: 0,
   }),
 
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'images.unsplash.com',
-      },
-      {
-        protocol: 'https',
-        hostname: 'hsjbtgctzfkncwianizn.supabase.co',
-      },
-    ],
-  },
-
   compiler: {
     emotion: {
       sourceMap: process.env.NODE_ENV !== 'production',

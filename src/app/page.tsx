@@ -1,11 +1,9 @@
-import type { InferGetStaticPropsType } from 'next'
-
 import { HomePage } from '@/components/Pages/Home'
 import { getArticles } from '@/libs/getArticles'
 import { getProjects } from '@/libs/getProjects'
 import { getSkills } from '@/libs/getSkills'
 
-export async function getStaticProps() {
+export default async function Page() {
   const articles = await getArticles()
   const projects = await getProjects()
 
@@ -16,17 +14,5 @@ export async function getStaticProps() {
 
   const skills = getSkills(articles, projects)
 
-  return {
-    props: {
-      articles: allArticles,
-      projects,
-      skills,
-    },
-  }
-}
-
-export default function Index(
-  props: InferGetStaticPropsType<typeof getStaticProps>,
-) {
-  return <HomePage {...props} />
+  return <HomePage articles={allArticles} projects={projects} skills={skills} />
 }

@@ -1,8 +1,10 @@
+'use client'
+
 import { useState } from 'react'
 
 import type { Article } from '@/libs/getArticles/types'
 
-import { Box } from '@/components/UI/Box'
+import { Box, BoxSectionHeader, BoxTitle } from '@/components/UI/Box'
 import { Card } from '@/components/UI/Card'
 import { Stack } from '@/components/UI/Stack'
 
@@ -25,9 +27,9 @@ export const ArticleCategoryHome = ({ category, articles }: Props) => {
 
   return (
     <Box>
-      <Box.SectionHeader>
-        <Box.Title>{category}</Box.Title>
-      </Box.SectionHeader>
+      <BoxSectionHeader>
+        <BoxTitle>{category}</BoxTitle>
+      </BoxSectionHeader>
       <Stack>
         {currentArticles.map((article) => {
           const isProjectArticle = 'project' in article
