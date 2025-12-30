@@ -6,6 +6,8 @@ import { keyframes } from '@emotion/react'
 import styled from '@emotion/styled'
 import { createPortal } from 'react-dom'
 
+import { useIsClient } from '@/components/hooks'
+
 import { SearchContent } from './SearchContent'
 import { SearchHeader } from './SearchHeader'
 import { useSearch } from './useSearch'
@@ -17,7 +19,8 @@ interface SearchModalProps {
 
 export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
   const [shouldRender, setShouldRender] = useState(false)
-  const { query, setQuery, results, loading } = useSearch(isOpen, onClose)
+  const { query, setQuery, results, isPending } = useSearch(isOpen, onClose)
+  const isClient = useIsClient()
 
   useEffect(() => {
     if (isOpen) {
@@ -30,7 +33,7 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
     }
   }, [isOpen])
 
-  if (typeof window === 'undefined' || !shouldRender) {
+  if (!isClient || !shouldRender) {
     return null
   }
 
@@ -43,7 +46,7 @@ export const SearchModal = ({ isOpen, onClose }: SearchModalProps) => {
           <Divider />
           <ResultsSection>
             <SearchContent
-              loading={loading}
+              loading={isPending}
               query={query}
               results={results}
               onClose={onClose}

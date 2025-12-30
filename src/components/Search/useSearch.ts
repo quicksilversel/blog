@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { usePathname, useRouter } from 'next/navigation'
 
@@ -11,46 +11,36 @@ interface SearchResult extends Article {
 export function useSearch(isOpen: boolean, onClose: () => void) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
-  const [loading, setLoading] = useState(false)
+  const [isPending, startTransition] = useTransition()
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const pathname = usePathname()
 
-  const searchArticles = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim()) {
+  useEffect(() => {
+    if (!query.trim()) {
       setResults([])
-      setLoading(false)
       return
     }
 
-    setLoading(true)
-    try {
-      const response = await fetch(
-        `/api/search?q=${encodeURIComponent(searchQuery)}`,
-      )
-      const data = await response.json()
-      setResults(data.results || [])
-      setSelectedIndex(0)
-    } catch (error) {
-      console.warn('Search error:', error)
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (query) {
-      setLoading(true)
-    }
-
     const debounceTimer = setTimeout(() => {
-      searchArticles(query)
+      startTransition(async () => {
+        try {
+          const response = await fetch(
+            `/api/search?q=${encodeURIComponent(query)}`,
+          )
+          const data = await response.json()
+          setResults(data.results || [])
+          setSelectedIndex(0)
+        } catch (error) {
+          console.warn('Search error:', error)
+          setResults([])
+        }
+      })
     }, 300)
 
     return () => clearTimeout(debounceTimer)
-  }, [query, searchArticles])
+  }, [query])
 
   const scrollPositionRef = useRef({ x: 0, y: 0 })
 
@@ -77,7 +67,6 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
         }
       }, 100)
     } else {
-      // Restore body scroll
       document.body.style.overflow = ''
       document.body.style.position = ''
       document.body.style.paddingRight = ''
@@ -141,7 +130,6 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, results, selectedIndex, onClose, router])
 
-  // Close modal on route change
   useEffect(() => {
     if (isOpen) {
       onClose()
@@ -153,7 +141,7 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
     query,
     setQuery,
     results,
-    loading,
+    isPending,
     selectedIndex,
     inputRef,
   }
