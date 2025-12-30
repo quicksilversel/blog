@@ -3,7 +3,7 @@ import path from 'path'
 
 import type { Project } from './types'
 
-import { parseMdxFile } from '@/libs/utils'
+import { parseMarkdownFile } from '@/libs/utils'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 import { getProjectArticles } from './getProjectArticles'
@@ -27,7 +27,7 @@ export async function getProjects(
 
       try {
         const indexPath = path.join(basePath, projectName, 'index.mdx')
-        const { frontmatter } = await parseMdxFile(indexPath)
+        const { frontmatter } = await parseMarkdownFile(indexPath)
         projectMeta = {
           title: frontmatter.title as string | undefined,
           description: frontmatter.description as string | undefined,

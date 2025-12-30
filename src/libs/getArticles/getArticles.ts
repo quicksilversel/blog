@@ -4,9 +4,9 @@ import path from 'path'
 import type { Article } from './types'
 
 import {
-  filterMdxFiles,
+  filterMarkdownFiles,
   filterPublished,
-  parseMdxFile,
+  parseMarkdownFile,
   sortByDateDesc,
 } from '@/libs/utils'
 import { ARTICLE_PATH } from '@/utils/constants'
@@ -27,12 +27,12 @@ export async function getArticles(
     categories.map(async (category) => {
       const categoryDir = path.join(absolutePath, category)
       const allFiles = await fs.readdir(categoryDir)
-      const mdxFiles = filterMdxFiles(allFiles)
+      const mdxFiles = filterMarkdownFiles(allFiles)
 
       return Promise.all(
         mdxFiles.map(async (fileName) => {
           const fullPath = path.join(categoryDir, fileName)
-          const { frontmatter, readingTime } = await parseMdxFile(fullPath)
+          const { frontmatter, readingTime } = await parseMarkdownFile(fullPath)
 
           const slug = `${category}/${path.basename(fileName, '.mdx')}`
 

@@ -3,7 +3,7 @@ import { css } from '@emotion/react'
 export const variables = css`
   :root {
     /* Font Families */
-    --font-family: 'Geist', sans-serif;
+    --font-family: var(--font-geist), sans-serif;
     --font-family-mono: 'League Mono', 'Fira Mono', monospace;
 
     /* Font Sizes - Desktop */

@@ -1,3 +1,5 @@
+'use client'
+
 import styled from '@emotion/styled'
 import { Monitor, Server, Cloud, BarChart3, LucideIcon } from 'lucide-react'
 import Link from 'next/link'

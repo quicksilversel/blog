@@ -1,6 +1,6 @@
 import type { SkillCategory } from '@/libs/getSkills'
 
-import { Box } from '@/components/UI/Box'
+import { Box, BoxSectionHeader, BoxTitle, BoxLink } from '@/components/UI/Box'
 
 import { Chart } from './Chart'
 import { SkillCards } from './SkillCards'
@@ -14,10 +14,10 @@ export const SkillsOverview = ({ skills }: Props) => {
 
   return (
     <Box>
-      <Box.SectionHeader>
-        <Box.Title>Skills & Expertise</Box.Title>
-        <Box.Link href="/articles">View All Categories</Box.Link>
-      </Box.SectionHeader>
+      <BoxSectionHeader>
+        <BoxTitle>Skills & Expertise</BoxTitle>
+        <BoxLink href="/articles">View All Categories</BoxLink>
+      </BoxSectionHeader>
       <Chart skills={skills} totalArticles={totalArticles} />
       <SkillCards skills={skills} />
     </Box>

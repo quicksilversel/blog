@@ -1,3 +1,5 @@
+'use client'
+
 import styled from '@emotion/styled'
 import { Codepen, Github, Linkedin } from 'lucide-react'
 import Link from 'next/link'

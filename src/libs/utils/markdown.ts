@@ -1,32 +1,38 @@
 import { promises as fs } from 'fs'
 
-import { serialize } from 'next-mdx-remote/serialize'
+import matter from 'gray-matter'
 import readingTime from 'reading-time'
-import remarkGfm from 'remark-gfm'
 
-export type ParsedMdx = {
+export type ParsedMarkdown = {
   frontmatter: Record<string, unknown>
-  source: string
+  content: string
   readingTime: string
 }
 
-export async function parseMdxFile(filePath: string): Promise<ParsedMdx> {
+export async function parseMarkdownFile(
+  filePath: string,
+): Promise<ParsedMarkdown> {
   const source = await fs.readFile(filePath, 'utf8')
-  const { frontmatter } = await serialize(source, {
-    parseFrontmatter: true,
-    mdxOptions: {
-      remarkPlugins: [remarkGfm],
-    },
-  })
+  const { data: frontmatter, content } = matter(source)
 
   return {
-    frontmatter: frontmatter as Record<string, unknown>,
-    source,
+    frontmatter,
+    content,
     readingTime: readingTime(source).text,
   }
 }
 
-export function filterMdxFiles(
+export function parseMarkdownString(source: string): ParsedMarkdown {
+  const { data: frontmatter, content } = matter(source)
+
+  return {
+    frontmatter,
+    content,
+    readingTime: readingTime(source).text,
+  }
+}
+
+export function filterMarkdownFiles(
   files: string[],
   options?: { excludeIndex?: boolean },
 ): string[] {

@@ -1,4 +1,6 @@
+'use client'
 /** @jsxImportSource @emotion/react */
+
 import { useState } from 'react'
 
 import styled from '@emotion/styled'

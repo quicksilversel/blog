@@ -1,5 +1,7 @@
+'use client'
+
 import styled from '@emotion/styled'
-import { useRouter } from 'next/router'
+import { useRouter } from 'next/navigation'
 
 import type { Article } from '@/libs/getArticles/types'
 
@@ -13,8 +15,8 @@ export function SnippetsList({ snippets }: SnippetsListProps) {
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
   )
 
-  const handleRowClick = (slug: string) => {
-    router.push(`/snippets/${slug}`)
+  const handleRowClick = (category: string, fileName: string) => {
+    router.push(`/snippets/${category}/${fileName.replace('.mdx', '')}`)
   }
   return (
     <Container>
@@ -29,7 +31,10 @@ export function SnippetsList({ snippets }: SnippetsListProps) {
         </Thead>
         <tbody>
           {sortedSnippets.map((snippet) => (
-            <Tr key={snippet.slug} onClick={() => handleRowClick(snippet.slug)}>
+            <Tr
+              key={snippet.slug}
+              onClick={() => handleRowClick(snippet.category, snippet.fileName)}
+            >
               <TitleCell>{snippet.title}</TitleCell>
               <DescriptionCell>{snippet.description}</DescriptionCell>
               <CategoryCell>{snippet.category}</CategoryCell>

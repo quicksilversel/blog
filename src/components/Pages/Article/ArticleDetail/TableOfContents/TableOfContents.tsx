@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import { useMemo } from 'react'
 
 import styled from '@emotion/styled'
 import { ChevronDown } from 'lucide-react'
@@ -22,7 +22,7 @@ export function TableOfContents({ content }: Props) {
 
     while ((match = headingRegex.exec(content)) !== null) {
       const level = match[1].length
-      const text = match[2].replace(/[*_`]/g, '') // Remove markdown formatting
+      const text = match[2].replace(/[*_`]/g, '')
       const id = text
         .toLowerCase()
         .replace(/[^a-z0-9\s-]/g, '')

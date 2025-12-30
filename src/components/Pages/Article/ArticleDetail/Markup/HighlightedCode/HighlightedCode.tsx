@@ -1,3 +1,5 @@
+'use client'
+
 import { ReactNode, isValidElement, useState } from 'react'
 
 import styled from '@emotion/styled'
@@ -8,17 +10,24 @@ type Props = {
   children?: ReactNode
 }
 
+type CodeProps = {
+  children?: string
+  className?: string
+}
+
 export const HighlightedCode = ({ children }: Props) => {
   const [copied, setCopied] = useState(false)
 
-  if (
-    !isValidElement(children) ||
-    typeof children.props.children !== 'string'
-  ) {
+  if (!isValidElement<CodeProps>(children)) {
     return null
   }
 
-  const code = children.props.children.trim()
+  const codeContent = children.props.children
+  if (typeof codeContent !== 'string') {
+    return null
+  }
+
+  const code = codeContent.trim()
 
   if (!code) return null
 

@@ -1,5 +1,4 @@
-import { ReactNode } from 'react'
-import { ImgHTMLAttributes } from 'react'
+import type { ReactNode, ImgHTMLAttributes } from 'react'
 
 import styled from '@emotion/styled'
 

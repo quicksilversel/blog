@@ -1,11 +1,14 @@
-import Head from 'next/head'
-
 import type { Article } from '@/libs/getArticles/types'
-import type { GetStaticProps, InferGetStaticPropsType } from 'next'
+import type { Metadata } from 'next'
 
 import { Archive } from '@/components/Pages/Archive'
 import { getArticles } from '@/libs/getArticles'
 import { getProjects } from '@/libs/getProjects'
+
+export const metadata: Metadata = {
+  title: 'Archive',
+  description: 'Archive of all blog posts',
+}
 
 type ArchiveItem = Article & { isProject: boolean }
 
@@ -17,7 +20,7 @@ const groupByMonth = (items: ArchiveItem[]) =>
     {} as Record<string, ArchiveItem[]>,
   )
 
-export const getStaticProps: GetStaticProps = async () => {
+export default async function ArchivePage() {
   const [articles, projects] = await Promise.all([getArticles(), getProjects()])
 
   const allArticles: ArchiveItem[] = [
@@ -32,21 +35,9 @@ export const getStaticProps: GetStaticProps = async () => {
     .filter((article) => article.published !== false)
     .sort((a, b) => +new Date(b.date) - +new Date(a.date))
 
-  return { props: { articles: groupByMonth(allArticles) } }
-}
-
-export default function ArchivePage({
-  articles,
-}: InferGetStaticPropsType<typeof getStaticProps>) {
   return (
-    <>
-      <Head>
-        <title>Archive - Zoe.log()</title>
-        <meta name="description" content="Archive of all blog posts" />
-      </Head>
-      <main>
-        <Archive articles={articles} />
-      </main>
-    </>
+    <main>
+      <Archive articles={groupByMonth(allArticles)} />
+    </main>
   )
 }
