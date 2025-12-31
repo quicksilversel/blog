@@ -37,5 +37,5 @@ const LoadingText = styled.div`
   align-items: center;
   justify-content: center;
   margin-top: 1rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 `

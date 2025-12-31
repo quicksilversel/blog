@@ -50,7 +50,7 @@ const Links = styled.div`
   display: flex;
   gap: 16px;
   margin: 4px auto 0;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 
   a:hover {
     color: inherit;

@@ -4,15 +4,14 @@ import { Geist } from 'next/font/google'
 
 import type { Metadata } from 'next'
 
-import { GoogleAnalytics } from '@/components/Functional/GoogleAnalytics'
 import { Providers } from '@/components/Providers/Providers'
-import { GlobalStyles } from '@/components/Styles'
 import { Footer } from '@/components/UI/Footer'
 import { Header } from '@/components/UI/Header'
+import { GoogleAnalytics } from '@/services/GoogleAnalytics'
+import { GlobalStyles } from '@/styles'
 
 const geist = Geist({
   subsets: ['latin'],
-  variable: '--font-geist',
 })
 
 export const metadata: Metadata = {
@@ -30,7 +29,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={geist.variable} suppressHydrationWarning>
+    <html lang="en" className={geist.className} suppressHydrationWarning>
       <head>
         <GoogleAnalytics />
       </head>

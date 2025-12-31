@@ -62,7 +62,7 @@ const BreadcrumbList = styled.ol`
   padding: 0;
   margin: 0;
   overflow: auto hidden;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   white-space: nowrap;
   list-style: none;
 

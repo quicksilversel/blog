@@ -61,10 +61,10 @@ const ImageContainer = styled.div`
 
 const H2 = styled.h2`
   margin-bottom: 1rem;
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   color: ${({ theme }) => theme.colors.primary};
 `
 
 const Description = styled.p`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 `

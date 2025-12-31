@@ -76,7 +76,7 @@ const Header = styled.button`
 
 const Title = styled.h3`
   margin: 0;
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
   text-transform: capitalize;
@@ -125,11 +125,11 @@ const ArticleLink = styled(Link, {
 
 const ArticleNumber = styled.span`
   margin-right: 0.75rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.muted};
 `
 
 const ArticleTitle = styled.span`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 `

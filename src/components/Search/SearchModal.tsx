@@ -6,7 +6,7 @@ import { keyframes } from '@emotion/react'
 import styled from '@emotion/styled'
 import { createPortal } from 'react-dom'
 
-import { useIsClient } from '@/components/hooks'
+import { useIsClient } from '@/hooks/useIsClient'
 
 import { SearchContent } from './SearchContent'
 import { SearchHeader } from './SearchHeader'

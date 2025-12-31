@@ -78,18 +78,18 @@ const ErrorContainer = styled.div`
 `
 
 const ErrorTitle = styled.h2`
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   color: ${({ theme }) => theme.colors.text};
 `
 
 const ErrorMessage = styled.p`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: ${({ theme }) => theme.colors.mutedText};
 `
 
 const RetryButton = styled.button`
   padding: 0.75rem 1.2rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: white;
   cursor: pointer;
   background-color: ${({ theme }) => theme.colors.primary};

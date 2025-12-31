@@ -57,7 +57,7 @@ const PaginationContainer = styled.div`
 
 const PaginationButton = styled.button`
   padding: 8px 16px;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
   cursor: pointer;
   background: transparent;
@@ -87,7 +87,7 @@ const PageNumber = styled.button<{ isActive: boolean }>`
   justify-content: center;
   width: 32px;
   height: 32px;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ isActive, theme }) =>
     isActive ? theme.colors.background : theme.colors.text};
   cursor: pointer;

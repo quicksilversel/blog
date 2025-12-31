@@ -1,8 +1,8 @@
-import type { Article } from './types'
+import type { Article } from '../getArticles/types'
 
 import { sortByDateDesc } from '@/libs/utils'
 
-import { getArticles } from './getArticles'
+import { getArticles } from '../getArticles/getArticles'
 
 interface ArticleIdentifier {
   slug: string

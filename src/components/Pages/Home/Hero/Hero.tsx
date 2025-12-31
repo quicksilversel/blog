@@ -101,19 +101,19 @@ const StyledImage = styled(Image)`
 
 const Name = styled.h2`
   margin: 0;
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   font-weight: bold;
 `
 
 const Description = styled.p`
   margin: 0;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 `
 
 const Links = styled.div`
   display: flex;
   gap: 16px;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 
   a:hover {
     color: inherit;
@@ -122,7 +122,7 @@ const Links = styled.div`
 `
 
 const AboutLink = styled(Link)`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: ${({ theme }) => theme.colors.primary};
   transition: opacity 0.2s ease;
 

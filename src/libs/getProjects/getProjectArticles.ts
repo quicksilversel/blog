@@ -3,12 +3,8 @@ import path from 'path'
 
 import type { ProjectArticle } from './types'
 
-import {
-  filterMarkdownFiles,
-  filterPublished,
-  parseMarkdownFile,
-  sortByDateAsc,
-} from '@/libs/utils'
+import { filterMarkdownFiles, parseMarkdownFile } from '@/libs/markdown'
+import { filterPublished, sortByDateAsc } from '@/libs/utils'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 export async function getProjectArticles(

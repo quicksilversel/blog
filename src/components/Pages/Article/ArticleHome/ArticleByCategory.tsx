@@ -99,7 +99,7 @@ const ShowMoreContainer = styled.div`
   display: flex;
   justify-content: center;
   margin-top: 2rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   line-height: 1;
   color: ${({ theme }) => theme.colors.primary};
   transition: opacity 0.2s ease;

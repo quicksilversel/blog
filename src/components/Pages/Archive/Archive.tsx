@@ -155,7 +155,7 @@ const StyledPawPrint = styled(PawPrint)`
 `
 
 const Title = styled.h1`
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.primary};
 `
@@ -237,7 +237,7 @@ const MonthTitle = styled.h2`
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  font-size: var(--font-size-medium);
+  font-size: ${({ theme }) => theme.fontSize.medium};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.primary};
 `
@@ -248,7 +248,7 @@ const ToggleIcon = styled(CircleChevronDown, {
   isExpanded: boolean
 }>`
   display: inline-block;
-  font-size: var(--font-size-medium);
+  font-size: ${({ theme }) => theme.fontSize.medium};
   transform: ${({ isExpanded }) =>
     !isExpanded ? 'rotate(-90deg)' : 'rotate(0deg)'};
   transition: transform 0.2s ease;
@@ -270,7 +270,7 @@ const ArticleItem = styled.li`
   gap: 1rem;
   align-items: baseline;
   padding: 0.5rem 0;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
 
   &:last-child {

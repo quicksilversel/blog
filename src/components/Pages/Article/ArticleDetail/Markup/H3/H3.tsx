@@ -20,7 +20,7 @@ export const H3 = ({ children }: { children?: ReactNode }) => {
 }
 
 const StyledH3 = styled.h3`
-  font-size: var(--font-size-medium);
+  font-size: ${({ theme }) => theme.fontSize.medium};
   color: ${({ theme }) => theme.colors.secondary};
   scroll-margin-top: 60px;
 

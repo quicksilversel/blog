@@ -106,7 +106,7 @@ const DistributionChart = styled.div`
 
 const ChartTitle = styled.h3`
   margin: 0 0 16px;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
   opacity: 0;
@@ -157,7 +157,7 @@ const SegmentLabel = styled.span<{ animationDelay?: number }>`
   display: flex;
   gap: 4px;
   align-items: center;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 600;
   color: white;
   white-space: nowrap;
@@ -208,12 +208,12 @@ const LegendText = styled.div`
 `
 
 const LegendName = styled.span`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const LegendStats = styled.span`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.mutedText};
 `
