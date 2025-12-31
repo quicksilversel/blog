@@ -48,7 +48,7 @@ const SkillsGrid = styled.div`
 
 const SkillTitle = styled.h3`
   margin: 0 0 1rem;
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
 `
@@ -63,7 +63,7 @@ const SkillItem = styled.li`
   position: relative;
   padding-left: 1rem;
   margin-bottom: 0.5rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: ${({ theme }) => theme.colors.text};
 
   &::before {

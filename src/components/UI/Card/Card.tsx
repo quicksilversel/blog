@@ -84,25 +84,21 @@ const Contents = styled.div`
 `
 
 const Title = styled.h3<{ size: Props['size'] }>`
-  font-size: ${({ size }) =>
-    size === 'large' ? 'var(--font-size-medium)' : 'var(--font-size-small)'};
+  font-size: ${({ size, theme }) =>
+    size === 'large' ? theme.fontSize.medium : theme.fontSize.small};
   font-weight: bold;
-
-  @media (width <= 35.1875rem) {
-    font-size: var(--font-size-small);
-  }
 `
 
 const Subtitle = styled.span`
   display: block;
   margin-top: 8px;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.primary};
 `
 
 const Description = styled.p`
   margin-top: 16px;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   white-space: preserve pretty;
 `
 
@@ -114,7 +110,7 @@ const TopicList = styled.div`
 
 const Topic = styled.span`
   padding: 8px;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
   background-color: ${({ theme }) => theme.colors.muted};
   border-radius: 4px;

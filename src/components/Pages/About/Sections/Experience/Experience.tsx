@@ -57,28 +57,28 @@ const ExperienceItem = styled.div`
 
 const JobTitle = styled.h3`
   margin: 0 0 0.5rem;
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   font-weight: bold;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const Company = styled.p`
   margin: 0 0 1rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.primary};
 `
 
 const Description = styled.p`
   margin-bottom: 1rem;
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   line-height: 1.6;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const Table = styled.table`
   width: 100%;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   border-collapse: collapse;
 `
 
@@ -92,7 +92,7 @@ const Thead = styled.thead`
 
 const Th = styled.th`
   padding: 0.75rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: bold;
   color: ${({ theme }) => theme.colors.primary};
   text-align: left;

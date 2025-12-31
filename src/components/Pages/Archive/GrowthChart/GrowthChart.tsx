@@ -130,13 +130,13 @@ const ChartHeader = styled.div`
 `
 
 const ChartTitle = styled.h3`
-  font-size: var(--font-size-medium);
+  font-size: ${({ theme }) => theme.fontSize.medium};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const CurrentDate = styled.span`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.primary};
 `

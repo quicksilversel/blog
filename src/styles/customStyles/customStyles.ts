@@ -6,7 +6,6 @@ export const customStyles = (theme: Theme) => css`
   body {
     max-width: 1000px;
     margin: 0 auto;
-    font-family: var(--font-family);
     color: ${theme.colors.text};
     accent-color: ${theme.colors.primary};
     background: ${theme.colors.background};

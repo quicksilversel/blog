@@ -112,7 +112,7 @@ const TimelineContent = styled.div`
 const TimelineDate = styled.time`
   display: block;
   margin-bottom: 0.5rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.muted};
 `
@@ -140,7 +140,7 @@ const CardHeader = styled.div`
 const PartLabel = styled.span`
   display: inline-block;
   padding: 0.125rem 0.5rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 600;
   color: white;
   white-space: nowrap;
@@ -150,7 +150,7 @@ const PartLabel = styled.span`
 
 const CardTitle = styled.h3`
   margin: 0;
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   line-height: 1.3;
   color: ${({ theme }) => theme.colors.text};

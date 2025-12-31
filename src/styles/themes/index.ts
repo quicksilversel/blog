@@ -1,1 +1,1 @@
-export { darkTheme } from './colors'
+export { customTheme } from './theme'

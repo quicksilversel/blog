@@ -22,7 +22,7 @@ export const H2 = ({ children }: { children?: ReactNode }) => {
 const StyledH2 = styled.h2`
   padding-top: 2rem;
   margin-block: 2rem 1rem;
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   color: ${({ theme }) => theme.colors.primary};
   text-transform: capitalize;
   scroll-margin-top: 60px;

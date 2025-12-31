@@ -13,7 +13,7 @@ const StyledUl = styled.ul`
   li {
     position: relative;
     margin-top: 0.5rem;
-    font-size: var(--font-size-small);
+    font-size: ${({ theme }) => theme.fontSize.small};
     list-style: none;
 
     &::before {

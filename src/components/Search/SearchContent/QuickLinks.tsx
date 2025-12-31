@@ -42,7 +42,7 @@ const QuickLink = styled(Link)`
   gap: 12px;
   align-items: center;
   padding: 12px;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: ${({ theme }) => theme.colors.text};
   text-decoration: none;
   border-radius: 8px;

@@ -13,5 +13,16 @@ declare module '@emotion/react' {
       syntaxBackground: string
       backgroundhsl: string
     }
+    fontSize: {
+      extraLarge: string
+      large: string
+      mediumLarge: string
+      medium: string
+      small: string
+      extraSmall: string
+    }
+    fontFamily: {
+      mono: string
+    }
   }
 }

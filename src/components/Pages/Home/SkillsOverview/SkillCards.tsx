@@ -108,14 +108,14 @@ const SkillInfo = styled.div`
 
 const SkillName = styled.h3`
   margin: 0;
-  font-size: var(--font-size-medium);
+  font-size: ${({ theme }) => theme.fontSize.medium};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const SkillDescription = styled.p`
   margin: 0;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.mutedText};
 `
 
@@ -124,7 +124,7 @@ const SkillStats = styled.div`
 `
 
 const ArticleCount = styled.span`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.primary};
 `
@@ -137,7 +137,7 @@ const TechList = styled.div`
 
 const TechTag = styled.span`
   padding: 4px 12px;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
   background: ${({ theme }) => theme.colors.syntaxBackground};
   border: 1px solid ${({ theme }) => theme.colors.primary};

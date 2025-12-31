@@ -126,7 +126,7 @@ const Summary = styled.summary`
 
 const Title = styled.h3`
   margin: 0;
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.primary};
 `
@@ -193,5 +193,5 @@ const HeadingLink = styled(Link)<{ level: number }>`
 `
 
 const HeadingText = styled.span`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 `

@@ -57,7 +57,7 @@ const Container = styled.div`
 
 const Title = styled.h1`
   margin-bottom: 2rem;
-  font-size: var(--font-size-large);
+  font-size: ${({ theme }) => theme.fontSize.large};
   font-weight: bold;
   color: ${({ theme }) => theme.colors.primary};
 
@@ -68,7 +68,7 @@ const Title = styled.h1`
 
 const Table = styled.table`
   width: 100%;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   border-collapse: collapse;
 `
 
@@ -83,7 +83,7 @@ const Thead = styled.thead`
 
 const Th = styled.th`
   padding: 0.75rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: bold;
   text-align: left;
 `

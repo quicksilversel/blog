@@ -108,8 +108,8 @@ const CopyButton = styled.button`
 const Pre = styled.pre`
   margin: 0;
   overflow-x: auto;
-  font-family: var(--font-family-mono);
-  font-size: var(--font-size-extra-small);
+  font-family: ${({ theme }) => theme.fontFamily.mono};
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   line-height: 1.6;
   background-color: ${({ theme }) => theme.colors.syntaxBackground};
   border-radius: 8px;
@@ -134,7 +134,7 @@ const LineNumber = styled.span`
   min-width: 40px;
   padding: 0 16px;
   padding-left: 16px;
-  font-family: var(--font-family-mono);
+  font-family: ${({ theme }) => theme.fontFamily.mono};
   text-align: right;
   white-space: nowrap;
   user-select: none;

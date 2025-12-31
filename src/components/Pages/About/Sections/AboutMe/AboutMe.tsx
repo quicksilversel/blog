@@ -69,7 +69,7 @@ const ContactGrid = styled.div`
 `
 
 const ContactLink = styled.a`
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: ${({ theme }) => theme.colors.primary};
   transition: opacity 0.2s ease;
 

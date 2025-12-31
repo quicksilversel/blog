@@ -8,10 +8,6 @@ export const H1 = ({ children }: { children?: ReactNode }) => {
 
 const StyledH1 = styled.h1`
   margin: 1rem 0;
-  font-size: var(--font-size-extra-large);
+  font-size: ${({ theme }) => theme.fontSize.extraLarge};
   font-weight: 700;
-
-  @media (width <= 35.1875rem) {
-    font-size: var(--font-size-large);
-  }
 `

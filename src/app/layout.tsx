@@ -12,7 +12,6 @@ import { GlobalStyles } from '@/styles'
 
 const geist = Geist({
   subsets: ['latin'],
-  variable: '--font-geist',
 })
 
 export const metadata: Metadata = {
@@ -30,7 +29,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={geist.variable} suppressHydrationWarning>
+    <html lang="en" className={geist.className} suppressHydrationWarning>
       <head>
         <GoogleAnalytics />
       </head>

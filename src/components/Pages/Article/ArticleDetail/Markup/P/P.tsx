@@ -8,5 +8,5 @@ export const P = ({ children }: { children?: ReactNode }) => {
 
 const StyledP = styled.p`
   margin-block: 1rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
 `

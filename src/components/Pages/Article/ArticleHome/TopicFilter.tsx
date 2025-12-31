@@ -68,7 +68,7 @@ const TagContainer = styled.div`
 
 const Tag = styled.button<{ isActive: boolean }>`
   padding: 0.5rem 1rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme, isActive }) => (isActive ? 'white' : theme.colors.text)};
   cursor: pointer;
   background: ${({ theme, isActive }) =>
@@ -87,7 +87,7 @@ const Tag = styled.button<{ isActive: boolean }>`
 
 const MoreButton = styled.button`
   padding: 0.5rem 1rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.primary};
   cursor: pointer;
   background: transparent;

@@ -50,14 +50,14 @@ const SectionContent = styled.div`
 
 const SectionTitle = styled.h2`
   margin: 0 0 2rem;
-  font-size: var(--font-size-extra-large);
+  font-size: ${({ theme }) => theme.fontSize.extraLarge};
   font-weight: 700;
   color: ${({ theme }) => theme.colors.text};
 `
 
 const Paragraph = styled.p`
   margin-bottom: 1.5rem;
-  font-size: var(--font-size-normal);
+  font-size: ${({ theme }) => theme.fontSize.small};
   line-height: 1.8;
   color: ${({ theme }) => theme.colors.text};
 `

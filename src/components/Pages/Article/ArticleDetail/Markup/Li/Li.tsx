@@ -9,7 +9,7 @@ export const Li = ({ children }: { children?: ReactNode }) => {
 const StyledLi = styled.li`
   position: relative;
   margin-top: 0.5rem;
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   list-style: none;
   counter-increment: ol-counter;
 

@@ -28,14 +28,14 @@ export const BoxSectionHeader = styled.div`
 `
 
 export const BoxTitle = styled.h2`
-  font-size: var(--font-size-small);
+  font-size: ${({ theme }) => theme.fontSize.small};
   color: ${({ theme }) => theme.colors.primary};
   text-transform: uppercase;
   letter-spacing: 2px;
 `
 
 export const BoxLink = styled(Link)`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.primary};
   transition: opacity 0.2s ease;
 

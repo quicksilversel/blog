@@ -61,7 +61,7 @@ const ImageContainer = styled.div`
 
 const Title = styled.h1`
   margin-bottom: 1rem;
-  font-size: var(--font-size-extra-large);
+  font-size: ${({ theme }) => theme.fontSize.extraLarge};
 `
 
 const MetaInfo = styled.div`
@@ -74,12 +74,12 @@ const MetaInfo = styled.div`
 `
 
 const Date = styled.time`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
 `
 
 const ReadingTime = styled.span`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
   opacity: 0.8;
 `
@@ -92,7 +92,7 @@ const Topics = styled.div`
 
 const Topic = styled.span`
   padding: 0.25rem 0.75rem;
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.text};
   background: ${({ theme }) => theme.colors.primary};

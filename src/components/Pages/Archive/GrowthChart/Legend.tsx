@@ -89,12 +89,12 @@ const LegendColor = styled.div<{ color: string }>`
 `
 
 const LegendLabel = styled.span`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
   text-transform: capitalize;
 `
 
 const LegendCount = styled.span`
-  font-size: var(--font-size-extra-small);
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.mutedText};
 `
