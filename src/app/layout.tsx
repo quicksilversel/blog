@@ -4,11 +4,11 @@ import { Geist } from 'next/font/google'
 
 import type { Metadata } from 'next'
 
-import { GoogleAnalytics } from '@/components/Functional/GoogleAnalytics'
 import { Providers } from '@/components/Providers/Providers'
-import { GlobalStyles } from '@/components/Styles'
 import { Footer } from '@/components/UI/Footer'
 import { Header } from '@/components/UI/Header'
+import { GoogleAnalytics } from '@/services/GoogleAnalytics'
+import { GlobalStyles } from '@/styles'
 
 const geist = Geist({
   subsets: ['latin'],

@@ -3,7 +3,7 @@ import path from 'path'
 
 import type { Project } from './types'
 
-import { parseMarkdownFile } from '@/libs/utils'
+import { parseMarkdownFile } from '@/libs/markdown'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 import { getProjectArticles } from './getProjectArticles'

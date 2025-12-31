@@ -1,14 +1,13 @@
 import fs from 'fs'
 import path from 'path'
 
-import matter from 'gray-matter'
 import { notFound } from 'next/navigation'
-import readingTime from 'reading-time'
 
 import type { Metadata } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
 import { getProjects } from '@/libs/getProjects'
+import { parseMarkdownFile } from '@/libs/markdown'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 type Props = {
@@ -38,20 +37,19 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     `${slug}.mdx`,
   )
 
-  try {
-    const postFile = fs.readFileSync(filePath, 'utf8')
-    const { data: frontmatter } = matter(postFile)
-
-    return {
-      title: `${frontmatter.title} - Project`,
-      description: String(frontmatter.description),
-      openGraph: {
-        title: String(frontmatter.title),
-        description: String(frontmatter.description),
-      },
-    }
-  } catch {
+  if (!fs.existsSync(filePath)) {
     return { title: 'Article Not Found' }
+  }
+
+  const { frontmatter } = await parseMarkdownFile(filePath)
+
+  return {
+    title: `${frontmatter.title} - Project`,
+    description: String(frontmatter.description),
+    openGraph: {
+      title: String(frontmatter.title),
+      description: String(frontmatter.description),
+    },
   }
 }
 
@@ -68,9 +66,8 @@ export default async function ProjectArticlePage({ params }: Props) {
     notFound()
   }
 
-  const postFile = fs.readFileSync(filePath, 'utf8')
-  const { data: frontmatter, content } = matter(postFile)
-  const stats = readingTime(postFile)
+  const { frontmatter, content, readingTime, rawSource } =
+    await parseMarkdownFile(filePath)
 
   const projects = await getProjects()
   const project = projects.find((p) => p.slug === projectName)
@@ -89,9 +86,9 @@ export default async function ProjectArticlePage({ params }: Props) {
         date: frontmatter.date ? String(frontmatter.date) : undefined,
         topics: frontmatter.topics as string[] | undefined,
       }}
-      rawContent={postFile}
+      rawContent={rawSource}
       isProject
-      readingTime={stats.text}
+      readingTime={readingTime}
       project={{
         title: project.title,
         articles: project.articles,

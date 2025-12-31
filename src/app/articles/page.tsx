@@ -1,7 +1,6 @@
 import type { Article } from '@/libs/getArticles/types'
 import type { Metadata } from 'next'
 
-
 import { ArticleHome } from '@/components/Pages/Article/ArticleHome'
 import { getArticles } from '@/libs/getArticles'
 import { getProjects } from '@/libs/getProjects'

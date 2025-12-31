@@ -1,0 +1,1 @@
+export { getRelatedArticles } from './getRelatedArticles'

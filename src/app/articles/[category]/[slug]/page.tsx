@@ -1,15 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 
-import matter from 'gray-matter'
 import { notFound } from 'next/navigation'
-import readingTime from 'reading-time'
 
 import type { Metadata } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
 import { getArticles } from '@/libs/getArticles'
-import { getRelatedArticles } from '@/libs/getArticles/getRelatedArticles'
+import { getRelatedArticles } from '@/libs/getRelatedArticles'
+import { parseMarkdownFile } from '@/libs/markdown'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 type Props = {
@@ -34,27 +33,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     `${slug}.mdx`,
   )
 
-  try {
-    const postFile = fs.readFileSync(filePath, 'utf8')
-    const { data: frontmatter } = matter(postFile)
+  if (!fs.existsSync(filePath)) {
+    return { title: 'Article Not Found' }
+  }
 
-    const keywords = Array.isArray(frontmatter.topics)
-      ? frontmatter.topics.join(', ')
-      : ''
+  const { frontmatter } = await parseMarkdownFile(filePath)
+  const keywords = Array.isArray(frontmatter.topics)
+    ? frontmatter.topics.join(', ')
+    : ''
 
-    return {
+  return {
+    title: String(frontmatter.title),
+    description: String(frontmatter.description),
+    keywords,
+    openGraph: {
       title: String(frontmatter.title),
       description: String(frontmatter.description),
-      keywords,
-      openGraph: {
-        title: String(frontmatter.title),
-        description: String(frontmatter.description),
-      },
-    }
-  } catch {
-    return {
-      title: 'Article Not Found',
-    }
+    },
   }
 }
 
@@ -71,9 +66,8 @@ export default async function ArticlePage({ params }: Props) {
     notFound()
   }
 
-  const postFile = fs.readFileSync(filePath, 'utf8')
-  const { data: frontmatter, content } = matter(postFile)
-  const stats = readingTime(postFile)
+  const { frontmatter, content, readingTime, rawSource } =
+    await parseMarkdownFile(filePath)
 
   const relatedArticles = await getRelatedArticles(
     `${category}/${slug}`,
@@ -90,9 +84,9 @@ export default async function ArticlePage({ params }: Props) {
         date: frontmatter.date ? String(frontmatter.date) : undefined,
         topics: frontmatter.topics as string[] | undefined,
       }}
-      rawContent={postFile}
+      rawContent={rawSource}
       relatedArticles={relatedArticles}
-      readingTime={stats.text}
+      readingTime={readingTime}
       breadcrumbItems={[
         { label: 'Home', href: '/' },
         { label: 'Articles', href: '/articles' },

@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react'
 import styled from '@emotion/styled'
 import { createPortal } from 'react-dom'
 
-import { useIsClient } from '@/components/hooks'
+import { useIsClient } from '@/hooks/useIsClient'
 
 interface DrawerProps {
   isOpen: boolean

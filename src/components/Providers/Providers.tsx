@@ -3,7 +3,7 @@
 import { ThemeProvider as EmotionThemeProvider } from '@emotion/react'
 
 import EmotionRegistry from '@/components/Providers/EmotionRegistry'
-import { darkTheme } from '@/components/Styles/themes'
+import { darkTheme } from '@/styles/themes'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (

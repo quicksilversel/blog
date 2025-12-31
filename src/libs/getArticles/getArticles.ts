@@ -3,12 +3,8 @@ import path from 'path'
 
 import type { Article } from './types'
 
-import {
-  filterMarkdownFiles,
-  filterPublished,
-  parseMarkdownFile,
-  sortByDateDesc,
-} from '@/libs/utils'
+import { filterMarkdownFiles, parseMarkdownFile } from '@/libs/markdown'
+import { filterPublished, sortByDateDesc } from '@/libs/utils'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 export async function getArticles(
