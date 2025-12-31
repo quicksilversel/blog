@@ -41,4 +41,4 @@ storybook-static/
 *.css.map
 
 # Reset CSS
-src/components/Styles/resetCss/resetCss.ts
+src/styles/resetCss/resetCss.ts
