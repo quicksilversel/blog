@@ -1,0 +1,211 @@
+---
+title: 'Next.js 16 SSG Migration: Why Turbopack Made My Build Faster but S3 Upload Slower (And How I Fixed It)'
+description: 'Deep dive into how Turbopack changed static export output in Next.js 16, why it impacts S3 upload times, and the simple fix that reduced upload time from 1m52s to 3s.'
+topics: ['Next.js', 'AWS', 'S3', 'GHA', 'CI/CD']
+published: true
+date: '2026-01-07'
+---
+
+## TL;DR
+
+Upgraded Next.js 14 → 16 and S3 uploads went from ~30s to 1m52s. One flag change brought it down to **3 seconds**!
+
+## The Mystery: Faster Build, Slower Deploy
+
+After upgrading from Next.js 14 to 16, I noticed something strange in my GitHub Actions pipeline:
+
+- Build time: **Faster** (Turbopack is incredible)
+- S3 upload time: **Way slower** (1m52s vs ~30s before)
+
+This didn't make sense at first. The total output size was roughly the same. What changed?
+
+## The Answer: Turbopack's File Generation Strategy
+
+The culprit is the fundamental difference in how Turbopack (Next.js 16's default bundler) generates files compared to Webpack (Next.js 14's bundler).
+
+### Webpack's Approach (Next.js 14)
+
+Webpack bundles aggressively. It creates fewer, larger chunk files by grouping related modules together.
+
+```
+out/_next/static/chunks/
+├── main-abc123.js         (150KB)
+├── pages/_app-def456.js   (80KB)
+├── commons-ghi789.js      (200KB)
+└── webpack-jkl012.js      (2KB)
+
+Total: ~4 files
+```
+
+The bundling philosophy: "Combine everything possible into single files to reduce HTTP requests."
+
+### Turbopack's Approach (Next.js 16)
+
+Turbopack prioritizes granular code splitting. It creates more, smaller chunk files optimized for caching and parallel loading.
+
+```
+out/_next/static/chunks/
+├── app/
+│   ├── layout-a1b2c3.js           (12KB)
+│   ├── page-d4e5f6.js             (8KB)
+│   ├── articles/
+│   │   ├── [category]/
+│   │   │   └── [slug]/
+│   │   │       └── page-g7h8i9.js (15KB)
+│   │   └── page-j0k1l2.js         (10KB)
+│   └── ...
+├── _shared/
+│   ├── chunk-m3n4o5.js            (5KB)
+│   ├── chunk-p6q7r8.js            (3KB)
+│   └── ...
+└── webpack-s9t0u1.js              (2KB)
+
+Total: ~50+ files
+```
+
+The bundling philosophy: "Split everything for maximum cacheability and tree-shaking."
+
+## Why More Files = Slower S3 Uploads
+
+S3 operations are **per-file**, not per-byte. Each file upload is a separate HTTP PUT request with:
+
+- TCP handshake
+- TLS negotiation
+- S3 API authentication
+- Request/response overhead
+
+If you're using `aws s3 cp --recursive`:
+
+| Next.js Version | File Count | Upload Time |
+| --------------- | ---------- | ----------- |
+| 14 (Webpack)    | ~200 files | ~30s        |
+| 16 (Turbopack)  | ~800 files | 1m52s       |
+
+The total bytes transferred might be similar, but 4x more files means 4x more HTTP overhead.
+
+## The Fix: Switch from `cp` to `sync`
+
+The solution is embarrassingly simple. Replace `aws s3 cp` with `aws s3 sync` and add the right flags.
+
+### Before (Slow)
+
+```yaml
+- name: Deploy to S3
+  run: |
+    aws s3 cp --recursive ./out/ s3://my-bucket/
+```
+
+This uploads **every file, every time**, regardless of whether it changed.
+
+### After (Fast)
+
+```yaml
+- name: Deploy to S3
+  run: |
+    aws s3 sync ./out/ s3://my-bucket/ \
+      --delete \
+      --size-only \
+      --exclude ".DS_Store" \
+      --exclude "*.map"
+```
+
+**Result: 1m52s → 3s** (on subsequent deploys)
+
+## Breaking Down the Flags
+
+### `--delete`
+
+Removes files from S3 that no longer exist in `./out/`. Essential for keeping your bucket clean and avoiding stale assets.
+
+```bash
+# Without --delete: old chunks accumulate forever
+# With --delete: bucket mirrors your output exactly
+```
+
+### `--size-only`
+
+This is the key optimization. By default, `sync` compares both file size AND modification time. But here's the problem: every build generates new timestamps, even for identical files.
+
+`--size-only` tells sync to only compare file sizes. If the size matches, skip the upload.
+
+```bash
+# Without --size-only: All 800 files uploaded (timestamps differ)
+# With --size-only: Only ~50 changed files uploaded
+```
+
+Why does this work? Turbopack includes content hashes in filenames. If the content changes, the filename changes (and thus the size). If the content is identical, the filename and size stay the same.
+
+### `--exclude ".DS_Store"` and `--exclude "*.map"`
+
+Prevents uploading unnecessary files:
+
+- `.DS_Store`: macOS metadata files (shouldn't be in output, but just in case)
+- `*.map`: Source maps (you probably don't want these public, or handle them separately)
+
+## Why This Works So Well with Turbopack
+
+Turbopack's granular chunking actually becomes an advantage with `sync`:
+
+1. **Content-hashed filenames**: `chunk-a1b2c3.js` only changes if content changes
+2. **Stable output**: Unchanged code produces identical chunks
+3. **Incremental updates**: Most deploys only change a few files
+
+In a typical deployment:
+
+- Homepage content changed → 3-5 new chunks
+- A single blog post added → 2-3 new chunks
+- Everything else → Skipped (same size)
+
+## Verifying the Optimization
+
+You can see exactly what `sync` will do before running it:
+
+```bash
+# Dry run - shows what would be uploaded/deleted
+aws s3 sync ./out/ s3://my-bucket/ --delete --size-only --dryrun
+```
+
+Example output:
+
+```
+(dryrun) upload: out/_next/static/chunks/app/page-new123.js to s3://my-bucket/_next/static/chunks/app/page-new123.js
+(dryrun) delete: s3://my-bucket/_next/static/chunks/app/page-old456.js
+```
+
+## The Complete Workflow
+
+Here's my full GitHub Actions deployment step:
+
+```yaml
+- name: Deploy to S3
+  run: |
+    aws s3 sync ./out/ s3://your-bucket-name/ \
+      --delete \
+      --size-only \
+      --exclude ".DS_Store" \
+      --exclude "*.map"
+```
+
+That's it. No fancy parallel uploaders, no custom scripts. Just the right tool with the right flags.
+
+## When `cp` Still Makes Sense
+
+There are cases where `aws s3 cp --recursive` is still the right choice:
+
+- **First deployment**: No existing files to compare against
+- **Full cache invalidation**: When you want to force re-upload everything
+- **Non-hashed filenames**: If your output doesn't use content hashes
+
+But for static Next.js deployments with Turbopack? `sync` with `--size-only` is the clear winner.
+
+## Summary
+
+| Command            | Use Case                   | Speed (800 files) |
+| ------------------ | -------------------------- | ----------------- |
+| `cp --recursive`   | Full upload, no comparison | 1m52s             |
+| `sync`             | Compare size + timestamp   | ~1m (all changed) |
+| `sync --size-only` | Compare size only          | 3s (incremental)  |
+
+Next.js 16's Turbopack creates more granular chunks for better caching and performance. The trade-off is more files in your output directory. By switching from `cp` to `sync --size-only`, you can take advantage of content-hashed filenames and only upload what actually changed.
+
+The build got faster. Now the deploy is faster too.
