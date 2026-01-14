@@ -1,0 +1,214 @@
+---
+title: 'SVG Custom Fonts in Figma/Illustrator: Converting Text to Paths with opentype.js'
+description: 'Embedded @font-face works in browsers but breaks in design tools. Here is how I used opentype.js to convert text to paths, making SVG exports compatible with Figma and Adobe Illustrator.'
+topics: ['Next.js', 'opentype.js']
+published: true
+date: '2026-01-14'
+---
+
+## The Problem
+
+In my [previous article](/articles/frontend/building-svg-chart-generator-sheetjs-storybook), I described building a chart generator that exports SVG files. One solution I mentioned was embedding fonts as base64 data URLs to avoid canvas tainting during PNG export:
+
+```typescript
+const styleElement = document.createElementNS(
+  'http://www.w3.org/2000/svg',
+  'style',
+)
+styleElement.textContent = `
+  @font-face {
+    font-family: 'CustomFont';
+    src: url('${fontBase64}') format('woff');
+  }
+`
+```
+
+This works perfectly in browsers. The SVG renders with the correct font, and PNG exports work because the font is embedded rather than loaded from an external source.
+
+But when designers opened these SVGs in Figma or Adobe Illustrator, the custom font was gone. The text fell back to a system font, breaking the visual consistency.
+
+## Why @font-face Doesn't Work in Design Tools
+
+Browsers are runtime environments. They parse CSS, fetch fonts (or decode embedded base64), and render text dynamically. Design tools like Figma and Illustrator are fundamentally different. They need to work with the file as a static document.
+
+While both tools technically support embedded fonts in some contexts, the reality is messy:
+
+- **Figma** imports SVGs but doesn't reliably process embedded @font-face rules. If the font isn't installed on the system or available in Figma's font library, it falls back.
+- **Illustrator** has similar issues. It can sometimes pick up embedded fonts, but behavior varies across versions and configurations.
+
+The reliable solution? Don't embed fonts at all. Convert text to paths.
+
+## The Solution: opentype.js
+
+[opentype.js](https://www.npmjs.com/package/opentype.js) is a JavaScript parser for TrueType and OpenType fonts. It can read font files, access glyph data, and generate SVG path data for any string of text.
+
+Instead of:
+
+```xml
+<text font-family="CustomFont" x="100" y="50">Revenue</text>
+```
+
+We generate:
+
+```xml
+<path d="M10.2 0L12.4 8.2L20.8 8.2L14.1 13.2..." fill="#000000" />
+```
+
+The text becomes a series of bezier curves. No font reference needed. The SVG looks identical everywhere because there's nothing to interpret—it's just geometry.
+
+## Implementation
+
+Here's how I implemented it:
+
+### Loading the Font
+
+First, fetch and parse the font file:
+
+```typescript
+import opentype from 'opentype.js'
+
+const FONT_URL = 'https://example.com/fonts/custom-font.woff'
+let cachedFont: opentype.Font | null = null
+
+const loadFont = async (): Promise<opentype.Font | null> => {
+  if (cachedFont) return cachedFont
+
+  try {
+    const response = await fetch(FONT_URL)
+    const arrayBuffer = await response.arrayBuffer()
+    cachedFont = opentype.parse(arrayBuffer)
+    return cachedFont
+  } catch {
+    return null
+  }
+}
+```
+
+The font is cached after the first load to avoid redundant network requests.
+
+### Deciding What to Convert
+
+Not all text needs conversion. I only convert text that uses the custom font and contains ASCII characters (Japanese characters weren't supported by my specific font):
+
+```typescript
+const usesCustomFont = (textElement: SVGTextElement): boolean => {
+  const fontFamily = textElement.getAttribute('font-family') || ''
+  return fontFamily.includes('CustomFont')
+}
+
+const containsOnlyAscii = (text: string): boolean => {
+  return /^[\x20-\x7E]*$/.test(text)
+}
+
+const shouldConvertToPath = (textElement: SVGTextElement): boolean => {
+  const text = textElement.textContent || ''
+  return usesCustomFont(textElement) && containsOnlyAscii(text)
+}
+```
+
+### Converting Text to Path
+
+The core conversion function handles font size, positioning, and text alignment:
+
+```typescript
+const convertTextToPath = (
+  textElement: SVGTextElement,
+  font: opentype.Font,
+): SVGPathElement | null => {
+  const text = textElement.textContent || ''
+  if (!text.trim()) return null
+
+  const fontSize = parseFloat(textElement.getAttribute('font-size') || '12')
+  const x = parseFloat(textElement.getAttribute('x') || '0')
+  const y = parseFloat(textElement.getAttribute('y') || '0')
+  const fill = textElement.getAttribute('fill') || '#000000'
+  const textAnchor = textElement.getAttribute('text-anchor') || 'start'
+
+  // Calculate text width for alignment
+  const textWidth = font.getAdvanceWidth(text, fontSize)
+
+  // Adjust x position based on text-anchor
+  let adjustedX = x
+  if (textAnchor === 'middle') {
+    adjustedX = x - textWidth / 2
+  } else if (textAnchor === 'end') {
+    adjustedX = x - textWidth
+  }
+
+  // Generate path data
+  const path = font.getPath(text, adjustedX, y, fontSize)
+  const pathData = path.toPathData(2) // 2 decimal places
+
+  // Create SVG path element
+  const pathElement = document.createElementNS(
+    'http://www.w3.org/2000/svg',
+    'path',
+  )
+  pathElement.setAttribute('d', pathData)
+  pathElement.setAttribute('fill', fill)
+
+  return pathElement
+}
+```
+
+Key details:
+
+- `font.getAdvanceWidth()` returns the rendered width of the text, which we need for `text-anchor` alignment
+- `font.getPath()` generates an opentype.js Path object with all the glyph outlines
+- `path.toPathData(2)` converts it to an SVG path `d` attribute with 2 decimal precision
+
+### Putting It Together
+
+The export function clones the SVG, converts eligible text elements, and downloads:
+
+```typescript
+export const downloadSVG = async (
+  svgElement: SVGSVGElement,
+  filename: string = 'chart.svg',
+) => {
+  const clonedSvg = svgElement.cloneNode(true) as SVGSVGElement
+
+  const font = await loadFont()
+  if (font) {
+    const textElements = clonedSvg.querySelectorAll('text')
+    textElements.forEach((textEl) => {
+      if (shouldConvertToPath(textEl as SVGTextElement)) {
+        const pathElement = convertTextToPath(textEl as SVGTextElement, font)
+        if (pathElement && textEl.parentNode) {
+          textEl.parentNode.replaceChild(pathElement, textEl)
+        }
+      }
+    })
+  }
+
+  const serializer = new XMLSerializer()
+  const svgString = serializer.serializeToString(clonedSvg)
+  const blob = new Blob([svgString], { type: 'image/svg+xml' })
+
+  // Download...
+}
+```
+
+## Trade-offs
+
+Converting text to paths has consequences:
+
+**Pros:**
+
+- Universal compatibility. Works in any tool that supports SVG paths
+- No font licensing issues. The font data isn't distributed, just the resulting shapes
+- Predictable rendering. No font substitution surprises
+
+**Cons:**
+
+- Text is no longer editable. Designers can't click and retype
+- File size increases. Path data is verbose compared to text
+- Accessibility is lost. Screen readers can't parse path data as text
+
+For my use case—generating charts for presentations—these trade-offs were acceptable. The charts are final output, not templates for further editing. File size increase was minimal for the short labels in charts.
+
+## Conclusion
+
+If you're generating SVGs that need to work in design tools with custom fonts, embedded @font-face won't cut it. [opentype.js](https://www.npmjs.com/package/opentype.js) provides a clean way to convert text to paths, ensuring your fonts render correctly everywhere.
+
+The approach is surgical: load the font once, identify text elements that need conversion, replace them with path equivalents. The result is an SVG that looks identical in the browser, Figma, Illustrator, and anywhere else.
