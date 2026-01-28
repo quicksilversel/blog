@@ -1,0 +1,335 @@
+---
+title: 'Auto-Refreshing GCS Memory with Pub/Sub: Fixing the Stale Cache Problem'
+description: 'How I fixed the bot serving outdated knowledge after GCS file updates by adding a reload endpoint, OIDC authentication, and wiring up GCS change notifications through Pub/Sub.'
+topics: ['Python', 'GCP', 'Pub/Sub', 'Cloud Run']
+published: true
+date: '2026-01-28'
+---
+
+## Intro
+
+After [adding GCS memory to Gemini](/projects/slack-gemini-bot/adding-gcs-memory-to-gemini), I had a bot that could answer team-specific questions from markdown files. Update a file in GCS, and the bot knows about it. Simple.
+
+Except... it didn't.
+
+I'd update a markdown file in the bucket, ask the bot a question, and it would give me the **old** answer. Every time. The only way to get it to pick up changes was to redeploy the entire service.
+
+> The goal: Make the bot automatically refresh its knowledge when GCS files are updated - without redeploying.
+
+## Finding the Problem
+
+### Two Layers of Staleness
+
+Looking at the code I wrote in the previous post, the problem was staring right at me. There are two layers of caching, and neither ever refreshes.
+
+**Layer 1: `MemoryService._cache`** - A plain Python dict that caches every file after the first GCS download:
+
+```python
+class MemoryService:
+    def __init__(self) -> None:
+        self._cache: dict[str, str] = {}
+
+    def _load_file(self, blob_name: str) -> Optional[str]:
+        if blob_name in self._cache:
+            return self._cache[blob_name]  # Always returns cached version
+
+        blob = self.bucket.blob(blob_name)
+        content = blob.download_as_text()
+        self._cache[blob_name] = content  # Cached forever
+        return content
+```
+
+**Layer 2: `GeminiService.system_instruction`** - The memory content gets baked into Gemini's system instruction at startup:
+
+```python
+class GeminiService:
+    def __init__(self) -> None:
+        self.memory_content = self._load_memory()  # Loaded once
+        self.system_instruction = self._build_system_instruction()  # Built once
+        self.model = GenerativeModel(
+            self.model_name, system_instruction=self.system_instruction  # Set once
+        )
+```
+
+Both services are global singletons. Both are created once when the process starts. Neither ever updates.
+
+### Why I Didn't Notice Earlier
+
+Cloud Run scales to zero when idle. When it scales back up, a fresh container starts, singletons are re-created, and GCS files are re-fetched. So if you update a file and wait long enough, the bot _eventually_ picks it up - whenever the current instance dies and a new one spins up.
+
+The problem shows up when the bot is actively being used. Cloud Run keeps the instance alive, the cache never clears, and you're stuck with whatever was loaded at startup.
+
+## The Fix: A Reload Endpoint
+
+I already had `MemoryService.refresh()` and `GeminiService.reload_memory()` methods from the previous implementation. They just weren't wired up to anything.
+
+### Bug in `reload_memory()`
+
+First, a subtle bug. The existing `reload_memory()` called `_load_memory()`, which calls `load_all_memory()`, which calls `_load_file()` - which checks the cache. So even "reloading" would return stale data.
+
+```python
+# Before: doesn't actually refresh because _load_memory() hits the cache
+def reload_memory(self) -> None:
+    self.memory_content = self._load_memory()
+    # ...
+```
+
+Fixed by calling `memory_service.refresh()` directly, which clears the cache first:
+
+```python
+# After: clears cache before re-fetching
+def reload_memory(self) -> None:
+    memory_service = get_memory_service()
+    self.memory_content = memory_service.refresh()
+    self.system_instruction = self._build_system_instruction()
+    self.model = GenerativeModel(
+        self.model_name, system_instruction=self.system_instruction
+    )
+    self.chat_sessions.clear()
+    logger.info("Memory reloaded and chat sessions cleared")
+```
+
+### Adding the HTTP Endpoint
+
+Then I added a POST endpoint in `main.py`:
+
+```python
+@app.route("/admin/reload-memory", methods=["POST"])
+def reload_memory():
+    # ... auth check (see next section) ...
+
+    try:
+        gemini_service = get_gemini_service()
+        gemini_service.reload_memory()
+        logger.info("Memory reload triggered successfully")
+        return jsonify({"status": "ok", "message": "Memory reloaded"}), 200
+    except Exception as e:
+        logger.error(f"Memory reload failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+```
+
+## Securing the Endpoint
+
+My Cloud Run service uses `--allow-unauthenticated` because Slack needs to send webhooks to it. That means anyone on the internet could curl `/admin/reload-memory`.
+
+The endpoint only reloads cached data (not destructive), but I still don't want random people triggering it.
+
+### Why Not an API Key?
+
+My first thought was a simple Bearer token check. But I wanted to trigger this from GCS via Pub/Sub, and Pub/Sub push subscriptions don't support custom `Authorization` headers - they send their own OIDC JWT token.
+
+### OIDC Token Verification
+
+Since we're in GCP land, the proper approach is to verify Google-signed OIDC tokens. When Pub/Sub pushes a message, it includes a JWT signed by Google with the service account's identity. We can verify that.
+
+`google-auth` is already installed as a dependency of `google-cloud-storage`, so no new packages needed:
+
+```python
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_auth_requests
+
+@app.route("/admin/reload-memory", methods=["POST"])
+def reload_memory():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+    token = auth_header.split(" ", 1)[1]
+    try:
+        audience = os.getenv("CLOUD_RUN_URL")
+        claim = id_token.verify_oauth2_token(
+            token, google_auth_requests.Request(), audience=audience
+        )
+        allowed_emails = [
+            e.strip()
+            for e in os.getenv("WIF_SERVICE_ACCOUNT", "").split(",")
+            if e.strip()
+        ]
+        if claim.get("email") not in allowed_emails:
+            logger.warning(f"Unauthorized reload attempt from: {claim.get('email')}")
+            return jsonify({"status": "error", "message": "Unauthorized"}), 403
+    except ValueError as e:
+        logger.warning(f"Token verification failed: {e}")
+        return jsonify({"status": "error", "message": "Invalid token"}), 401
+
+    # ... reload logic
+```
+
+How it works:
+
+1. Extract the Bearer token from the `Authorization` header
+2. Verify it's a valid Google-signed JWT using `verify_oauth2_token()`
+3. Check the `audience` matches our Cloud Run URL (prevents token reuse across services)
+4. Check the `email` claim matches our allowed service account
+5. Reject everything else with 401/403
+
+### Environment Variables
+
+Two new env vars in the Cloud Run deployment:
+
+```yaml
+--set-env-vars "...,CLOUD_RUN_URL=https://your-service-url,WIF_SERVICE_ACCOUNT=your-sa@project.iam.gserviceaccount.com"
+```
+
+## Wiring Up GCS to Pub/Sub
+
+Now for the automatic part. The pipeline:
+
+```
+GCS file updated → Pub/Sub notification → Push to Cloud Run → Memory reload
+```
+
+### Step 1: Create a Pub/Sub Topic
+
+```bash
+gcloud pubsub topics create gcs-memory-updates --project=your-project
+```
+
+**Verify:** Cloud Console > Pub/Sub > Topics
+
+### Step 2: Set Up GCS Bucket Notification
+
+```bash
+gsutil notification create \
+  -t gcs-memory-updates \
+  -f json \
+  -e OBJECT_FINALIZE \
+  gs://your-bot-memory
+```
+
+`OBJECT_FINALIZE` fires when an object is created or overwritten - exactly what we want.
+
+**Verify:** There's no UI for this in Cloud Console. Use the CLI:
+
+```bash
+gsutil notification list gs://your-bot-memory
+```
+
+### Step 3: Grant Token Creator Permission
+
+This is the step that's easy to miss. Pub/Sub needs to generate an OIDC token for your service account when pushing messages. The **Pub/Sub service agent** (a Google-managed service account) needs permission to do this:
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  your-sa@your-project.iam.gserviceaccount.com \
+  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator" \
+  --project=your-project
+```
+
+The `service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com` is Google's internal Pub/Sub agent. You can find your project number in the Cloud Run URL or the project dashboard.
+
+**Verify:** Cloud Console > IAM & Admin > Service Accounts > click your SA > Permissions tab
+
+Also, the service account invoking Cloud Run needs `roles/run.invoker`:
+
+```bash
+gcloud run services add-iam-policy-binding your-service \
+  --member="serviceAccount:your-sa@your-project.iam.gserviceaccount.com" \
+  --role="roles/run.invoker" \
+  --region=your-region \
+  --project=your-project
+```
+
+### Step 4: Create the Push Subscription
+
+```bash
+gcloud pubsub subscriptions create gcs-memory-push \
+  --topic=gcs-memory-updates \
+  --push-endpoint=https://your-cloud-run-url/admin/reload-memory \
+  --push-auth-service-account=your-sa@your-project.iam.gserviceaccount.com \
+  --push-auth-token-audience=https://your-cloud-run-url \
+  --project=your-project
+```
+
+**Verify:** Cloud Console > Pub/Sub > Subscriptions > `gcs-memory-push` - check delivery type is Push with the correct endpoint and authentication enabled.
+
+## Testing the Full Pipeline
+
+Upload a file and check the logs:
+
+```bash
+# Trigger a GCS change
+echo "test content" | gsutil cp - gs://your-bot-memory/test-reload.md
+
+# Check Cloud Run logs
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=your-service AND textPayload:reload" \
+  --project=your-project --limit=5 --freshness=5m \
+  --format="table(timestamp, textPayload)"
+```
+
+If everything is wired up correctly:
+
+```
+TIMESTAMP                    TEXT_PAYLOAD
+2026-01-28T00:21:03.879988Z  Memory reload triggered successfully
+2026-01-28T00:21:03.879937Z  Memory reloaded and chat sessions cleared
+```
+
+If messages aren't getting through, check the Pub/Sub subscription monitoring:
+
+> Cloud Console > Pub/Sub > Subscriptions > `gcs-memory-push` > Monitoring tab
+
+Look at "Unacked message count" - if messages are piling up, it's usually an auth issue.
+
+Clean up after testing:
+
+```bash
+gsutil rm gs://your-bot-memory/test-reload.md
+```
+
+### Manual Trigger
+
+You can also invoke the endpoint manually using `gcloud` to generate an identity token:
+
+```bash
+curl -X POST https://your-cloud-run-url/admin/reload-memory \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token --audiences=https://your-cloud-run-url)"
+```
+
+This works if your GCP user account is in the allowed service accounts list.
+
+## Gotchas
+
+### 1. Pub/Sub Service Agent vs Default Service Account
+
+`service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com` (Pub/Sub service agent) is different from `PROJECT_NUMBER-compute@developer.gserviceaccount.com` (Compute Engine default SA). The Pub/Sub agent is Google-managed and doesn't show up under IAM > Service Accounts. Check it under IAM > IAM with "Include Google-provided role grants" enabled.
+
+### 2. GCS Notifications Have No Console UI
+
+Unlike most GCP features, GCS Pub/Sub notifications can't be viewed or managed in the Cloud Console. Use `gsutil notification list gs://your-bucket` to verify.
+
+## Architecture After
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
+│  .md file    │────▶│   Pub/Sub    │────▶│    Cloud Run     │
+│  updated     │     │   (push)     │     │                  │
+│  in GCS      │     │              │     │  POST /admin/    │
+└──────────────┘     │  OIDC token  │     │  reload-memory   │
+                     └──────────────┘     │                  │
+                                          │  ┌────────────┐  │
+                                          │  │ Verify JWT │  │
+                                          │  │ Check SA   │  │
+                                          │  └─────┬──────┘  │
+                                          │        │         │
+                                          │  ┌─────▼──────┐  │
+                                          │  │ Clear cache │  │
+                                          │  │ Re-fetch    │  │
+                                          │  │ Rebuild     │  │
+                                          │  │ model       │  │
+                                          │  └────────────┘  │
+                                          └──────────────────┘
+```
+
+## Wrapping Up
+
+The irony: in the [previous article](/projects/slack-gemini-bot/adding-gcs-memory-to-gemini), I wrote "No redeploy needed to update knowledge" as a feature. Technically true - you didn't need to redeploy _code_. But the bot wouldn't actually _see_ the changes until the process restarted. The `refresh()` and `reload_memory()` methods were sitting right there, unused.
+
+**Key takeaways:**
+
+1. **In-memory caches in long-running processes need invalidation** - A Python dict cache with no TTL and no refresh trigger will serve stale data forever
+2. **Singletons amplify caching issues** - When there's exactly one instance that lives for the entire process, stale state affects every request
+3. **OIDC token verification is free** - `google-auth` is already in your dependency tree if you're using any GCP client library
+4. **GCS + Pub/Sub + Cloud Run is a clean event-driven pattern** - File change → notification → HTTP push. No polling, no cron jobs
+5. **The Pub/Sub service agent needs `serviceAccountTokenCreator`** - This is the step everyone forgets when setting up authenticated push subscriptions
