@@ -1,0 +1,318 @@
+---
+title: 'Adding Thumbs Up/Down Feedback Buttons to Slack Bot Responses'
+description: 'How I added interactive feedback buttons to collect user satisfaction data, log it to BigQuery, and prevent double-clicking with visual confirmation.'
+topics: ['Python', 'Slack', 'GCP', 'BigQuery']
+published: true
+date: '2026-03-03'
+---
+
+## Intro
+
+After [setting up analytics](/projects/slack-gemini-bot/setting-up-analytics-with-bigquery-and-looker-studio), I could see how many questions users were asking and track response times. But I had no idea whether the answers were actually **helpful**.
+
+Response time tells you the bot is fast. It doesn't tell you the bot is good.
+
+I wanted a simple way for users to rate responses - thumbs up or thumbs down - without interrupting their flow. The feedback would flow into the same BigQuery pipeline I already had, letting me track satisfaction alongside other metrics.
+
+## The Implementation
+
+### 1. Creating Response Blocks with Buttons
+
+Slack's Block Kit lets you add interactive elements like buttons to messages. I created a helper function to wrap every response with feedback buttons:
+
+```python
+# app/handlers/slack_events.py
+
+def _create_response_blocks(response_text: str) -> list:
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": response_text,
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "👍",
+                        "emoji": True,
+                    },
+                    "action_id": "feedback_thumbs_up",
+                },
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "👎",
+                        "emoji": True,
+                    },
+                    "action_id": "feedback_thumbs_down",
+                },
+            ],
+        },
+    ]
+```
+
+The `action_id` is what Slack uses to route button clicks to the right handler.
+
+### 2. Using Blocks in Message Handlers
+
+I updated both the mention and DM handlers to use blocks instead of plain text:
+
+```python
+@app.event("app_mention")
+def handle_mention(event, say, logger):
+    # ... existing code ...
+
+    try:
+        with track_response("mention_response", user, channel, clean_text) as tracker:
+            gemini = get_gemini_service()
+            response = gemini.generate_response_sync(user, clean_text)
+            tracker.set_response(response)
+            result = say(
+                text=response,
+                blocks=_create_response_blocks(response),
+                thread_ts=thread_ts,
+            )
+            tracker.set_message_ts(result["ts"])
+    except Exception as e:
+        logger.error(f"Error with Gemini: {e}")
+        say(text=ERROR_MESSAGE, thread_ts=thread_ts)
+```
+
+A few important details:
+
+- **`text` is still required** - It's the fallback for notifications and accessibility
+- **`result["ts"]`** - The `say()` function returns the sent message's timestamp, which I save for linking feedback to responses later
+- **`set_message_ts()`** - A new method I added to the tracker (more on this below)
+
+### 3. Adding Feedback Logging
+
+I extended the analytics module with a new `log_feedback` function:
+
+```python
+# app/utils/analytics.py
+
+def log_feedback(
+    user_id: str,
+    channel: str,
+    message_ts: str,
+    feedback: str,
+) -> None:
+    _log_json(
+        {
+            "event_type": "feedback",
+            "user_id": user_id,
+            "channel": channel,
+            "message_ts": message_ts,
+            "feedback": feedback,
+            "feedback_value": 1 if feedback == "thumbs_up" else -1,
+        }
+    )
+```
+
+The `message_ts` field is the key - it links feedback to the original response in BigQuery.
+
+I also added `message_ts` to the response tracker so both logs share the same identifier:
+
+```python
+class ResponseTracker:
+    def __init__(self, ...):
+        # ... existing fields ...
+        self.message_ts: Optional[str] = None
+
+    def set_message_ts(self, message_ts: str) -> None:
+        self.message_ts = message_ts
+
+    def log_success(self) -> None:
+        _log_json({
+            # ... existing fields ...
+            "message_ts": self.message_ts,
+        })
+```
+
+### 4. Handling Button Clicks
+
+Slack Bolt makes handling button clicks simple with the `@app.action()` decorator:
+
+```python
+@app.action("feedback_thumbs_up")
+def handle_thumbs_up(ack, body, client, logger):
+    ack()
+    user = body["user"]["id"]
+    channel = body["channel"]["id"]
+    message_ts = body["message"]["ts"]
+    message_blocks = body["message"].get("blocks", [])
+
+    log_feedback(user, channel, message_ts, "thumbs_up")
+    logger.info(f"Thumbs up from {user} on message {message_ts}")
+
+    response_blocks = [b for b in message_blocks if b.get("type") != "actions"]
+    response_blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "👍 _フィードバックありがとうございます_"}],
+    })
+    client.chat_update(channel=channel, ts=message_ts, blocks=response_blocks)
+
+
+@app.action("feedback_thumbs_down")
+def handle_thumbs_down(ack, body, client, logger):
+    ack()
+    user = body["user"]["id"]
+    channel = body["channel"]["id"]
+    message_ts = body["message"]["ts"]
+    message_blocks = body["message"].get("blocks", [])
+
+    log_feedback(user, channel, message_ts, "thumbs_down")
+    logger.info(f"Thumbs down from {user} on message {message_ts}")
+
+    response_blocks = [b for b in message_blocks if b.get("type") != "actions"]
+    response_blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "👎 _フィードバックありがとうございます_"}],
+    })
+    client.chat_update(channel=channel, ts=message_ts, blocks=response_blocks)
+```
+
+Key points:
+
+- **`ack()`** - Must be called immediately to acknowledge the button click (Slack requires a response within 3 seconds)
+- **`client.chat_update()`** - Updates the original message to remove buttons and show confirmation
+- **Removing action blocks** - Filter out the actions block to prevent double-clicking
+- **Adding context** - Show a small "thank you" message where the buttons were
+
+### 5. Enabling Interactivity in Slack
+
+This part tripped me up initially. After deploying, clicking buttons showed an error about the app not being configured for interactive responses.
+
+To fix this:
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps)
+2. Select your app
+3. Click **Interactivity & Shortcuts** in the sidebar
+4. Toggle **Interactivity** to **On**
+5. Set the **Request URL** to the same endpoint you use for events: `https://your-domain.com/slack/events`
+6. Click **Save Changes**
+
+Slack Bolt automatically routes interactive payloads to the right `@app.action()` handler.
+
+## Testing
+
+I wrote tests to verify the button creation and handler behavior:
+
+```python
+# tests/test_feedback.py
+
+class TestCreateResponseBlocks:
+    def test_creates_section_with_response_text(self):
+        blocks = _create_response_blocks("Hello, world!")
+
+        assert len(blocks) == 2
+        assert blocks[0]["type"] == "section"
+        assert blocks[0]["text"]["text"] == "Hello, world!"
+
+    def test_creates_actions_with_feedback_buttons(self):
+        blocks = _create_response_blocks("Test response")
+
+        actions = blocks[1]
+        assert actions["type"] == "actions"
+        assert len(actions["elements"]) == 2
+        assert actions["elements"][0]["action_id"] == "feedback_thumbs_up"
+        assert actions["elements"][1]["action_id"] == "feedback_thumbs_down"
+
+
+class TestLogFeedback:
+    def test_logs_thumbs_up_feedback(self, capsys):
+        log_feedback(
+            user_id="U123",
+            channel="C456",
+            message_ts="1234567890.123456",
+            feedback="thumbs_up",
+        )
+
+        captured = capsys.readouterr()
+        log_entry = json.loads(captured.out.strip())
+
+        assert log_entry["event_type"] == "feedback"
+        assert log_entry["feedback"] == "thumbs_up"
+        assert log_entry["feedback_value"] == 1
+```
+
+For handler tests, I mocked the Slack app and captured the registered handlers to test them in isolation without making real API calls.
+
+## BigQuery Integration
+
+Since feedback logs use the same `_log_json` function with `message="bot_analytics"`, they flow into BigQuery automatically through the existing log sink.
+
+The schema now includes feedback events:
+
+```sql
+SELECT
+  timestamp,
+  jsonPayload.event_type,
+  jsonPayload.message_ts,
+  jsonPayload.feedback,
+  jsonPayload.feedback_value
+FROM `PROJECT.DATASET.run_googleapis_com_stdout_*`
+WHERE jsonPayload.event_type = "feedback"
+ORDER BY timestamp DESC
+```
+
+To join feedback with the original response:
+
+```sql
+SELECT
+  r.timestamp as response_time,
+  r.jsonPayload.question,
+  r.jsonPayload.response_time_ms,
+  f.jsonPayload.feedback
+FROM `PROJECT.DATASET.run_googleapis_com_stdout_*` r
+LEFT JOIN `PROJECT.DATASET.run_googleapis_com_stdout_*` f
+  ON r.jsonPayload.message_ts = f.jsonPayload.message_ts
+  AND f.jsonPayload.event_type = "feedback"
+WHERE r.jsonPayload.event_type IN ("dm_response", "mention_response")
+ORDER BY r.timestamp DESC
+```
+
+### Looker Studio Update
+
+I had to update my Looker Studio query to handle the new event type. Feedback logs don't have a `success` field, so I changed:
+
+```sql
+jsonPayload.success
+```
+
+to:
+
+```sql
+IFNULL(jsonPayload.success, NULL) as success
+```
+
+This prevents the "Field name success does not exist" error for feedback events.
+
+## The Log Flow
+
+Here's how it all connects:
+
+1. User asks a question
+2. Bot responds with `dm_response` or `mention_response` log (includes `message_ts`)
+3. User clicks thumbs up/down
+4. Bot logs `feedback` event (same `message_ts`)
+5. Message updates to show confirmation, buttons disappear
+6. Both logs flow to BigQuery, linked by `message_ts`
+
+## Wrapping Up
+
+Adding feedback buttons took about an hour:
+
+1. **Block Kit buttons** - Wrap responses in blocks with action buttons
+2. **Action handlers** - Log feedback and update the message
+3. **Visual feedback** - Remove buttons after click to prevent duplicates
+4. **Slack config** - Enable interactivity in the app settings
+
+Now I can track not just how many questions users ask, but whether the answers actually help. The next step would be analyzing which types of questions get negative feedback and improving the knowledge base accordingly.
