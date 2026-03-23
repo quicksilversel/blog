@@ -1,0 +1,761 @@
+---
+title: 'Adding Knowledge via Slack Workflow: Automating Documentation with Gemini'
+description: 'How I built a Slack Workflow integration that lets users submit raw notes, uses Gemini AI to structure them into proper documentation, and automatically creates GitHub PRs for review.'
+topics: ['Python', 'Slack', 'GCP', 'GitHub', 'Vertex AI']
+published: true
+date: '2026-03-23'
+---
+
+## Intro
+
+After [setting up the knowledge base in GCS](/projects/slack-gemini-bot/adding-gcs-memory-to-gemini), I had a bot that could answer questions from our documentation. But adding new knowledge required:
+
+1. Writing markdown manually
+2. Following our document structure (frontmatter, sections, etc.)
+3. Uploading to the GCS bucket
+4. Getting someone to review it
+
+This friction meant knowledge rarely got added. People would answer questions in Slack threads, but that knowledge never made it back into the docs.
+
+> The goal: Let users paste raw notes into a Slack form, have AI structure it into proper documentation, and automatically create a PR for review.
+
+## What We're Building
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Slack Workflow Form                                                │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │  Requester: @john.doe                                           │ │
+│  │  Knowledge to add: [raw notes here]                             │ │
+│  │  Reference URL: https://...                                     │ │
+│  │  Contact: #support-channel                                      │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Bot receives message in workflow channel                           │
+│  └─▶ Posts "Received! Formatting your knowledge..."                │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Gemini + DCP (Data Control Protocol)                               │
+│  └─▶ Structures raw data into proper markdown with frontmatter      │
+│  └─▶ Assigns doc_id, target_path automatically                      │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  GitHub Service                                                     │
+│  └─▶ Creates branch: knowledge/{doc_id}                             │
+│  └─▶ Commits structured document                                    │
+│  └─▶ Opens PR for review                                            │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Bot posts success message                                          │
+│  "Done! @ops-team Please review this PR"                           │
+│  └─▶ Links to PR                                                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## The DCP Prompt
+
+The magic happens in the **DCP (Data Control Protocol)** - a system prompt stored in GCS that tells Gemini exactly how to structure documents. It handles:
+
+- Inferring document type (manual, workflow, FAQ, etc.)
+- Generating unique doc_id by scanning the repository
+- Creating proper YAML frontmatter
+- Structuring content with headers and sections
+- Returning errors if required fields are missing
+
+I won't include the full prompt here, but the key is that it outputs complete markdown with frontmatter:
+
+```yaml
+---
+doc_id: manual-42
+target_path: docs/manuals/manual-42_coffee-machine-guide.md
+title: Coffee Machine Guide
+description: How to use the office coffee machine
+created: 2026-03-23
+creator: "@john.doe"
+source_url: https://slack.com/archives/C123/p456
+contact_info: "#faq-support @ops-team"
+tags:
+  - office
+  - equipment
+---
+
+# Coffee Machine Guide
+
+## Overview
+...
+```
+
+## Implementation
+
+### 1. Configuration
+
+First, I added the new environment variables:
+
+```python
+# app/utils/config.py
+
+WORKFLOW_CHANNEL_ID = os.getenv("WORKFLOW_CHANNEL_ID", "")
+WORKFLOW_ID = os.getenv("WORKFLOW_ID", "")
+DEFAULT_CONTACT_INFO = os.getenv("DEFAULT_CONTACT_INFO", "#support @team")
+REVIEW_TEAM_ID = os.getenv("REVIEW_TEAM_ID", "")
+REVIEW_TEAM_MENTION = f"<!subteam^{REVIEW_TEAM_ID}>" if REVIEW_TEAM_ID else "@team"
+SLACK_WORKSPACE_DOMAIN = os.getenv("SLACK_WORKSPACE_DOMAIN", "")
+DCP_PROMPT_PATH = "prompts/dcp_prompt.md"
+
+WF_FIELDS = {
+    "creator": "Requester",
+    "raw_data": "Knowledge to add",
+    "source_url": "Reference URL",
+    "contact_info": "Contact",
+}
+
+WORKFLOW_PROCESSING_MESSAGE = "Received! Formatting your knowledge, please wait..."
+WORKFLOW_SUCCESS_MESSAGE = """Done!
+<@{user_id}> submitted new knowledge for review.
+
+📄 *{title}*
+🔗 {pr_url}
+
+{review_team} Please review this PR!"""
+WORKFLOW_ERROR_MESSAGE = """Error occurred while formatting!
+<@{user_id}>, please check the following and try again.
+
+Reason: {error_details}"""
+```
+
+A few notes:
+- **`WORKFLOW_ID`** filters messages to only process from our specific workflow
+- **`WF_FIELDS`** maps field names to Japanese labels used in the workflow form
+- **`REVIEW_TEAM_MENTION`** uses Slack's subteam mention syntax `<!subteam^ID>`
+
+### 2. Detecting Workflow Messages
+
+I updated the message handler to detect workflow submissions:
+
+```python
+# app/handlers/slack_events.py
+
+@app.event("message")
+def handle_message(event, say, client, logger):
+    bot_id = event.get("bot_id")
+    channel = event.get("channel")
+
+    # Detect workflow submission
+    if bot_id and channel == WORKFLOW_CHANNEL_ID and WORKFLOW_CHANNEL_ID:
+        metadata = event.get("metadata", {})
+        event_payload = metadata.get("event_payload", {})
+        workflow_id = event_payload.get("workflow_id")
+
+        logger.info(
+            f"Workflow channel message: workflow_id={workflow_id}, "
+            f"expected={WORKFLOW_ID}"
+        )
+
+        # Only process messages from our specific workflow
+        if WORKFLOW_ID and workflow_id and workflow_id != WORKFLOW_ID:
+            logger.info(f"Ignoring message from different workflow {workflow_id}")
+            return
+
+        event_ts = event.get("event_ts") or event.get("ts")
+        if _is_duplicate(f"workflow:{event_ts}"):
+            return
+
+        handle_workflow_submission(event, say, client, logger)
+        return
+
+    # ... existing DM handling
+```
+
+Key points:
+- **Bot messages only** - Workflow posts come from a bot, not a user
+- **Channel filter** - Only process messages in the designated workflow channel
+- **Workflow ID filter** - The channel might have multiple workflows posting; we only want ours
+- **Duplicate check** - Slack sometimes sends duplicate events
+
+### 3. Parsing the Workflow Form
+
+The workflow posts a message with labeled fields. I parse it into a dataclass:
+
+```python
+# app/handlers/workflow_handler.py
+
+@dataclass
+class WorkflowFormData:
+    raw_data: str
+    contact_info: str
+    creator: str
+    source_url: Optional[str] = None
+
+
+def parse_workflow_message(text: str) -> Optional[WorkflowFormData]:
+    if not text:
+        return None
+
+    raw_data = None
+    source_url = None
+    contact_info = None
+    creator = None
+
+    lines = text.strip().split("\n")
+    current_field = None
+    raw_data_lines = []
+    in_raw_data = False
+
+    for line in lines:
+        if WF_FIELDS["creator"] in line:
+            in_raw_data = False
+            current_field = "creator"
+        elif WF_FIELDS["raw_data"] in line:
+            in_raw_data = True
+            current_field = "raw_data"
+        elif WF_FIELDS["source_url"] in line:
+            in_raw_data = False
+            current_field = "source_url"
+        elif WF_FIELDS["contact_info"] in line:
+            in_raw_data = False
+            current_field = "contact_info"
+        elif current_field == "creator" and not creator:
+            if line.strip():
+                creator = line.strip()
+        elif in_raw_data and current_field == "raw_data":
+            raw_data_lines.append(line)
+        elif current_field == "source_url" and not source_url:
+            url_match = re.search(r"https?://[^\s<>]+", line)
+            if url_match:
+                source_url = url_match.group(0)
+        elif current_field == "contact_info" and not contact_info:
+            if line.strip():
+                contact_info = line.strip()
+
+    # ... handle multiline raw_data and fallbacks
+```
+
+The tricky part is `raw_data` - it can span multiple lines, so I collect lines until hitting the next field label.
+
+### 4. Resolving User Mentions
+
+Slack converts `@john.doe` typed in the form to `<@U12345ABCDE>` before the bot receives it. I wanted the actual display name in the documentation, so I added a resolver:
+
+```python
+def resolve_user_mention(text: str, client) -> str:
+    match = re.search(r"<@([A-Z0-9]+)>", text)
+    if not match:
+        return text
+
+    user_id = match.group(1)
+    try:
+        result = client.users_info(user=user_id)
+        if result.get("ok"):
+            profile = result.get("user", {}).get("profile", {})
+            display_name = (
+                profile.get("display_name") or profile.get("real_name") or user_id
+            )
+            return f"@{display_name}"
+    except Exception:
+        pass
+    return text
+```
+
+Now `<@U12345ABCDE>` becomes `@john.doe` in the generated docs.
+
+### 5. Building Slack Message URLs
+
+If the user doesn't provide a source URL, I fall back to linking the Slack message itself:
+
+```python
+def build_slack_message_url(channel: str, ts: str) -> str:
+    ts_without_dot = ts.replace(".", "")
+    return f"https://{SLACK_WORKSPACE_DOMAIN}/archives/{channel}/p{ts_without_dot}"
+```
+
+This creates URLs like `https://workspace.slack.com/archives/C123/p1234567890123456`.
+
+### 6. Generating Documents with Gemini
+
+I added a new method to the Gemini service:
+
+```python
+# app/services/gemini.py
+
+def generate_document(
+    self,
+    raw_data: str,
+    source_url: str,
+    contact_info: str,
+    creator: str,
+) -> str:
+    dcp_prompt = self._load_gcs_prompt(DCP_PROMPT_PATH)
+    today = date.today().isoformat()
+
+    prompt = f"""{dcp_prompt}
+
+[INPUT]
+today: {today}
+creator: {creator}
+data: {raw_data}
+source_url: {source_url}
+contact_info: {contact_info}
+"""
+
+    # Use standalone model without chat history
+    standalone_model = GenerativeModel(self.model_name)
+    response = standalone_model.generate_content(prompt)
+
+    result = response.text.strip()
+    logger.info("Generated document via DCP")
+    return result
+```
+
+Using a standalone model (not a chat session) ensures consistent results - no conversation history affecting the output.
+
+### 7. Creating GitHub PRs
+
+The GitHub service handles branch creation, commits, and PR opening:
+
+```python
+# app/services/github.py
+
+class GitHubService:
+    def __init__(self) -> None:
+        self.token = os.getenv("GITHUB_TOKEN")
+        self.repo_name = os.getenv("GITHUB_MEMORY_REPO")
+
+        if not self.token:
+            raise ValueError("GITHUB_TOKEN environment variable is required")
+        if not self.repo_name:
+            raise ValueError("GITHUB_MEMORY_REPO environment variable is required")
+
+        self.github = Github(self.token)
+        self.repo: Repository = self.github.get_repo(self.repo_name)
+
+    def create_document_pr(
+        self,
+        doc_id: str,
+        file_path: str,
+        content: str,
+        title: str,
+        source_url: str,
+        creator: str,
+    ) -> str:
+        branch_name = f"knowledge/{doc_id}"
+
+        # Get default branch SHA
+        default_branch = self.repo.default_branch
+        default_ref = self.repo.get_git_ref(f"heads/{default_branch}")
+        sha = default_ref.object.sha
+
+        # Create new branch
+        self.repo.create_git_ref(f"refs/heads/{branch_name}", sha)
+
+        # Create/update file
+        self.repo.create_file(
+            path=file_path,
+            message=f"Add {title}",
+            content=content,
+            branch=branch_name,
+        )
+
+        # Create PR
+        pr = self.repo.create_pull(
+            title=f"[Knowledge] {title}",
+            body=f"Source: {source_url}\nRequested by: {creator}",
+            head=branch_name,
+            base=default_branch,
+        )
+
+        return pr.html_url
+```
+
+### 8. Extracting Frontmatter
+
+After Gemini generates the document, I extract the frontmatter to get `doc_id`, `target_path`, and `title`:
+
+```python
+def extract_frontmatter(content: str) -> dict:
+    result = {
+        "doc_id": None,
+        "target_path": None,
+        "title": "Untitled",
+    }
+
+    doc_id_match = re.search(
+        r'^doc_id:\s*["\']?(.+?)["\']?\s*$', content, re.MULTILINE
+    )
+    if doc_id_match:
+        result["doc_id"] = doc_id_match.group(1).strip()
+
+    target_path_match = re.search(
+        r'^target_path:\s*["\']?(.+?)["\']?\s*$', content, re.MULTILINE
+    )
+    if target_path_match:
+        result["target_path"] = target_path_match.group(1).strip()
+
+    title_match = re.search(
+        r'^title:\s*["\']?(.+?)["\']?\s*$', content, re.MULTILINE
+    )
+    if title_match:
+        result["title"] = title_match.group(1).strip()
+
+    return result
+```
+
+### 9. Handling DCP Errors
+
+If the user's input is missing required fields, DCP returns a JSON error:
+
+```json
+{"status": "error", "missing": ["title", "description"]}
+```
+
+I detect and handle this:
+
+```python
+def is_dcp_error(content: str) -> Tuple[bool, Optional[list]]:
+    content_stripped = content.strip()
+
+    # Strip markdown code block wrapper if present
+    if content_stripped.startswith("```json"):
+        content_stripped = content_stripped[7:]
+    if content_stripped.endswith("```"):
+        content_stripped = content_stripped[:-3]
+    content_stripped = content_stripped.strip()
+
+    if content_stripped.startswith("{") and "status" in content_stripped:
+        try:
+            data = json.loads(content_stripped)
+            if data.get("status") == "error":
+                return True, data.get("missing", [])
+        except json.JSONDecodeError:
+            pass
+
+    return False, None
+```
+
+### 10. The Main Handler
+
+Putting it all together:
+
+```python
+def handle_workflow_submission(event: dict, say, client, logger) -> None:
+    text = event.get("text", "")
+    channel = event.get("channel", "")
+    thread_ts = event.get("ts", "")
+
+    # Extract user_id for mentions
+    user_id = None
+    if "metadata" in event:
+        metadata = event.get("metadata", {})
+        if "event_payload" in metadata:
+            user_id = metadata["event_payload"].get("user_id")
+
+    if not user_id:
+        user_match = re.search(r"<@([A-Z0-9]+)>", text)
+        if user_match:
+            user_id = user_match.group(1)
+
+    if not user_id:
+        user_id = "unknown"
+
+    # Post processing message
+    say(text=WORKFLOW_PROCESSING_MESSAGE, thread_ts=thread_ts)
+
+    # Parse form data
+    form_data = parse_workflow_message(text)
+    if not form_data:
+        say(text=WORKFLOW_ERROR_MESSAGE.format(...), thread_ts=thread_ts)
+        return
+
+    # Resolve user mention to display name
+    creator = resolve_user_mention(form_data.creator, client)
+
+    # Fall back to Slack message URL if no source URL
+    source_url = form_data.source_url
+    if not source_url:
+        source_url = build_slack_message_url(channel, thread_ts)
+
+    try:
+        # Generate structured document
+        gemini = get_gemini_service()
+        document_content = gemini.generate_document(
+            raw_data=form_data.raw_data,
+            source_url=source_url,
+            contact_info=form_data.contact_info,
+            creator=creator,
+        )
+
+        # Check for DCP error
+        is_error, missing_fields = is_dcp_error(document_content)
+        if is_error:
+            say(text=WORKFLOW_ERROR_MESSAGE.format(...), thread_ts=thread_ts)
+            return
+
+        # Extract frontmatter
+        frontmatter = extract_frontmatter(document_content)
+        doc_id = frontmatter["doc_id"]
+        target_path = frontmatter["target_path"]
+        title = frontmatter["title"]
+
+        if not doc_id or not target_path:
+            say(text=WORKFLOW_ERROR_MESSAGE.format(...), thread_ts=thread_ts)
+            return
+
+        # Create PR
+        github = get_github_service()
+        pr_url = github.create_document_pr(
+            doc_id=doc_id,
+            file_path=target_path,
+            content=document_content,
+            title=title,
+            source_url=source_url,
+            creator=creator,
+        )
+
+        # Post success message
+        success_msg = WORKFLOW_SUCCESS_MESSAGE.format(
+            user_id=user_id,
+            title=title,
+            pr_url=pr_url,
+            review_team=REVIEW_TEAM_MENTION,
+        )
+        say(text=success_msg, thread_ts=thread_ts)
+
+    except Exception as e:
+        say(text=WORKFLOW_ERROR_MESSAGE.format(...), thread_ts=thread_ts)
+```
+
+## Testing
+
+I wrote comprehensive tests for each component:
+
+```python
+# tests/test_workflow_handler.py
+
+class TestResolveUserMention:
+    def test_resolves_user_mention_to_display_name(self):
+        mock_client = MagicMock()
+        mock_client.users_info.return_value = {
+            "ok": True,
+            "user": {
+                "profile": {"display_name": "john.doe", "real_name": "John Doe"}
+            },
+        }
+
+        result = resolve_user_mention("<@U12345678>", mock_client)
+
+        assert result == "@john.doe"
+        mock_client.users_info.assert_called_once_with(user="U12345678")
+
+    def test_falls_back_to_real_name_when_no_display_name(self):
+        mock_client = MagicMock()
+        mock_client.users_info.return_value = {
+            "ok": True,
+            "user": {"profile": {"display_name": "", "real_name": "John Doe"}},
+        }
+
+        result = resolve_user_mention("<@U12345678>", mock_client)
+
+        assert result == "@John Doe"
+
+
+class TestParseWorkflowMessage:
+    def test_parses_full_workflow_message(self):
+        text = """Requester
+@john.doe
+Knowledge to add
+This is the raw knowledge content.
+Reference URL
+https://example.com/doc
+Contact
+#support-channel"""
+
+        result = parse_workflow_message(text)
+
+        assert result is not None
+        assert result.creator == "@john.doe"
+        assert "raw knowledge content" in result.raw_data
+        assert result.source_url == "https://example.com/doc"
+        assert result.contact_info == "#support-channel"
+
+
+class TestIsDcpError:
+    def test_detects_error_json(self):
+        content = '{"status": "error", "missing": ["title"]}'
+
+        is_error, missing = is_dcp_error(content)
+
+        assert is_error is True
+        assert missing == ["title"]
+
+    def test_returns_false_for_valid_content(self):
+        content = """---
+doc_id: manual-1
+title: Test Document
+---
+# Content here"""
+
+        is_error, missing = is_dcp_error(content)
+
+        assert is_error is False
+        assert missing is None
+```
+
+For the Slack event tests, I captured the registered handlers and tested them in isolation:
+
+```python
+# tests/test_slack_events.py
+
+class TestWorkflowMessageFiltering:
+    def test_processes_message_from_matching_workflow_id(
+        self, mock_say, mock_client, mock_logger
+    ):
+        event = {
+            "bot_id": "B123",
+            "channel": "C_WORKFLOW",
+            "ts": "123.456",
+            "text": "Requester\n@user\nKnowledge to add\ntest",
+            "metadata": {"event_payload": {"workflow_id": "Wf_CORRECT"}},
+        }
+
+        with (
+            patch("app.handlers.slack_events.WORKFLOW_CHANNEL_ID", "C_WORKFLOW"),
+            patch("app.handlers.slack_events.WORKFLOW_ID", "Wf_CORRECT"),
+            patch("app.handlers.slack_events.handle_workflow_submission") as mock_handler,
+            patch("app.handlers.slack_events._is_duplicate", return_value=False),
+        ):
+            # ... register and call handler
+
+            mock_handler.assert_called_once()
+
+    def test_ignores_message_from_different_workflow_id(
+        self, mock_say, mock_client, mock_logger
+    ):
+        event = {
+            "bot_id": "B123",
+            "channel": "C_WORKFLOW",
+            "ts": "123.456",
+            "text": "Some message",
+            "metadata": {"event_payload": {"workflow_id": "Wf_DIFFERENT"}},
+        }
+
+        with (
+            patch("app.handlers.slack_events.WORKFLOW_CHANNEL_ID", "C_WORKFLOW"),
+            patch("app.handlers.slack_events.WORKFLOW_ID", "Wf_CORRECT"),
+            patch("app.handlers.slack_events.handle_workflow_submission") as mock_handler,
+        ):
+            # ... register and call handler
+
+            mock_handler.assert_not_called()
+```
+
+## Deployment
+
+I added the new dependencies and secrets:
+
+```toml
+# pyproject.toml
+[project]
+dependencies = [
+    # ... existing deps
+    "PyGithub>=2.1.1",  # New!
+]
+```
+
+And updated the Cloud Run deployment:
+
+```yaml
+# .github/workflows/deploy.yml
+
+env:
+  WORKFLOW_CHANNEL_ID: C0123456789
+  WORKFLOW_ID: Wf0123456789
+  REVIEW_TEAM_ID: S0123456789
+  SLACK_WORKSPACE_DOMAIN: your-workspace.slack.com
+  GITHUB_MEMORY_REPO: your-org/your-bot-memory
+
+# In the deploy step
+--set-env-vars "\
+  WORKFLOW_CHANNEL_ID=${{ env.WORKFLOW_CHANNEL_ID }},\
+  WORKFLOW_ID=${{ env.WORKFLOW_ID }},\
+  REVIEW_TEAM_ID=${{ env.REVIEW_TEAM_ID }},\
+  SLACK_WORKSPACE_DOMAIN=${{ env.SLACK_WORKSPACE_DOMAIN }},\
+  GITHUB_MEMORY_REPO=${{ env.GITHUB_MEMORY_REPO }}\
+" \
+--set-secrets "\
+  GITHUB_TOKEN=GITHUB_TOKEN:latest\
+"
+```
+
+## Gotchas
+
+### 1. Workflow ID Filtering
+
+The workflow channel might have multiple workflows posting to it. Without filtering by `workflow_id`, the bot would try to process every workflow message. The workflow ID is in `event.metadata.event_payload.workflow_id`.
+
+### 2. Slack Converts Mentions
+
+When a user types `@john.doe` in a Slack form, it arrives as `<@U12345ABCDE>`. I had to add the `resolve_user_mention` function to convert it back to a readable name using the Slack API.
+
+**Important:** This requires the `users:read` OAuth scope. Without it, you'll get a `missing_scope` error:
+
+```
+{'ok': False, 'error': 'missing_scope', 'needed': 'users:read', ...}
+```
+
+Add the scope in your Slack app settings under **OAuth & Permissions** → **Bot Token Scopes**, then reinstall the app to your workspace.
+
+### 3. Source URL Fallback
+
+If the user leaves the source URL empty or enters something that's not a URL, the bot falls back to linking the Slack message itself. This ensures we always have a reference.
+
+### 4. DCP Prompt in GCS
+
+I store the DCP prompt in GCS rather than the codebase. This lets me iterate on the prompt without redeploying the bot.
+
+### 5. Thread Replies
+
+All bot messages use `thread_ts=thread_ts` to reply in the same thread as the workflow form submission. This keeps the channel clean and groups related messages together.
+
+### 6. Branch Name Collisions
+
+If Gemini generates the same `doc_id` twice (e.g., for similar content), the bot will try to create a branch that already exists:
+
+```
+Reference already exists: 422 {"message": "Reference already exists", ...}
+```
+
+I fixed this by adding a Unix timestamp suffix to branch names:
+
+```python
+timestamp = int(time.time())
+branch_name = f"knowledge/{doc_id}-{timestamp}"
+```
+
+Now branches like `knowledge/ref-20260323-abc-1774228173` are always unique.
+
+## Wrapping Up
+
+The complete flow:
+
+1. User fills out Slack Workflow form with raw notes
+2. Bot detects the message, posts "Processing..."
+3. Gemini + DCP structures the content into proper documentation
+4. Bot creates a GitHub PR with the formatted doc
+5. Bot posts success message with PR link and @mentions the review team
+
+What used to require manual markdown writing, file uploading, and PR creation now happens in seconds with a Slack form. The knowledge actually gets documented.
+
+**Files changed:**
+- `app/handlers/workflow_handler.py` - New orchestration handler
+- `app/services/github.py` - New GitHub API service
+- `app/services/gemini.py` - Added `generate_document()` method
+- `app/handlers/slack_events.py` - Added workflow detection
+- `app/utils/config.py` - New configuration constants
