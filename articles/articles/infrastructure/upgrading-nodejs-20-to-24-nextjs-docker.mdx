@@ -1,0 +1,189 @@
+---
+title: '[Node.js] Upgrading from Node 20 to 24 in a Dockerized Next.js App'
+description: 'What broke when upgrading Node.js from 20 to 24 in a production Next.js app running in Docker, and how I fixed each issue — npm@11 breaking changes, ignore-scripts, git auth in multi-stage builds.'
+topics: ['Node.js', 'Docker', 'npm', 'Next.js', 'CI/CD']
+published: true
+date: '2026-03-25'
+---
+
+## Why Upgrade?
+
+Node.js 20 hits EOL on April 30, 2026. Node 24 is the current Active LTS ("Krypton") with support until April 2028. Seemed like a good time to jump.
+
+I went from Node 20.20.0 straight to 24.14.0, upgrading one major version at a time (20 → 22 → 24) to isolate any issues.
+
+## What Needed to Change
+
+The straightforward part — updating version references everywhere:
+
+- `.node-version`
+- `package.json` (engines and volta)
+- `@types/node`
+- Dockerfile base images (`node:24.14.0-slim` and `gcr.io/distroless/nodejs24-debian12`)
+
+Node 22 was a clean upgrade. Node 24 is where things got interesting.
+
+## Issue 1: `npm prune --production` is Dead
+
+npm 9+ deprecated `--production`. npm@11 (bundled with Node 24) still accepts it but throws warnings. The fix:
+
+```dockerfile
+# Before
+RUN npm prune --production
+
+# After
+RUN npm prune --omit=dev
+```
+
+Simple enough. But this change also introduced Issue 3 (below).
+
+## Issue 2: `--ignore-scripts` Now Blocks Everything
+
+This was the big one.
+
+I wrote about [using --ignore-scripts](/articles/infrastructure/npm-ignore-scripts-flag) for security a while back. It's great for preventing supply chain attacks — skip all lifecycle scripts during install, then selectively rebuild trusted packages.
+
+In npm@10 and below, `--ignore-scripts` skipped `preinstall` and `postinstall` but still ran `prepare`. In npm@11, it blocks **everything**, including `prepare`.
+
+Why does this matter? I have an internal icon library (`@myorg/icons`) installed as a git dependency. It uses a `prepare` script to build itself:
+
+```json
+{
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "npm run optimize && node ./lib/build.js"
+  }
+}
+```
+
+With npm@10, `npm ci --ignore-scripts` would skip `postinstall` but still run `prepare`, so the icon library would build its `dist/` directory. With npm@11, `prepare` is blocked too, so `dist/` is never generated and the build fails:
+
+```
+Type error: Module '"@/components/UI/Icon"' has no exported member 'IconSample'.
+```
+
+### What Didn't Work
+
+**`npm rebuild`** — I tried adding the package to the existing rebuild command:
+
+```dockerfile
+npm ci --ignore-scripts && npm rebuild dd-trace @myorg/icons
+```
+
+But `npm rebuild` only runs native addon scripts (`install`, `postinstall`), not `prepare`. So the icon library still wasn't built.
+
+**Running the build script directly** — Next attempt:
+
+```dockerfile
+npm ci --ignore-scripts && npm rebuild dd-trace && npm run --prefix node_modules/@myorg/icons build
+```
+
+This failed because the package's build script needs `svgo`, which is a devDependency of the icon library. Since `--ignore-scripts` prevented the full install, `svgo` wasn't available:
+
+```
+sh: 1: svgo: not found
+```
+
+Also, for git-based dependencies, npm doesn't keep the source files (`src/`, `lib/`) after install — only the build output. So even if `svgo` was available, the source files to build from weren't there.
+
+### What Worked
+
+Reinstall the package individually without `--ignore-scripts`:
+
+```dockerfile
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts && npm rebuild dd-trace && \
+    npm cache clean --force && npm install @myorg/icons
+```
+
+The `npm install @myorg/icons` runs without `--ignore-scripts`, so `prepare` executes normally and `dist/` is generated.
+
+Since this is an internal private package (not a random npm package from the internet), running its scripts doesn't compromise the security posture that `--ignore-scripts` was set up for.
+
+## Issue 3: `npm prune` Needs Git Auth in Multi-Stage Builds
+
+After fixing the icon library, the Docker build failed at a different stage:
+
+```
+npm error command git --no-replace-objects ls-remote ssh://git@github.com/myorg/icons.git
+npm error git@github.com: Permission denied (publickey).
+```
+
+This happened during `npm prune --omit=dev` in the **builder** stage. npm@11 apparently validates git dependencies during prune, which means it needs access to the git remote.
+
+The problem: my Dockerfile is a multi-stage build. GitHub credentials (`.netrc`) are set up in the `deps` stage but not in the `builder` stage. With npm@10, prune didn't try to resolve git deps. With npm@11, it does.
+
+The fix — copy `.netrc` from the deps stage:
+
+```dockerfile
+FROM node:24.14.0-slim AS builder
+RUN apt-get update && apt-get install -y git
+WORKDIR /app
+COPY --from=deps /root/.netrc /root/.netrc  # npm@11 needs git auth for prune
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+```
+
+This is safe because the builder stage is intermediate — it's discarded after the build. The final production image (distroless) only copies specific app files and never includes `.netrc`.
+
+## Bonus: Node 24 Deprecation Warning
+
+After deploying, I noticed this in the logs:
+
+```
+(node:7) [DEP0187] DeprecationWarning: Passing invalid argument types to fs.existsSync is deprecated
+```
+
+This is from `dd-trace`, not my code. It passes `undefined` to `fs.existsSync` somewhere (likely checking `process.env.DD_TELEMETRY_FORWARDER_PATH` when it's not set). This was [already fixed](https://github.com/DataDog/dd-trace-js/pull/5687) in dd-trace 5.x but my version (5.24.0) predates the fix. It's just a warning — harmless for now.
+
+## The Final Dockerfile
+
+Here's what the relevant parts look like after all fixes:
+
+```dockerfile
+FROM node:24.14.0-slim AS deps
+# ... auth setup ...
+RUN npm ci --ignore-scripts && npm rebuild dd-trace && \
+    npm cache clean --force && npm install @myorg/icons
+
+FROM node:24.14.0-slim AS builder
+RUN apt-get update && apt-get install -y git
+WORKDIR /app
+COPY --from=deps /root/.netrc /root/.netrc
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+# ... env vars ...
+RUN npm run build
+RUN npm prune --omit=dev
+
+FROM gcr.io/distroless/nodejs24-debian12 AS runner
+# ... only app files copied here, no credentials ...
+```
+
+## Version Choice
+
+I went with 24.14.0 instead of 24.14.1 (the latest security patch released the day before). Distroless images and Docker tags can take a day or two to stabilize after a new release, so I opted for the slightly older version that I could verify had working Docker images.
+
+## TL;DR
+
+Upgrading Node.js in a Dockerized app isn't just bumping version numbers. npm@11 (bundled with Node 24) has breaking changes around `--ignore-scripts` and dependency resolution that can silently break multi-stage Docker builds. The three issues I hit:
+
+1. **`npm prune --production`** → use `--omit=dev`
+2. **`--ignore-scripts` blocks `prepare`** → reinstall git-based packages individually
+3. **`npm prune` validates git deps** → forward credentials to the builder stage
+
+Each one only showed up in CI/CD Docker builds, not locally. Test your Docker builds early.
+
+## References
+
+### Docker Images
+
+- Builder: [`node:24.14.0-slim`](https://hub.docker.com/_/node/tags?name=24.14.0-slim)
+- Runner: [`gcr.io/distroless/nodejs24-debian12`](https://console.cloud.google.com/artifacts/docker/distroless/us/gcr.io/nodejs24-debian12)
+
+### Links
+
+- [Node.js Releases](https://nodejs.org/en/about/previous-releases)
+- [npm CLI breaking changes](https://github.com/npm/cli/blob/latest/CHANGELOG.md#%EF%B8%8F-breaking-changes-1)
+- [GoogleContainerTools/distroless](https://github.com/GoogleContainerTools/distroless)
+- [dd-trace fs.existsSync fix](https://github.com/DataDog/dd-trace-js/pull/5687)
