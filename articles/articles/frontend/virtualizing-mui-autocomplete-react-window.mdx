@@ -1,0 +1,156 @@
+---
+title: 'Virtualizing a MUI Autocomplete with react-window'
+description: 'How I fixed a sluggish MUI Autocomplete dropdown with thousands of options by wiring up react-window virtualization — including the non-obvious trick that makes it actually work.'
+date: 2026-03-31
+topics: ['React', 'MUI', 'react-window']
+published: true
+---
+
+## The Problem
+
+I have an internal tool with an Autocomplete dropdown that loads a large dataset at build time — thousands of entries, grouped alphabetically. Opening the dropdown felt noticeably heavy. Scrolling was janky. The browser was rendering every single list item at once, even the ones you couldn't see.
+
+The fix is virtualization: only render the rows that are actually visible in the viewport, and swap them in and out as you scroll.
+
+## Why react-window
+
+[react-window](https://github.com/bvaughn/react-window) is the standard library for this. It's small, well-maintained, and has a `VariableSizeList` that handles items of different heights — which matters here because group headers are taller than regular options.
+
+MUI's Autocomplete has a `ListboxComponent` prop specifically for this use case. You swap out the default `<ul>` with your own component, and that's where react-window lives.
+
+## The Non-Obvious Trick
+
+The naive approach — wrapping MUI's rendered `<li>` elements in a `VariableSizeList` — doesn't work well. By the time those elements reach `ListboxComponent` as children, they're already rendered React nodes, making it hard to know which are group headers vs options and what height to assign them.
+
+MUI's docs show a cleaner pattern: make `renderOption` and `renderGroup` return **raw data** instead of React elements, and let `ListboxComponent` handle all the rendering itself.
+
+```tsx
+<Autocomplete
+  renderOption={(props, option) => [props, option]}
+  renderGroup={(params) => params}
+  ListboxComponent={MyVirtualizedListbox}
+  ...
+/>
+```
+
+With this in place, the children that arrive at `ListboxComponent` are:
+
+- Group objects: `{ key, group, children: [[props, option], ...] }`
+- Each option is a `[props, optionData]` tuple
+
+No React elements in sight. The `ListboxComponent` flattens these into a single array and passes them to `VariableSizeList`, which renders rows on demand.
+
+## Building a Reusable ListboxComponent
+
+I wanted to reuse this across multiple dropdowns with proper TypeScript types for each option shape. A factory function worked well:
+
+```tsx
+export type OptionRenderer<T> = (
+  key: Key,
+  optionProps: HTMLAttributes<HTMLLIElement>,
+  option: T,
+  style: CSSProperties,
+) => ReactElement
+
+export function createVirtualizedListbox<T>(renderOption: OptionRenderer<T>) {
+  function Row({ data, index, style }: ListChildComponentProps) {
+    const dataSet = data[index]
+    // adjust for listbox padding
+    const inlineStyle = { ...style, top: (style.top as number) + PADDING }
+
+    if (Object.prototype.hasOwnProperty.call(dataSet, 'group')) {
+      return (
+        <ListSubheader key={dataSet.key} component="div" style={inlineStyle}>
+          {dataSet.group}
+        </ListSubheader>
+      )
+    }
+
+    const [{ key, ...optionProps }, option] = dataSet as [
+      HTMLAttributes<HTMLLIElement> & { key: Key },
+      T,
+    ]
+    return renderOption(key, optionProps, option, inlineStyle)
+  }
+
+  return forwardRef<HTMLDivElement, HTMLAttributes<HTMLElement>>(
+    function VirtualizedListbox({ children, ...other }, ref) {
+      const itemData: unknown[] = []
+      ;(
+        children as Array<{ children?: unknown[] } & Record<string, unknown>>
+      ).forEach((item) => {
+        itemData.push(item)
+        itemData.push(...(item.children || []))
+      })
+      // ... VariableSizeList setup
+    },
+  )
+}
+```
+
+The `Row` function is defined inside the factory but outside any React component, so it's created once per factory call and stays stable as a `VariableSizeList` child. The `renderOption` argument is captured in the closure — no context needed.
+
+## Using It
+
+Creating a listbox for a specific option type is a one-liner at module level:
+
+```tsx
+type Item = { id: number; name: string; group: string }
+
+const ItemListbox = createVirtualizedListbox<Item>(
+  (key, optionProps, option, style) => (
+    <li key={key} {...optionProps} style={style}>
+      {option.name}
+    </li>
+  ),
+)
+```
+
+Then wire it up:
+
+```tsx
+<Autocomplete
+  options={items}
+  groupBy={(option) => option.group}
+  getOptionLabel={(option) => option.name}
+  onChange={(_e, value) => handleChange(value)}
+  ListboxComponent={ItemListbox}
+  renderOption={(props, option) => [props, option]}
+  renderGroup={(params) => params}
+  renderInput={...}
+/>
+```
+
+One thing worth noting: with this setup, `onChange` receives the selected option object directly as the second argument. I was previously reading `e.target.dataset` attributes off the clicked `<li>` element, which worked for mouse clicks but silently broke keyboard selection (pressing Enter). Switching to the `value` argument fixed both at once.
+
+## The OuterElement Pattern
+
+`VariableSizeList` needs to attach scroll listeners and a ref to its outer container. MUI's listbox props (including `onScroll`, `aria-*` attributes, and the ref) need to land on that same element. The standard pattern is a small context that forwards them:
+
+```tsx
+const OuterElementContext = createContext<HTMLAttributes<HTMLElement>>({})
+
+const OuterElementType = forwardRef<
+  HTMLDivElement,
+  HTMLAttributes<HTMLDivElement>
+>(function OuterElement(props, ref) {
+  const outerProps = useContext(OuterElementContext)
+  return <div ref={ref} {...props} {...outerProps} />
+})
+```
+
+Inside `VirtualizedListbox`:
+
+```tsx
+<OuterElementContext.Provider value={other}>
+  <VariableSizeList outerElementType={OuterElementType} innerElementType="ul" ...>
+    {Row}
+  </VariableSizeList>
+</OuterElementContext.Provider>
+```
+
+Without this, keyboard navigation and accessibility break because MUI's event handlers never get attached.
+
+## Result
+
+The dropdown opens instantly now. Scrolling through thousands of grouped items is smooth. The DOM at any point has only the visible rows rendered instead of the entire list.
