@@ -1,0 +1,272 @@
+---
+title: 'Migrating from Gemini to Claude: Swapping LLMs on Vertex AI'
+description: 'Why I switched from Gemini 2.5 Flash to Claude Sonnet on Vertex AI, and how the migration went. Covers the Anthropic Vertex SDK, code changes, type safety, and first impressions.'
+topics: ['Python', 'GCP', 'AI', 'Claude']
+published: true
+date: '2026-04-08'
+---
+
+## Intro
+
+After months of running my Slack bot on [Gemini 2.5 Flash](/projects/slack-gemini-bot/integrating-gemini-vertex-ai), I started noticing a problem: **hallucinations**.
+
+The bot would confidently answer questions with information that sounded plausible but was completely wrong. It would cite knowledge documents that didn't exist, mix up details between different documents, or just make things up entirely. For a support bot that people rely on for accurate answers, this was a dealbreaker.
+
+I wanted to try Claude to see if it would do better. Spoiler: it did.
+
+## Why Switch?
+
+The specific issues with Gemini 2.5 Flash Lite:
+
+1. **False information** - It would fabricate answers instead of saying "I don't know"
+2. **Hallucinated sources** - It would reference documents that weren't in the knowledge base
+3. **Mixed-up details** - It would combine information from different documents into wrong answers
+
+For a general chatbot, some hallucination is tolerable. For an internal support bot where people trust the answers to make decisions, it's not.
+
+I'd heard Claude was better at staying grounded in provided context and admitting when it doesn't know something. Worth a try.
+
+## The Good News: Claude is on Vertex AI
+
+I was dreading the idea of setting up a completely separate API, managing new credentials, dealing with a different auth flow. But it turns out Anthropic's Claude models are available directly on Vertex AI through [Model Garden](https://console.cloud.google.com/vertex-ai/model-garden).
+
+This means:
+
+- Same GCP project, same billing
+- Same service account authentication
+- No new API keys to manage
+- Just a different SDK and model name
+
+## Enabling Claude on Vertex AI
+
+Before you can use Claude, you need to enable it in Model Garden:
+
+1. Go to **Vertex AI** > **Model Garden** in GCP Console
+2. Search for "Claude Sonnet"
+3. Click **Enable** - you'll need to fill out a form with your business info
+4. Accept Anthropic's terms of service
+
+The form asks about your business, intended use cases, and whether your use case falls under Anthropic's Acceptable Use Policy. For an internal Slack bot, it's straightforward - just describe what you're building.
+
+Approval was quick in my case.
+
+## The Migration
+
+### 1. Swap the SDK
+
+Out with `google-cloud-aiplatform`, in with `anthropic[vertex]`:
+
+```toml
+# pyproject.toml
+dependencies = [
+    "anthropic[vertex]>=0.52.0",  # was google-cloud-aiplatform>=1.121.0
+    # ... rest unchanged
+]
+```
+
+### 2. Update Config
+
+```python
+# app/utils/config.py
+
+# Before
+GEMINI_LOCATION = "us-central1"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
+
+# After
+CLAUDE_LOCATION = "global"
+CLAUDE_MODEL = "claude-sonnet-4-6"
+```
+
+Two things to note:
+
+- **Region is `"global"`** - Claude on Vertex AI supports a global endpoint, unlike Gemini which required a specific region like `us-central1`
+- **Model ID format** - It's `claude-sonnet-4-6`, not the `model@date` format you might see in older docs
+
+### 3. Rewrite the Service
+
+This was the biggest change. The Gemini SDK and Anthropic SDK have fundamentally different APIs.
+
+**Gemini approach:**
+
+```python
+import vertexai
+from vertexai.generative_models import GenerativeModel, ChatSession
+
+vertexai.init(project=project_id, location=location)
+model = GenerativeModel(model_name, system_instruction=system_prompt)
+chat = model.start_chat()
+response = chat.send_message("Hello")
+print(response.text)
+```
+
+**Claude approach:**
+
+```python
+from anthropic import AnthropicVertex
+
+client = AnthropicVertex(project_id=project_id, region=location)
+response = client.messages.create(
+    model=model_name,
+    max_tokens=4096,
+    system=system_prompt,
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.content[0].text)
+```
+
+Key differences:
+
+|                   | Gemini                                  | Claude                                    |
+| ----------------- | --------------------------------------- | ----------------------------------------- |
+| **Init**          | `vertexai.init()` + `GenerativeModel()` | `AnthropicVertex()`                       |
+| **System prompt** | Baked into model instance               | Passed per API call                       |
+| **Chat history**  | Managed by `ChatSession`                | You manage it yourself (list of messages) |
+| **Response**      | `response.text`                         | `response.content[0].text`                |
+| **Statefulness**  | Stateful chat sessions                  | Stateless - send full history each time   |
+
+The biggest difference is chat history management. With Gemini, `ChatSession` tracks the conversation for you. With Claude, you maintain a list of `{"role": "user/assistant", "content": "..."}` messages and send the full list on every request.
+
+Here's the core of the new service:
+
+```python
+from anthropic import AnthropicVertex
+from anthropic.types import MessageParam, TextBlock
+
+
+class ClaudeService:
+    def __init__(self) -> None:
+        self.client = AnthropicVertex(
+            project_id=self.project_id, region=self.location
+        )
+        self.chat_histories: dict[str, list[MessageParam]] = {}
+
+    def _send_message(self, messages: list[MessageParam]) -> str:
+        response = self.client.messages.create(
+            model=self.model_name,
+            max_tokens=4096,
+            system=self.system_instruction,
+            messages=messages,
+        )
+        block = response.content[0]
+        assert isinstance(block, TextBlock)
+        return block.text
+
+    def generate_response_sync(
+        self, user_id: str, message: str, use_context: bool = True
+    ) -> str:
+        if use_context:
+            history = self.get_chat_history(user_id)
+            history.append({"role": "user", "content": message})
+            reply = self._send_message(history)
+            history.append({"role": "assistant", "content": reply})
+        else:
+            reply = self._send_message(
+                [{"role": "user", "content": message}]
+            )
+        return markdown_to_slack(reply)
+```
+
+### 4. Update All Imports
+
+Since I renamed the file from `gemini.py` to `claude.py` and the service from `GeminiService` to `ClaudeService`, I had to update imports everywhere:
+
+```python
+# Before
+from app.services.gemini import get_gemini_service
+gemini = get_gemini_service()
+response = gemini.generate_response_sync(user, text)
+
+# After
+from app.services.claude import get_claude_service
+claude = get_claude_service()
+response = claude.generate_response_sync(user, text)
+```
+
+Files touched: `main.py`, `slack_events.py`, `workflow_handler.py`, and all test files.
+
+## Type Safety Gotcha
+
+This one caught me off guard. Locally, `mypy` passed fine. But in GitHub Actions, it failed with 23 errors:
+
+```
+error: Argument "messages" to "create" of "Messages" has incompatible type
+  "list[dict[Any, Any]]"; expected "Iterable[MessageParam]"
+
+error: Item "ThinkingBlock" of "TextBlock | ThinkingBlock | RedactedThinkingBlock |
+  ToolUseBlock | ..." has no attribute "text"
+```
+
+Two issues:
+
+**1. Message typing** - Claude's API expects `MessageParam` (a TypedDict), not plain `dict`:
+
+```python
+# Before
+self.chat_histories: dict[str, list[dict]] = {}
+
+# After
+from anthropic.types import MessageParam
+self.chat_histories: dict[str, list[MessageParam]] = {}
+```
+
+**2. Response block type** - `response.content[0]` could be a `TextBlock`, `ThinkingBlock`, `ToolUseBlock`, etc. You need to narrow the type:
+
+```python
+# Before - mypy doesn't like this
+return response.content[0].text
+
+# After - explicit type narrowing
+from anthropic.types import TextBlock
+
+block = response.content[0]
+assert isinstance(block, TextBlock)
+return block.text
+```
+
+The `assert` serves double duty: it satisfies mypy AND acts as a runtime safety check. If Claude ever returns a non-text block, you'll get a clear `AssertionError` instead of a confusing `AttributeError`.
+
+## What Stayed the Same
+
+Everything outside the LLM service was untouched:
+
+- Cloud Run deployment
+- GCS memory/knowledge base
+- Slack handlers (just updated imports)
+- GitHub Actions CI/CD
+- System prompts (worked as-is with Claude)
+
+The service interface (`generate_response_sync`, `generate_document`, `reload_memory`) stayed identical. The handlers don't care which LLM is behind the service - they just call the same methods and get strings back.
+
+## First Impressions
+
+After deploying and testing:
+
+**The good:**
+
+- Claude actually says "I don't know" when the answer isn't in the knowledge base, instead of making something up
+- Responses are more grounded in the provided context
+- It cites the right sources
+- Response quality feels noticeably better for our Japanese-language support use case
+
+**The different:**
+
+- Response times are comparable (both go through Vertex AI)
+- The `global` endpoint means less regional latency headache
+- `max_tokens` is required per request (Gemini infers it)
+
+**The verdict:** For a knowledge-base bot where accuracy matters more than speed, Claude has been a clear improvement. The hallucination issue that motivated the switch hasn't come back.
+
+## Wrapping Up
+
+The migration took about an hour of actual coding. Most of the changes were mechanical - swap SDK, rewrite one service file, update imports. The hardest part was the mypy type issues, which only showed up in CI.
+
+**If you're considering the switch:**
+
+1. Claude is available on Vertex AI - no need to leave GCP
+2. Enable it in Model Garden first (requires approval form)
+3. The Anthropic Vertex SDK is well-documented and straightforward
+4. Your system prompts will likely work as-is
+5. Budget time for type annotation fixes if you use mypy
+
+The fact that both models are available on the same platform made this much less scary than it could have been. If Claude doesn't work out, switching back would be just as easy.
