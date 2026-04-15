@@ -235,7 +235,7 @@ gcloud run services add-iam-policy-binding your-service \
 ### Step 4: Create the Push Subscription
 
 ```bash
-gcloud pubsub subscriptions create gcs-memory-push \
+gcloud pubsub subscriptions create gcs-memory-reload \
   --topic=gcs-memory-updates \
   --push-endpoint=https://your-cloud-run-url/admin/reload-memory \
   --push-auth-service-account=your-sa@your-project.iam.gserviceaccount.com \
@@ -243,7 +243,15 @@ gcloud pubsub subscriptions create gcs-memory-push \
   --project=your-project
 ```
 
-**Verify:** Cloud Console > Pub/Sub > Subscriptions > `gcs-memory-push` - check delivery type is Push with the correct endpoint and authentication enabled.
+The default `ackDeadlineSeconds` is 10, which can be tight if your reload fetches a lot of data from GCS (e.g. loading hundreds of LP archive entries). If Pub/Sub doesn't get an ACK in time, it retries — harmless since reload is idempotent, but noisy. Bump it to 30 seconds:
+
+```bash
+gcloud pubsub subscriptions update gcs-memory-reload \
+  --ack-deadline=30 \
+  --project=your-project
+```
+
+**Verify:** Cloud Console > Pub/Sub > Subscriptions > `gcs-memory-reload` - check delivery type is Push with the correct endpoint and authentication enabled.
 
 ## Testing the Full Pipeline
 

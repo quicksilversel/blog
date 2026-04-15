@@ -1,0 +1,371 @@
+---
+title: 'Adding Similar Case Recommendations: A Second Feature Without a Second Bot'
+description: 'How I added a case archive search feature to an existing Slack support bot - from arguing against a separate service, to skipping FAISS for 600 records, to automating a CMS-to-GCS data pipeline.'
+topics: ['Python', 'GCP', 'Claude', 'Architecture']
+published: true
+date: '2026-04-15'
+---
+
+## Intro
+
+After [migrating to Claude](/projects/slack-gemini-bot/migrating-from-gemini-to-claude), the bot was doing well at Q&A. Then someone asked: "Can we also recommend similar past cases when someone's planning a new project?"
+
+The idea: our team has an archive of ~600 past campaign pages in a headless CMS, tagged with categories, tech used, design approach, etc. When someone submits a pre-proposal consultation, the bot should find similar past cases and recommend them.
+
+Simple enough. Then came the architecture debate.
+
+## The "Separate Bot" Debate
+
+A colleague suggested building this as a completely separate bot. The reasoning made sense on paper:
+
+- Different purpose (Q&A vs. case search)
+- Different data source (knowledge markdown vs. CMS archive)
+- Different prompt
+- Mixing them would cause prompt bloat, cross-contamination, and coupled failure modes
+
+Those are legitimate concerns. But looking at the existing codebase, the bot already handles three distinct flows (channel mentions, DMs, workflow submissions) with different prompts and different data, all routed by a single message handler. The separation they were worried about already existed at the code level, just not at the infrastructure level.
+
+The cost of a separate service was harder to justify: double the Cloud Run instances, double the GCS buckets, double the CI/CD pipelines, double the secrets management, and double the things to monitor. All for something that shares the same Slack app, same GCP project, and same authentication.
+
+We landed on a middle ground: same service, same repo, but completely separate handler + prompt + data path. The features are isolated in code, just not in infrastructure. And if it causes problems down the line, splitting it out is always an option since it's easier to split later than to merge later.
+
+## Why Not FAISS?
+
+My first instinct was to build a proper similarity search with FAISS or some vector database. Then I looked at the actual data:
+
+- ~600 records
+- Each record is mostly tags (category, tech stack, design style) with a title and URL
+- Total data size: ~400KB of JSON
+- Claude's context window: 200K tokens
+
+400KB of structured tag data fits comfortably in Claude's context. And the data is **tag-based**, not free text - embedding models aren't great at computing meaningful distances between categorical tags like `["sale", "seasonal"]` vs `["new-store-opening"]`.
+
+Claude, on the other hand, understands the semantic relationship between these tags natively. It can reason about "the user wants a seasonal sale page with animation" and match that against tags across 600 records better than cosine similarity on tag embeddings would.
+
+**The approach:** Pass all 600 records directly in the system prompt. One API call, no vector database, no embedding model, no index management. If the archive grows to thousands of records, we can revisit. For now, this is simpler and works better.
+
+### Making It Token-Efficient
+
+Passing raw JSON would waste tokens. Instead, I format each record as a compact one-liner:
+
+```python
+# Fields to include in context: (json_key, display_label)
+CONTEXT_FIELDS = [
+    ("category", "cat"),
+    ("tags", "tags"),
+    ("date", "date"),
+    ("url", "url"),
+]
+
+def get_context_text(self) -> str:
+    lines = [f"[Case Archive: {len(self.data)} total]"]
+
+    for i, case in enumerate(self.data, 1):
+        parts = [f"{i}. {case.get('title', 'N/A')}"]
+
+        for key, label in CONTEXT_FIELDS:
+            value = case.get(key)
+            if not value:
+                continue
+            if isinstance(value, list):
+                parts.append(f"{label}:{', '.join(value)}")
+            elif key == "date":
+                parts.append(f"{label}:{value[:10]}")
+            else:
+                parts.append(f"{label}:{value}")
+
+        lines.append(" | ".join(parts))
+
+    return "\n".join(lines)
+```
+
+Output looks like:
+
+```
+[Case Archive: 600 total]
+1. Holiday Campaign 2026 | cat:seasonal | tech:scroll-animation | design:parallax | date:2026-03-01 | url:https://...
+2. Product Launch Page | cat:launch | tech:vanilla-js | date:2026-02-15 | url:https://...
+```
+
+Each record is one line, ~100-200 tokens. 600 records = ~60K-120K tokens in the system prompt. Well within limits, and since the data only changes weekly, Anthropic's prompt caching kicks in across requests.
+
+## The Data Pipeline
+
+The case archive lives in a headless CMS with a GraphQL API. I needed to:
+
+1. Fetch the data weekly
+2. Transform it to a clean JSON format
+3. Upload to GCS (same bucket as the knowledge base)
+
+### The Fetch Script
+
+A standalone Python script using only stdlib (no app dependencies, since it runs in CI):
+
+```python
+#!/usr/bin/env python3
+
+import json
+import sys
+import urllib.request
+from pathlib import Path
+
+API_URL = "https://cms.example.com/api/cases"
+
+def fetch_cases() -> list[dict]:
+    req = urllib.request.Request(API_URL)
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = json.loads(response.read().decode("utf-8"))
+
+    items = (raw.get("data") or {}).get("cases") or []
+
+    # Filter out entries without a title, sort newest first
+    result = [item for item in items if item.get("title")]
+    result.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return result
+
+def main() -> None:
+    output_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("archive.json")
+
+    data = fetch_cases()
+
+    if not data:
+        print("Error: No data received", file=sys.stderr)
+        sys.exit(1)
+
+    output_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Done: {len(data)} cases written to {output_path}")
+```
+
+Key design decisions:
+
+- **Stdlib only** (`urllib`, `json`) - no `requests` dependency. This runs in a bare CI environment, and adding `requests` just for one HTTP call isn't worth it.
+- **Output path as argument** - the script writes to wherever you tell it, so CI can write to a temp file before uploading.
+- **Null-safe chaining** - the CMS GraphQL response can have `None` at any level, so `(x or {}).get(...)` everywhere.
+
+### The GitHub Actions Workflow
+
+```yaml
+name: Deploy Case Archive Data (CMS → GCS)
+
+on:
+  schedule:
+    - cron: '0 1 * * 1' # Monday 10:00 JST
+  workflow_dispatch:
+
+env:
+  GCS_BUCKET: your-bot-memory
+  GCS_PATH: data/case_archive.json
+
+jobs:
+  fetch-and-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Fetch data from CMS
+        run: python scripts/fetch_archive.py archive.json
+
+      - name: Upload to GCS
+        run: gsutil cp archive.json gs://${{ env.GCS_BUCKET }}/${{ env.GCS_PATH }}
+```
+
+No PR, no JSON committed to the repo, no merge step. The script fetches from the CMS and uploads straight to GCS. If you already have [Pub/Sub auto-reload](/projects/slack-gemini-bot/auto-refreshing-gcs-memory-with-pubsub) set up, the bot picks up the new data automatically.
+
+### How I Got Here: Three Approaches to Data Storage
+
+This wasn't the first design. I went through three iterations before landing on direct GCS upload.
+
+**Attempt 1: Commit JSON to the repo, bake into Docker image**
+
+The initial approach. The weekly GHA would fetch from the CMS, commit the JSON to the repo, create a PR for review, and after merge the deploy workflow would build a new Docker image with the data baked in.
+
+This worked, but it felt wrong immediately:
+
+- 400KB JSON file polluting git history, growing every week
+- Every data update triggers a full Docker rebuild + Cloud Run redeploy
+- Weekly PRs with 600-line JSON diffs that nobody actually reviews
+- The `Dockerfile` needed a `COPY data/ ./data/` line just for one file
+
+**Attempt 2: Commit to repo, upload to GCS on deploy**
+
+Next I tried a hybrid: keep the JSON in the repo for reviewability, but read it from GCS at runtime instead of from the filesystem. The deploy workflow would `gsutil cp` the JSON to GCS alongside the Docker deploy.
+
+Better - no more baking data into the image. But it still had the git history bloat and the weekly noise PRs. And the deploy workflow was doing two unrelated things (deploy app + upload data) which meant a data-only change still triggered a full deploy.
+
+**Attempt 3 (final): Direct CMS → GCS, no repo involvement**
+
+The realization: nobody was actually reviewing those JSON diffs. 600 records of CMS-generated tag data isn't something you eyeball for correctness. If the CMS data is wrong, you'd catch it from the bot's responses, not from a PR diff.
+
+So I cut the repo out entirely. The GHA fetches from the CMS and uploads straight to GCS. The JSON never touches git. The app reads it from GCS at runtime via the same `MemoryService` that loads knowledge files.
+
+Benefits:
+- Zero git history bloat
+- No weekly noise PRs
+- Data updates are decoupled from app deploys
+- The existing `OBJECT_FINALIZE` → Pub/Sub → `/admin/reload-memory` pipeline handles cache invalidation automatically
+- If you need to debug the data, `gsutil cat gs://your-bucket/data/archive.json` is right there
+
+## Routing by Workflow
+
+The existing bot routes messages by channel + workflow ID. Adding the new feature was the same pattern:
+
+```python
+# app/handlers/router.py
+
+@app.event("message")
+def _message(event, say, client, logger):
+    bot_id = event.get("bot_id")
+    channel = event.get("channel")
+
+    # Route 1: Knowledge submission workflow
+    if bot_id and channel == KNOWLEDGE_CHANNEL_ID:
+        # ... dispatch to knowledge handler
+
+    # Route 2: Case consultation workflow
+    if bot_id and channel == CONSULTATION_CHANNEL_ID:
+        metadata = event.get("metadata", {})
+        workflow_id = metadata.get("event_payload", {}).get("workflow_id")
+
+        if CONSULTATION_WORKFLOW_ID and workflow_id != CONSULTATION_WORKFLOW_ID:
+            return
+
+        if _is_duplicate(f"consultation:{event.get('event_ts')}"):
+            return
+
+        handle_consultation(event, say, client, logger)
+        return
+
+    if bot_id:
+        return
+
+    # Route 3: DMs
+    if event.get("channel_type") == "im":
+        handle_dm(event, say, logger)
+```
+
+Each route checks channel + workflow ID, deduplicates, and delegates to a feature handler. The router doesn't know or care what each handler does.
+
+## Parsing Workflow Form Messages
+
+Slack Workflow forms arrive as plain text with field labels. I parse out just the consultation content:
+
+```python
+@dataclass
+class ConsultationFormData:
+    consultation: str
+    reference_url: Optional[str] = None
+
+
+def parse_consultation_message(text: str) -> ConsultationFormData:
+    consultation_lines = []
+    reference_url = None
+    current_field = None
+
+    for line in text.strip().split("\n"):
+        if "Reference URL" in line:
+            current_field = "url"
+        elif "Consultation" in line:
+            current_field = "consultation"
+        elif current_field == "url" and not reference_url:
+            url_match = re.search(r"https?://[^\s<>]+", line)
+            if url_match:
+                reference_url = url_match.group(0)
+        elif current_field == "consultation":
+            consultation_lines.append(line)
+
+    consultation = "\n".join(consultation_lines).strip()
+
+    # Fall back to full text if parsing fails
+    if not consultation:
+        consultation = text.strip()
+
+    return ConsultationFormData(
+        consultation=consultation,
+        reference_url=reference_url,
+    )
+```
+
+The fallback is important - if the message format changes, the bot degrades to passing the full text to Claude rather than breaking entirely.
+
+## The Refactoring That Came After
+
+Adding this feature exposed a structural problem. The original codebase had:
+
+- **`slack_events.py`** (290 lines) - routing + Q&A logic + feedback handlers + help command
+- **`claude.py`** (250 lines) - Q&A generation + document generation + case consultation, all in one class
+
+Every feature was mixed into two god files. Adding the consultation feature made it obvious.
+
+### Splitting the Services
+
+The AI service was doing three unrelated things with one shared Anthropic client. I split it:
+
+```
+Before:
+  claude.py (ClaudeService - does everything)
+
+After:
+  claude_client.py   → Shared Anthropic client + send_message()
+  qa_service.py      → Q&A: system prompt + memory + chat history
+  knowledge_service.py → Document generation: DCP prompt + GCS
+  consultation_service.py → Case search: archive prompt + CMS data
+```
+
+Each service owns its own prompt, data loading, and error handling. They share only the Anthropic client.
+
+### Splitting the Handlers
+
+Same idea for the Slack handlers:
+
+```
+Before:
+  slack_events.py (routing + Q&A + feedback + help, all inline)
+
+After:
+  router.py           → Routing + dedup only
+  qa_handler.py       → Mention + DM handling
+  feedback_handler.py → Thumbs up/down
+  knowledge_handler.py → Knowledge submission (renamed from workflow_handler.py)
+  consultation_handler.py → Case consultation
+```
+
+The router became a thin dispatch layer. Each handler file has one job.
+
+### Was It Worth It?
+
+98 tests, zero behavior changes, same test count before and after. The refactoring was purely structural. But now when I look at the codebase, I can tell what each file does from its name. Adding a fifth feature would be: one new handler, one new service, one new route in the router.
+
+## Wrapping Up
+
+The full pipeline:
+
+1. **Weekly:** GitHub Actions fetches from CMS → uploads JSON to GCS
+2. **On GCS update:** Pub/Sub notifies Cloud Run → bot reloads archive data
+3. **On consultation:** User submits Slack Workflow form → bot parses consultation text → Claude matches against 600 archived cases in context → bot responds with 3-5 similar cases + rationale
+
+**Key takeaways:**
+
+1. **Don't build a separate service when a route will do** - Same Slack app, same GCP project, same auth. A new handler is cheaper than a new service in every dimension.
+2. **FAISS is overkill for small, tag-based datasets** - 600 records of categorical tags fit in Claude's context window. Let the LLM do the semantic matching instead of building a similarity search pipeline.
+3. **Separate data pipelines from app deployments** - CMS data changes weekly, app code changes irregularly. Don't couple them. GCS + Pub/Sub decouples data freshness from deploy cycles.
+4. **God files are a smell, not a crisis** - The single `claude.py` worked fine for two features. It got painful at three. Refactor when it hurts, not before.
+5. **Prompt caching makes context-heavy approaches viable** - Passing 600 records in every system prompt sounds expensive, but with prompt caching, the static data is cached across requests. You only pay full price once per cache window.
