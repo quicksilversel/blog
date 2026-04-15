@@ -1,0 +1,261 @@
+---
+title: 'MSW v1 to v2: The Jest Setup Nobody Warns You About'
+description: 'Migrating MSW from v1 to v2 sounds straightforward until your test suite explodes. A walkthrough of the polyfills, fetch replacements, and config changes needed to make Jest work with MSW v2.'
+date: 2026-04-14
+topics: ['MSW', 'Jest', 'Next.js']
+published: true
+---
+
+## It Started Simple
+
+The [MSW v2 migration guide](https://mswjs.io/docs/migrations/1.x-to-2.x/) is well-written. It walks you through the API changes: `rest` becomes `http`, `res(ctx.json(data))` becomes `HttpResponse.json(data)`, types get renamed. Straightforward stuff. I read through it, thought "this won't take long," and started updating handler files.
+
+The handler changes were indeed mechanical. But when I ran `npm test`, everything fell apart. Not because of the API changes — because of what MSW v2 now expects from the environment it runs in.
+
+## The Handler Changes (The Easy Part)
+
+Before diving into the hard stuff, here's what the handler migration looks like. This part is genuinely simple:
+
+```ts
+// v1
+import { rest } from 'msw'
+import type { ResponseResolver, RestRequest, RestContext } from 'msw'
+
+export const handler = rest.get('/api/items', resolve)
+
+export const resolve: ResponseResolver<RestRequest, RestContext> = (
+  req,
+  res,
+  ctx,
+) => {
+  const limit = Number(req.url.searchParams.get('limit'))
+  return res(ctx.json({ items: [], limit }))
+}
+```
+
+```ts
+// v2
+import { http, HttpResponse } from 'msw'
+import type { HttpResponseResolver } from 'msw'
+
+export const handler = http.get('/api/items', resolve)
+
+export const resolve: HttpResponseResolver = ({ request }) => {
+  const url = new URL(request.url)
+  const limit = Number(url.searchParams.get('limit'))
+  return HttpResponse.json({ items: [], limit })
+}
+```
+
+The pattern is consistent across every handler: `rest` → `http`, the three-argument callback `(req, res, ctx)` becomes a single destructured object `({ request })`, and `res(ctx.json())` becomes `HttpResponse.json()`. For network errors, `res.networkError('Failed')` becomes `HttpResponse.error()`. For passthrough requests, `req.passthrough()` becomes the `passthrough()` function imported from `msw`.
+
+Other small changes:
+
+- `setupWorker` import moves from `msw` to `msw/browser`
+- `RequestHandler` type becomes `HttpHandler`
+- URL params are accessed via `new URL(request.url)` instead of `req.url.searchParams`
+
+If this was all there was to it, the migration would take an hour. But it wasn't.
+
+## The Real Problem: jsdom Doesn't Have Web APIs
+
+MSW v2 is built on web standards. It uses `TextEncoder`, `TextDecoder`, `ReadableStream`, `WritableStream`, `TransformStream`, and `BroadcastChannel` internally. These are all available in modern browsers and Node.js — but not in jsdom.
+
+Jest with jsdom is the standard setup for testing React components. jsdom simulates a browser environment, but it doesn't implement every Web API. MSW v1 worked around this by using Node.js-specific polyfills internally. MSW v2 dropped that approach and expects these APIs to exist globally.
+
+The first error I hit was something like:
+
+```
+ReferenceError: TextEncoder is not defined
+```
+
+The fix is to polyfill everything MSW v2 needs in `jest/setup.ts`, before any other imports:
+
+```ts
+import { TransformStream, ReadableStream, WritableStream } from 'stream/web'
+import { TextEncoder, TextDecoder } from 'util'
+import { BroadcastChannel } from 'worker_threads'
+
+if (typeof globalThis.TextEncoder === 'undefined') {
+  globalThis.TextEncoder = TextEncoder
+}
+if (typeof globalThis.TextDecoder === 'undefined') {
+  globalThis.TextDecoder = TextDecoder as typeof globalThis.TextDecoder
+}
+if (typeof globalThis.TransformStream === 'undefined') {
+  globalThis.TransformStream =
+    TransformStream as typeof globalThis.TransformStream
+}
+if (typeof globalThis.ReadableStream === 'undefined') {
+  globalThis.ReadableStream = ReadableStream as typeof globalThis.ReadableStream
+}
+if (typeof globalThis.WritableStream === 'undefined') {
+  globalThis.WritableStream = WritableStream as typeof globalThis.WritableStream
+}
+if (typeof globalThis.BroadcastChannel === 'undefined') {
+  globalThis.BroadcastChannel =
+    BroadcastChannel as typeof globalThis.BroadcastChannel
+}
+```
+
+The `typeof` checks aren't strictly necessary in jsdom (they'll always be undefined), but they make the setup defensive — if a future jsdom version adds support, you won't get conflicts.
+
+The order matters here. These polyfills must come before `@testing-library/jest-dom` or any other import that might trigger MSW initialization.
+
+## Replacing whatwg-fetch with undici
+
+After fixing the Web API polyfills, I hit the next wall. Our setup was using `whatwg-fetch` to polyfill the Fetch API in jsdom:
+
+```ts
+// Before
+if (typeof window !== 'undefined') {
+  require('whatwg-fetch')
+}
+```
+
+This worked fine with MSW v1, but MSW v2's `HttpResponse.error()` creates a `Response` with status `0` — a network error response. `whatwg-fetch`'s `Response` implementation doesn't handle this correctly and throws.
+
+The fix is to use `undici`, which is the HTTP client that Node.js uses internally for its native `fetch`. Since it's the same implementation, it handles all edge cases correctly:
+
+```ts
+if (typeof window !== 'undefined') {
+  const undici = require('undici')
+  globalThis.fetch = undici.fetch
+  globalThis.Response = undici.Response
+  globalThis.Request = undici.Request
+  globalThis.Headers = undici.Headers
+}
+```
+
+This swap means replacing `whatwg-fetch` with `undici` in `devDependencies` too:
+
+```diff
+- "whatwg-fetch": "^3.6.2"
++ "undici": "^5.28.4"
+```
+
+## The Jest Config Changes
+
+Even after the polyfills, tests were failing with import errors. MSW v2 depends on packages like `rettime` and `until-async` that ship as ESM-only. Jest's default `transformIgnorePatterns` skips everything in `node_modules/`, so these ESM packages don't get transformed and fail to import.
+
+I was already handling a few ESM packages, but the approach needed restructuring:
+
+```ts
+// Before
+const esm = ['@example/icons', '@example/components', 'swiper']
+
+// ...
+const getConfig = async (): Promise<Config> => {
+  const jestConfig = await createJestConfig(config)()
+  return {
+    ...jestConfig,
+    transformIgnorePatterns:
+      jestConfig.transformIgnorePatterns?.filter(
+        (pattern: string | RegExp) => pattern !== '/node_modules/',
+      ) ?? [],
+  }
+}
+```
+
+The old approach just removed the `/node_modules/` pattern entirely, which meant Jest would try to transform everything in `node_modules/`. This worked but was slow. The new approach explicitly lists which packages to transform:
+
+```ts
+const esm = [
+  '@example/icons',
+  '@example/components',
+  'swiper',
+  'rettime',
+  'until-async',
+]
+
+const getConfig = async (): Promise<Config> => {
+  const jestConfig = await createJestConfig(config)()
+  return {
+    ...jestConfig,
+    transformIgnorePatterns: [
+      `/node_modules/(?!(${esm.join('|')})/)`,
+      ...(jestConfig.transformIgnorePatterns?.filter(
+        (pattern: string | RegExp) =>
+          typeof pattern === 'string' && !pattern.includes('/node_modules/'),
+      ) ?? []),
+    ],
+    testEnvironmentOptions: {
+      ...jestConfig.testEnvironmentOptions,
+      customExportConditions: ['node', 'node-addons'],
+    },
+  }
+}
+```
+
+Two changes here:
+
+1. **`transformIgnorePatterns`** now uses a negative lookahead regex to only transform the listed ESM packages, instead of removing the `node_modules` exclusion entirely.
+
+2. **`customExportConditions`** is new and critical. MSW v2 uses the `exports` field in `package.json` with conditional exports. Without `['node', 'node-addons']`, Jest resolves the wrong entry point and you get cryptic import errors.
+
+## The Storybook Side
+
+If you use `msw-storybook-addon`, it needs to be upgraded too:
+
+```diff
+- "msw-storybook-addon": "^1.8.0"
++ "msw-storybook-addon": "^2.0.7"
+```
+
+And the handler syntax in stories follows the same v1 → v2 pattern:
+
+```ts
+// v1
+import { rest } from 'msw'
+
+parameters: {
+  msw: {
+    handlers: [
+      rest.get('/api/stock', (_, res, ctx) => {
+        return res(ctx.json({ stock: 10 }))
+      }),
+    ],
+  },
+}
+```
+
+```ts
+// v2
+import { http, HttpResponse } from 'msw'
+
+parameters: {
+  msw: {
+    handlers: [
+      http.get('/api/stock', () => {
+        return HttpResponse.json({ stock: 10 })
+      }),
+    ],
+  },
+}
+```
+
+Don't forget to regenerate `mockServiceWorker.js` with `npx msw init public/` — the service worker file changed significantly between v1 and v2.
+
+## The Full Checklist
+
+If you're doing this migration in a Next.js + Jest project, here's everything in order:
+
+1. Update `msw` to v2 and `msw-storybook-addon` to v2 (if applicable)
+2. Replace `whatwg-fetch` with `undici` in devDependencies
+3. Add Web API polyfills to your Jest setup file (before other imports)
+4. Replace `whatwg-fetch` with `undici`'s fetch/Response/Request/Headers in the setup
+5. Add `rettime` and `until-async` to your ESM transform list
+6. Add `customExportConditions: ['node', 'node-addons']` to `testEnvironmentOptions`
+7. Update all handlers: `rest` → `http`, `res(ctx.*)` → `HttpResponse.*`
+8. Update types: `ResponseResolver<RestRequest, RestContext>` → `HttpResponseResolver`, `RequestHandler` → `HttpHandler`
+9. Update `setupWorker` import from `msw` to `msw/browser`
+10. Regenerate `mockServiceWorker.js`
+11. Run tests, fix any remaining issues
+
+## What I'd Do Differently
+
+If I could redo this, I'd start with the Jest setup changes (steps 2-6) before touching any handler code. The handler changes are mechanical and easy to verify — but if your test environment isn't set up correctly, every test fails and you can't tell if your handler changes are correct.
+
+I spent time debugging handler code that was actually fine. The tests were failing because of missing polyfills, not because of incorrect handler syntax.
+
+The MSW migration guide focuses on the API changes because that's what MSW controls. The Jest environment setup is technically Jest's problem, not MSW's. But in practice, it's the part that takes the most time and causes the most confusion.
