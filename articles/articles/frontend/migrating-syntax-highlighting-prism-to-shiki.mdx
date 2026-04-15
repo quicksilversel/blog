@@ -1,0 +1,188 @@
+---
+title: 'Migrating Syntax Highlighting from Prism to Shiki'
+description: 'Why I replaced prism-react-renderer with shiki for code highlighting in my Next.js blog, and how the migration went.'
+topics: ['shiki', 'mdx']
+published: true
+date: '2026-04-15'
+---
+
+## Why Switch?
+
+I wrote about [setting up Prism](/articles/frontend/mdx-syntax-highlighting-prism) a while back. It worked well. `prism-react-renderer` is simple to set up and gets the job done. But after using it for a while, I started noticing places where the highlighting was off. TypeScript generics would sometimes confuse the tokenizer, and JSX mixed with complex expressions didn't always come out right.
+
+Prism uses regex-based tokenization. It works for most cases, but regex has limits, especially with nested syntax like TypeScript's type system or embedded expressions in JSX.
+
+[Shiki](https://shiki.matsu.io/) uses the same TextMate grammars that power VS Code. The highlighting is noticeably more accurate, and you get access to VS Code's entire theme ecosystem.
+
+## Dependencies
+
+Versions used when this was written:
+
+- [Next.js](https://nextjs.org/): 16.2.3
+- [shiki](https://shiki.matsu.io/): 4.0.2
+- [React](https://react.dev/): 19.2.3
+- [react-markdown](https://github.com/remarkjs/react-markdown): 10.1.0
+
+## Install
+
+```bash
+npm install shiki
+npm uninstall prism-react-renderer
+```
+
+## The Async Problem
+
+Shiki's main API is async. It needs to load grammars and themes before it can highlight anything. That doesn't play well with `react-markdown`, which renders components synchronously through its `components` prop.
+
+There are a few ways around this:
+
+1. Use `@shikijs/rehype` as a rehype plugin (but `react-markdown` calls `processSync` internally)
+2. Pre-process markdown on the server before passing it to the renderer
+3. Use shiki's synchronous core API with bundled grammars
+
+I went with option 3. Shiki provides `createHighlighterCoreSync` which lets you import grammars as JavaScript modules and create a highlighter that works synchronously. No WASM, no async initialization.
+
+## Highlighter Setup
+
+Created a module that initializes a sync highlighter with the languages I use on this blog:
+
+```ts
+import { createHighlighterCoreSync } from 'shiki/core'
+import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+import githubDark from 'shiki/themes/github-dark.mjs'
+import langBash from 'shiki/langs/bash.mjs'
+import langCss from 'shiki/langs/css.mjs'
+import langDiff from 'shiki/langs/diff.mjs'
+import langHtml from 'shiki/langs/html.mjs'
+import langJavascript from 'shiki/langs/javascript.mjs'
+import langJson from 'shiki/langs/json.mjs'
+import langJsx from 'shiki/langs/jsx.mjs'
+import langMarkdown from 'shiki/langs/markdown.mjs'
+import langTsx from 'shiki/langs/tsx.mjs'
+import langTypescript from 'shiki/langs/typescript.mjs'
+import langYaml from 'shiki/langs/yaml.mjs'
+
+const highlighter = createHighlighterCoreSync({
+  themes: [githubDark],
+  langs: [
+    langBash,
+    langCss,
+    langDiff,
+    langHtml,
+    langJavascript,
+    langJson,
+    langJsx,
+    langMarkdown,
+    langTsx,
+    langTypescript,
+    langYaml,
+  ],
+  engine: createJavaScriptRegexEngine(),
+})
+
+export function highlightCode(code: string, lang: string) {
+  try {
+    return highlighter.codeToTokensBase(code, {
+      lang,
+      theme: 'github-dark',
+    })
+  } catch {
+    return highlighter.codeToTokensBase(code, {
+      lang: 'plaintext',
+      theme: 'github-dark',
+    })
+  }
+}
+```
+
+A few things worth noting:
+
+- **`createJavaScriptRegexEngine`** uses a pure JS regex engine instead of Oniguruma (WASM). It's lighter and works synchronously. For blog code blocks, the accuracy difference is negligible.
+- **Language imports use `.mjs`**. These are pre-compiled grammar bundles that can be imported synchronously.
+- **The try/catch** handles cases where a code block specifies a language I haven't loaded. It falls back to plain text instead of crashing.
+
+## Updating the Component
+
+The previous version used Prism's `Highlight` render prop to tokenize code. Shiki's `codeToTokensBase` returns a similar structure, an array of lines, where each line is an array of tokens with `content` and `color` properties.
+
+The component interface stays the same. It still receives a `<pre>` element from `react-markdown` with a `<code>` child:
+
+```tsx
+import { highlightCode } from '@/libs/shiki'
+
+export const HighlightedCode = ({ children }: Props) => {
+  const [copied, setCopied] = useState(false)
+
+  const codeElement = isValidElement<CodeProps>(children) ? children : null
+  const codeContent = codeElement?.props.children
+  const code = typeof codeContent === 'string' ? codeContent.trim() : ''
+  const language =
+    codeElement?.props.className?.replace('language-', '').trim() || 'text'
+
+  const tokens = useMemo(
+    () => (code ? highlightCode(code, language) : []),
+    [code, language],
+  )
+
+  if (!code) return null
+
+  return (
+    <CodeContainer>
+      <CopyButton onClick={handleCopy} title={copied ? 'Copied!' : 'Copy code'}>
+        {copied ? <ClipboardCheck /> : <Clipboard />}
+      </CopyButton>
+      <Pre>
+        <CodeWrapper>
+          {tokens.map((line, lineIndex) => (
+            <Line key={`line-${lineIndex}`}>
+              <LineNumber>{lineIndex + 1}</LineNumber>
+              <LineContent>
+                {line.map((token, tokenIndex) => (
+                  <span
+                    key={`token-${tokenIndex}`}
+                    style={{
+                      color: token.color,
+                      fontStyle: token.fontStyle === 1 ? 'italic' : undefined,
+                    }}
+                  >
+                    {token.content}
+                  </span>
+                ))}
+              </LineContent>
+            </Line>
+          ))}
+        </CodeWrapper>
+      </Pre>
+    </CodeContainer>
+  )
+}
+```
+
+### What Changed
+
+- Replaced `Highlight` from `prism-react-renderer` with `highlightCode` from the shiki utility
+- Token rendering maps `token.color` and `token.fontStyle` directly instead of using Prism's `getTokenProps`
+- Wrapped tokenization in `useMemo` to avoid re-tokenizing on copy button clicks
+- Validation logic moved before hooks to keep the rules of hooks happy, so there are no early returns before `useMemo`
+
+### What Didn't Change
+
+- The component still receives `<pre>` from `react-markdown`'s component mapping
+- Line numbers, copy button, and all styled components stayed the same
+- The `MarkdownRenderer` didn't need any changes at all
+
+## Prism vs Shiki
+
+|                | Prism                              | Shiki                                 |
+| -------------- | ---------------------------------- | ------------------------------------- |
+| Grammar system | Regex-based                        | TextMate (same as VS Code)            |
+| Themes         | Limited built-in set               | Full VS Code theme ecosystem          |
+| Accuracy       | Good for common cases              | Handles edge cases better             |
+| API            | Render prop (sync)                 | `codeToTokensBase` / `codeToHtml`     |
+| Bundle         | Included in `prism-react-renderer` | Language grammars loaded per-language |
+
+## Final Notes
+
+The migration was straightforward, just one utility file and an updated component. No changes to the markdown pipeline or rendering setup. The code blocks on this blog now use GitHub Dark theme colors with TextMate-grade tokenization, which is a nice upgrade from Prism's defaults.
+
+If you're using `react-markdown` and need synchronous highlighting, the `createHighlighterCoreSync` + `createJavaScriptRegexEngine` combo is the way to go. It avoids the async initialization dance entirely while still giving you shiki's grammar quality.

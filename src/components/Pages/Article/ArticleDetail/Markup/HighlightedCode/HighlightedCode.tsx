@@ -1,10 +1,11 @@
 'use client'
 
-import { ReactNode, isValidElement, useState } from 'react'
+import { ReactNode, isValidElement, useMemo, useState } from 'react'
 
 import styled from '@emotion/styled'
 import { Clipboard, ClipboardCheck } from 'lucide-react'
-import { Highlight } from 'prism-react-renderer'
+
+import { highlightCode } from '@/libs/shiki'
 
 type Props = {
   children?: ReactNode
@@ -18,21 +19,18 @@ type CodeProps = {
 export const HighlightedCode = ({ children }: Props) => {
   const [copied, setCopied] = useState(false)
 
-  if (!isValidElement<CodeProps>(children)) {
-    return null
-  }
+  const codeElement = isValidElement<CodeProps>(children) ? children : null
+  const codeContent = codeElement?.props.children
+  const code = typeof codeContent === 'string' ? codeContent.trim() : ''
+  const language =
+    codeElement?.props.className?.replace('language-', '').trim() || 'text'
 
-  const codeContent = children.props.children
-  if (typeof codeContent !== 'string') {
-    return null
-  }
-
-  const code = codeContent.trim()
+  const tokens = useMemo(
+    () => (code ? highlightCode(code, language) : []),
+    [code, language],
+  )
 
   if (!code) return null
-
-  const language =
-    children.props.className?.replace('language-', '').trim() || 'text'
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(code)
@@ -41,36 +39,33 @@ export const HighlightedCode = ({ children }: Props) => {
   }
 
   return (
-    <Highlight code={code} language={language}>
-      {({ tokens, getLineProps, getTokenProps }) => (
-        <CodeContainer>
-          <CopyButton
-            onClick={handleCopy}
-            title={copied ? 'Copied!' : 'Copy code'}
-          >
-            {copied ? <ClipboardCheck /> : <Clipboard />}
-          </CopyButton>
-          <Pre>
-            <CodeWrapper>
-              {tokens.map((line, index) => (
-                <Line key={`token-${index}`} {...getLineProps({ line })}>
-                  <LineNumber>{index + 1}</LineNumber>
-                  <LineContent>
-                    {line.map((token, index) => (
-                      <span
-                        key={`line-${index}`}
-                        {...getTokenProps({ token })}
-                      />
-                    ))}
-                    {line.length === 0 && '\n'}
-                  </LineContent>
-                </Line>
-              ))}
-            </CodeWrapper>
-          </Pre>
-        </CodeContainer>
-      )}
-    </Highlight>
+    <CodeContainer>
+      <CopyButton onClick={handleCopy} title={copied ? 'Copied!' : 'Copy code'}>
+        {copied ? <ClipboardCheck /> : <Clipboard />}
+      </CopyButton>
+      <Pre>
+        <CodeWrapper>
+          {tokens.map((line, lineIndex) => (
+            <Line key={`line-${lineIndex}`}>
+              <LineNumber>{lineIndex + 1}</LineNumber>
+              <LineContent>
+                {line.map((token, tokenIndex) => (
+                  <span
+                    key={`token-${tokenIndex}`}
+                    style={{
+                      color: token.color,
+                      fontStyle: token.fontStyle === 1 ? 'italic' : undefined,
+                    }}
+                  >
+                    {token.content}
+                  </span>
+                ))}
+              </LineContent>
+            </Line>
+          ))}
+        </CodeWrapper>
+      </Pre>
+    </CodeContainer>
   )
 }
 
