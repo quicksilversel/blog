@@ -1,0 +1,328 @@
+---
+title: 'Syncing Confluence to GCS: Bridging Two Knowledge Sources'
+description: 'How I added Confluence as a knowledge source for the bot without duplicating content - a sync script that fetches pages, converts HTML to markdown, and a weekly GitHub Actions pipeline to keep GCS up to date.'
+topics: ['Python', 'Confluence', 'GCS', 'GHA']
+published: true
+date: '2026-04-23'
+---
+
+## Intro
+
+After [adding similar case recommendations](/projects/slack-gemini-bot/adding-similar-case-recommendations), the bot could answer team questions from markdown files in GCS and recommend past cases from CMS data. Two separate knowledge sources, both flowing into the same GCS bucket, both working well.
+
+Then a problem surfaced: some of the team's knowledge lived in Confluence.
+
+Not in the bot's GCS bucket. Not in markdown files anyone maintained. Just... in Confluence wiki pages, maintained by people who had no idea the bot existed. Asking them to also maintain a separate set of markdown files in GCS was never going to happen. And copy-pasting wiki content into markdown files every time someone updated a Confluence page was exactly the kind of manual process that rots over time.
+
+> The goal: Use Confluence as a knowledge source without duplicating content. Confluence stays the source of truth, GCS stays the bot's memory, and a sync script bridges the two.
+
+## What We're Building
+
+**Before:** Knowledge exists in two places - GCS (bot reads this) and Confluence (humans maintain this). They don't talk to each other.
+
+**After:** A weekly pipeline fetches Confluence pages, converts them to markdown, and uploads to GCS. Confluence remains the single source of truth. The bot picks up changes automatically.
+
+**Key features:**
+
+- Fetch only pages under a specific parent page (not the entire space)
+- Convert Confluence HTML to clean markdown
+- Filter out empty container pages
+- Run locally for testing, run weekly in CI for production
+
+## Why Not Read Confluence Directly?
+
+I considered three approaches:
+
+| Approach             | Pros                                                 | Cons                                                 |
+| -------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| **Sync to GCS**      | Zero bot code changes, Confluence is source of truth | Slight staleness (weekly sync)                       |
+| **Read at runtime**  | Always fresh                                         | Runtime dependency on Confluence API, slower startup |
+| **Claude tool call** | Scales better, on-demand                             | Complex, extra latency per query, prompt engineering |
+
+**Sync to GCS won** because the bot's `MemoryService` already loads all `.md` files from the bucket. Drop markdown files under a new prefix, and the bot picks them up with zero code changes. The Confluence API only gets hit once a week in CI, not on every user question.
+
+If the knowledge base grows large enough to blow past Claude's context window, that's when the tool-call approach becomes worth the complexity. We're not there yet.
+
+## The Confluence API
+
+### Authentication Setup
+
+Confluence Cloud uses basic auth with an API token (not your account password):
+
+1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
+2. Create a new token
+3. Your credentials are `email:token`, base64-encoded in the `Authorization` header
+
+### Fetching Pages Under a Parent
+
+I didn't want every page in the space - that would be hundreds of unrelated pages. The Confluence REST API supports CQL (Confluence Query Language) with an `ancestor` filter that returns all descendants of a given page:
+
+```
+GET /rest/api/content/search?cql=ancestor=12345678 AND type=page&expand=body.storage
+```
+
+The parent page ID is the number in the Confluence URL: `https://your-domain.atlassian.net/wiki/spaces/SPACE/pages/12345678/Page+Title`.
+
+## The Sync Script
+
+The script does one thing: fetch Confluence pages and write them as local markdown files. No GCS upload, no Secret Manager calls, no framework dependencies beyond `markdownify` for HTML-to-markdown conversion.
+
+```python
+#!/usr/bin/env python3
+
+import argparse
+import base64
+import json
+import os
+import shutil
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+from markdownify import markdownify
+
+CONFLUENCE_URL = os.getenv("CONFLUENCE_URL", "")
+CONFLUENCE_EMAIL = os.getenv("CONFLUENCE_EMAIL", "")
+CONFLUENCE_API_TOKEN = os.getenv("CONFLUENCE_API_TOKEN", "")
+CONFLUENCE_PARENT_PAGE_ID = os.getenv("CONFLUENCE_PARENT_PAGE_ID", "")
+
+PAGE_LIMIT = 25
+MIN_CONTENT_LENGTH = 50  # Skip container pages
+
+
+def _auth_header() -> str:
+    credentials = f"{CONFLUENCE_EMAIL}:{CONFLUENCE_API_TOKEN}"
+    return f"Basic {base64.b64encode(credentials.encode()).decode()}"
+
+
+def fetch_descendant_pages() -> list[dict]:
+    base = CONFLUENCE_URL.rstrip("/")
+    cql = f"ancestor={CONFLUENCE_PARENT_PAGE_ID} AND type=page"
+    start = 0
+    all_pages = []
+
+    while True:
+        url = (
+            f"{base}/rest/api/content/search"
+            f"?cql={urllib.parse.quote(cql)}"
+            f"&expand=body.storage"
+            f"&limit={PAGE_LIMIT}"
+            f"&start={start}"
+        )
+        req = urllib.request.Request(url, headers={
+            "Authorization": _auth_header(),
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        results = data.get("results", [])
+        all_pages.extend(results)
+
+        if len(results) < PAGE_LIMIT:
+            break
+        start += PAGE_LIMIT
+
+    return all_pages
+```
+
+### Converting HTML to Markdown
+
+Confluence stores page content as HTML (the "storage" format). `markdownify` handles the conversion:
+
+```python
+def page_to_markdown(page: dict) -> str:
+    title = page.get("title", "Untitled")
+    html_body = page.get("body", {}).get("storage", {}).get("value", "")
+    md_body = markdownify(html_body, heading_style="ATX", strip=["img"])
+    return f"# {title}\n\n{md_body}"
+```
+
+I strip images since they're not useful as LLM context - they'd just be broken image references in markdown.
+
+### Filtering Out Container Pages
+
+Confluence spaces often have parent pages that exist purely for navigation - they contain nothing but a "Children Display" macro, which renders as a single word like "true" in the storage format. These add noise to the bot's context.
+
+The fix: skip pages where the body content is shorter than 50 characters after conversion:
+
+```python
+for page in pages:
+    title = page.get("title", "Untitled")
+    md_content = page_to_markdown(page)
+
+    # Skip container pages with no real content
+    body_text = md_content.split("\n", 2)[-1].strip() if "\n" in md_content else ""
+    if len(body_text) < MIN_CONTENT_LENGTH:
+        skipped += 1
+        print(f"  [skipped] {title} ({len(body_text)} chars)")
+        continue
+
+    filename = f"{sanitize_filename(title)}.md"
+    (output_dir / filename).write_text(md_content, encoding="utf-8")
+```
+
+### CLI Arguments with Env Var Fallbacks
+
+The script accepts values as CLI arguments for local use, falling back to environment variables for CI:
+
+```python
+parser.add_argument("--url", default=os.getenv("CONFLUENCE_URL", ""))
+parser.add_argument("--email", default=os.getenv("CONFLUENCE_EMAIL", ""))
+parser.add_argument("--token", default=os.getenv("CONFLUENCE_API_TOKEN", ""))
+parser.add_argument("--parent-page-id", default=os.getenv("CONFLUENCE_PARENT_PAGE_ID", ""))
+parser.add_argument("-o", "--output", type=Path, default=Path("confluence_pages"))
+```
+
+**Locally:**
+
+```bash
+uv run python scripts/sync_confluence.py \
+  --url https://your-domain.atlassian.net/wiki \
+  --email you@company.com \
+  --token your-api-token \
+  --parent-page-id 12345678
+```
+
+**In CI:** environment variables are set by the workflow, so no arguments needed.
+
+## The GitHub Actions Pipeline
+
+Same pattern as the [CMS data pipeline](/projects/slack-gemini-bot/adding-similar-case-recommendations): fetch data, write to local files, upload to GCS with `gsutil`. The script doesn't know about GCS, and the workflow doesn't know about Confluence's API.
+
+The Confluence credentials live in GCP Secret Manager. The workflow fetches them with `gcloud secrets versions access` and passes them as environment variables to the script:
+
+```yaml
+name: Sync Confluence Pages (Confluence → GCS)
+
+on:
+  schedule:
+    - cron: '0 1 * * 1' # Monday 10:00 JST
+  workflow_dispatch:
+
+env:
+  GCS_MEMORY_BUCKET: your-bot-memory
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: uv sync
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Fetch Confluence secrets
+        id: secrets
+        run: |
+          echo "CONFLUENCE_URL=$(gcloud secrets versions access latest --secret=CONFLUENCE_URL)" >> "$GITHUB_OUTPUT"
+          echo "CONFLUENCE_EMAIL=$(gcloud secrets versions access latest --secret=CONFLUENCE_EMAIL)" >> "$GITHUB_OUTPUT"
+          echo "CONFLUENCE_API_TOKEN=$(gcloud secrets versions access latest --secret=CONFLUENCE_API_TOKEN)" >> "$GITHUB_OUTPUT"
+          echo "CONFLUENCE_PARENT_PAGE_ID=$(gcloud secrets versions access latest --secret=CONFLUENCE_PARENT_PAGE_ID)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch Confluence pages
+        env:
+          CONFLUENCE_URL: ${{ steps.secrets.outputs.CONFLUENCE_URL }}
+          CONFLUENCE_EMAIL: ${{ steps.secrets.outputs.CONFLUENCE_EMAIL }}
+          CONFLUENCE_API_TOKEN: ${{ steps.secrets.outputs.CONFLUENCE_API_TOKEN }}
+          CONFLUENCE_PARENT_PAGE_ID: ${{ steps.secrets.outputs.CONFLUENCE_PARENT_PAGE_ID }}
+        run: uv run python scripts/sync_confluence.py -o confluence_pages
+
+      - name: Upload to GCS
+        run: gsutil -m rsync -d confluence_pages gs://${{ env.GCS_MEMORY_BUCKET }}/aem
+```
+
+### Why `gsutil rsync -d`?
+
+The `-d` flag deletes files in GCS that don't exist locally. If a page was removed from Confluence, it gets removed from GCS too. `-m` runs transfers in parallel for speed.
+
+### Why `uv sync` in CI?
+
+Unlike the CMS fetch script (which uses only stdlib), this script depends on `markdownify` for HTML-to-markdown conversion. So the workflow installs project dependencies with `uv sync` before running.
+
+## Secret Manager Setup
+
+Four secrets, all straightforward:
+
+```bash
+echo -n "https://your-domain.atlassian.net/wiki" | \
+  gcloud secrets create CONFLUENCE_URL --data-file=-
+
+echo -n "you@company.com" | \
+  gcloud secrets create CONFLUENCE_EMAIL --data-file=-
+
+echo -n "your-api-token" | \
+  gcloud secrets create CONFLUENCE_API_TOKEN --data-file=-
+
+echo -n "12345678" | \
+  gcloud secrets create CONFLUENCE_PARENT_PAGE_ID --data-file=-
+```
+
+The service account running the GHA workflow needs `roles/secretmanager.secretAccessor` to read these.
+
+## How It Fits Together
+
+```
+┌──────────────┐     ┌─────────────┐     ┌──────────────────┐
+│  Confluence  │     │    GitHub   │     │      GCS         │
+│  wiki pages  │────▶│   Actions   │────▶│  /aem/*.md       │
+│  (HTML)      │     │   (weekly)  │     │                  │
+└──────────────┘     │             │     │  /faq.md         │
+                     │  fetch →    │     │  /processes.md   │
+                     │  convert →  │     │  /data/archive.  │
+                     │  upload     │     │    json          │
+                     └─────────────┘     └────────┬─────────┘
+                                                  │
+                                        ┌─────────▼──────────┐
+                                        │    Cloud Run       │
+                                        │                    │
+                                        │  MemoryService     │
+                                        │  loads ALL .md     │
+                                        │  files from bucket │
+                                        └────────────────────┘
+```
+
+The bot doesn't know or care that some markdown files came from Confluence. It loads everything from GCS, same as before.
+
+## Gotchas
+
+### 1. Space Key vs. Parent Page ID
+
+My first version fetched all pages in a Confluence space. That pulled hundreds of unrelated pages. The CQL `ancestor` filter is what you want - it scopes to descendants of a specific page.
+
+### 2. Container Pages Are Noise
+
+Pages that only contain a "Children Display" macro produce almost no markdown content - just a title and "true". Without the minimum content length filter, these end up as near-empty files in the bot's context. 50 characters as a threshold catches these without filtering out real short pages.
+
+### 3. Confluence API Pagination
+
+The v1 REST API returns at most 25 results per request by default. If you have more than 25 pages under your parent, you need to paginate with the `start` parameter. Easy to miss if you're testing with a small space.
+
+## Wrapping Up
+
+The pattern keeps repeating: external data source → fetch script → local files → GCS → bot reads from bucket. CMS data, knowledge markdown, and now Confluence pages all flow through the same pipeline shape. The bot's `MemoryService` doesn't need to know where the data came from - it just loads `.md` files.
+
+**Key takeaways:**
+
+1. **Don't ask people to maintain two places** - If knowledge already lives in Confluence, sync it. Asking humans to copy-paste between systems is a losing battle.
+2. **Scripts should be dumb pipes** - The sync script fetches and converts. The CI workflow handles secrets and uploads. Neither knows about the other's concerns.
+3. **CLI args with env var fallbacks** - Same script works locally (pass arguments) and in CI (set env vars). No code branching needed.
+4. **Filter noise early** - Container pages, navigation pages, and stub pages add nothing to LLM context. A simple length check saves context window for real content.
+5. **GCS as a universal knowledge sink** - Markdown from humans, JSON from a CMS, markdown from Confluence. Different sources, same destination, same bot interface.

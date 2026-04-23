@@ -1,0 +1,238 @@
+---
+title: 'Swiper v8 to v11: The Loop Mode Nightmare'
+description: 'Upgrading Swiper from v8 to v11 seems harmless until your carousels start thrashing the page. A deep dive into why loop mode broke, what loopAddBlankSlides actually does (nothing useful), and how to fix it with a wrapper component.'
+date: 2026-04-22
+topics: ['Swiper', 'React', 'Next.js']
+published: true
+---
+
+## The Symptom
+
+After upgrading Swiper from v8 to v11 alongside a React 19 / Next.js 15 migration, certain pages started violently scrolling back and forth. Not a subtle jank — the page was jumping 1,000+ pixels per frame, making it completely unusable.
+
+The browser console was flooded with this warning:
+
+```
+Swiper Loop Warning: The number of slides is not enough for loop mode,
+it will be disabled or not function properly. You need to add more slides
+(or make duplicates) or lower the values of slidesPerView and slidesPerGroup parameters
+```
+
+Firing infinitely. From `resizeHandler`.
+
+## Finding the Root Cause
+
+The affected carousels had a common pattern: `loop: true` with few slides. One carousel had 2 items, another had 4. They all used `slidesPerView: 'auto'` with `centeredSlides: true` — a standard config for centered carousels where adjacent slides peek from the edges.
+
+In Swiper v8, this worked perfectly. In v11, it caused an infinite resize loop.
+
+### What Changed Between v8 and v11
+
+The answer is in v9's changelog: **loop mode was completely rewritten**.
+
+In v8, loop worked by **cloning DOM nodes**. Swiper would duplicate your slides and place copies at the start and end of the carousel. Simple, brute-force, and it worked with any number of slides.
+
+Starting in v9, loop works by **rearranging the actual slides** using CSS transforms. No more DOM cloning. Swiper physically moves slides from one end to the other to create the illusion of infinite scroll.
+
+This was a good architectural change — the old clone-based approach had real problems:
+
+- Cloned slides didn't sync with React state updates
+- Virtual Translate was incompatible with loop mode
+- The `swiper-slide-duplicate` class caused all sorts of edge cases
+
+But the new approach introduced a hard requirement: **you need enough slides to fill both sides of the viewport**. Specifically, `slidesPerView + loopedSlides` slides minimum. If Swiper can't find a slide to move into the empty space, it breaks.
+
+### The Infinite Resize Loop
+
+Here's what happens when the requirement isn't met:
+
+1. Swiper initializes with `loop: true`
+2. `loopFix()` detects there aren't enough slides
+3. `loopFix()` attempts to rearrange slides anyway, modifying the DOM
+4. The DOM change triggers the `ResizeObserver`
+5. `resizeHandler` fires and calls `loopFix()` again
+6. Go to step 2
+
+Each iteration causes a layout recalculation, and the browser compensates by adjusting the scroll position. The result: the page bounces back and forth until the tab crashes or the user navigates away.
+
+### How Many Slides Do You Actually Need?
+
+It depends on your config. The formula from Swiper's source:
+
+```js
+// swiper-core.mjs, inside loopFix()
+let slidesPerView = params.slidesPerView
+if (slidesPerView === 'auto') {
+  slidesPerView = swiper.slidesPerViewDynamic()
+}
+
+let loopedSlides = centeredSlides
+  ? Math.max(slidesPerGroup, Math.ceil(slidesPerView / 2))
+  : slidesPerGroup
+loopedSlides += params.loopAdditionalSlides
+
+// The check:
+if (slides.length < slidesPerView + loopedSlides) {
+  showWarning('...')
+}
+```
+
+For a carousel where slide width equals container width (1 slide visible):
+
+- `slidesPerView ≈ 1–2` (Swiper counts partial visibility)
+- `loopedSlides = Math.max(1, Math.ceil(2/2)) = 1`
+- **Minimum: 3 slides**
+
+For a wider carousel showing 3 slides:
+
+- `slidesPerView ≈ 3`
+- `loopedSlides = Math.max(1, Math.ceil(3/2)) = 2`
+- **Minimum: 5 slides**
+
+## The Red Herrings
+
+Before finding the real fix, I went through a few approaches that didn't work.
+
+### `loopAddBlankSlides: true`
+
+This sounded perfect — Swiper v11 has a parameter that adds blank slides when there aren't enough. It even defaults to `true`. Surely this solves the problem?
+
+It doesn't. Looking at the source:
+
+```js
+// swiper-core.mjs
+if (params.loopAddBlankSlides && (params.slidesPerGroup > 1 || gridEnabled)) {
+  // Only executes when slidesPerGroup > 1 or grid is enabled
+  addBlankSlides(slidesToAdd)
+}
+```
+
+`loopAddBlankSlides` only fires when `slidesPerGroup > 1` or CSS grid mode is on. With the default `slidesPerGroup: 1`, it's completely inert. The parameter exists to pad group-based pagination, not to fix the minimum slide count for loop mode.
+
+The loop warning comes from a completely separate check in `loopFix()` that runs **after** the blank slide logic. These are two different code paths solving two different problems.
+
+### `loopAdditionalSlides`
+
+This increases `loopedSlides` in the formula above. But `loopedSlides` is part of the **requirement**, not the **supply**. Setting `loopAdditionalSlides: 3` doesn't add 3 slides — it increases the minimum needed by 3. It makes the problem worse.
+
+### `cssMode: true`
+
+Uses native CSS `scroll-snap` instead of JavaScript transforms. The loop still triggers the same resize warning and thrashing. CSS mode changes how slides are positioned, not how loop calculates its requirements.
+
+### `rewind: true` Instead of `loop: true`
+
+This actually works — `rewind` makes the carousel animate back to the first slide when you reach the end. No minimum slide requirement. But there's a problem:
+
+For carousels with `centeredSlides: true` that show adjacent slides with lower opacity (a common design pattern), `rewind` doesn't show the previous slide to the left of the first slide. With `loop`, slide 3 wraps around to appear on the left. With `rewind`, there's just empty space. This broke the design on many pages.
+
+## The Actual Fix
+
+The fix is to do what Swiper v8 did internally: **duplicate the slides**. But instead of patching every carousel in the codebase, I put the logic in a single place.
+
+In our codebase, every carousel imports `Swiper` from a shared module. Instead of re-exporting Swiper directly, I wrapped it:
+
+```tsx
+import { Swiper as SwiperOriginal, SwiperSlide } from 'swiper/react'
+
+const LOOP_DUPLICATE_THRESHOLD = 6
+
+const isSwiperSlide = (child) =>
+  typeof child === 'object' &&
+  'type' in child &&
+  child.type?.displayName === 'SwiperSlide'
+
+const Swiper = ({ children, ...props }) => {
+  const childArray = Children.toArray(children)
+  const slides = childArray.filter(isSwiperSlide)
+  const nonSlides = childArray.filter((c) => !isSwiperSlide(c))
+  const slideCount = slides.length
+
+  // Enough slides → pass through unchanged
+  if (
+    !props.loop ||
+    slideCount === 0 ||
+    slideCount >= LOOP_DUPLICATE_THRESHOLD
+  ) {
+    return <SwiperOriginal {...props}>{children}</SwiperOriginal>
+  }
+
+  // Not enough slides → duplicate to meet loop requirement
+  const copies = Math.ceil(LOOP_DUPLICATE_THRESHOLD / slideCount)
+  const duplicatedSlides = Array.from({ length: copies + 1 }, (_, i) =>
+    slides.map((slide, j) => cloneElement(slide, { key: `loop-${i}-${j}` })),
+  ).flat()
+
+  return (
+    <SwiperOriginal
+      {...props}
+      onPaginationUpdate={(swiper, paginationEl) => {
+        // Hide extra pagination bullets
+        const bullets = swiper.pagination?.bullets
+        if (!bullets) return
+        const mappedIndex = swiper.realIndex % slideCount
+        for (let i = 0; i < bullets.length; i++) {
+          if (i < slideCount) {
+            bullets[i].style.display = ''
+            bullets[i].classList.toggle(
+              'swiper-pagination-bullet-active',
+              i === mappedIndex,
+            )
+          } else {
+            bullets[i].style.display = 'none'
+          }
+        }
+      }}
+      onSlideChange={(swiper) => {
+        // Sync active bullet to original slide index
+        const bullets = swiper.pagination?.bullets
+        if (!bullets) return
+        const mappedIndex = swiper.realIndex % slideCount
+        for (let i = 0; i < slideCount; i++) {
+          bullets[i]?.classList.toggle(
+            'swiper-pagination-bullet-active',
+            i === mappedIndex,
+          )
+        }
+      }}
+    >
+      {duplicatedSlides}
+      {nonSlides}
+    </SwiperOriginal>
+  )
+}
+
+export { Swiper, SwiperSlide }
+```
+
+### How It Works
+
+1. **Count SwiperSlide children** using `displayName` (Swiper React sets this on `SwiperSlide`)
+2. **If enough slides** (>= 6): pass everything through to Swiper unchanged. Zero overhead for the common case.
+3. **If not enough slides**: clone the slides until we have at least 6, then fix pagination:
+   - `onPaginationUpdate`: hide bullets beyond the original count, remap the active state
+   - `onSlideChange`: sync the active bullet to `realIndex % originalCount`
+
+Non-slide children (navigation, pagination, custom elements rendered inside `<Swiper>`) are preserved and placed after the duplicated slides.
+
+### Why 6?
+
+The threshold of 6 covers the worst case in our codebase: 3 slides visible with `centeredSlides` (needs 5 minimum). Setting it to 6 gives a buffer. Carousels with 6+ slides never had the loop issue.
+
+## What I Learned
+
+A few takeaways from this:
+
+**Read the migration guide, but also read the source.** The Swiper v11 migration guide mentions loop changes in one line. The actual behavioral change — from DOM cloning to slide rearrangement — is buried in the v9 changelog. The minimum slide requirement isn't documented anywhere I could find; I had to read `swiper-core.mjs` to understand the formula.
+
+**`loopAddBlankSlides` is misleading.** The name suggests it adds blank slides when loop doesn't have enough. It doesn't. It pads slide groups for pagination alignment. The parameter name is reasonable in context, but if you're searching for "how to fix loop with few slides," it's a trap.
+
+**Wrapper components are underrated.** Instead of patching every carousel call site, wrapping the exported `Swiper` component in one place fixed the entire codebase. The wrapper is transparent — carousels with enough slides get the original component with zero overhead.
+
+**Sometimes the old approach was right.** Swiper v9 removed DOM cloning for good reasons (state sync, Virtual Translate compatibility). But for carousels with few slides, cloning was the correct solution. The fix is literally "do what v8 did" — just in React-land instead of Swiper-land.
+
+## References
+
+- [Swiper v11 Migration Guide](https://swiperjs.com/migration-guide-v11)
+- [Swiper v9 Migration Guide](https://swiperjs.com/migration-guide-v9) — where loop mode was rewritten
+- [Swiper v11 Blog Post](https://swiperjs.com/blog/swiper-v11-back-to-basics)
+- [GitHub Issue #7254](https://github.com/nolimits4web/swiper/issues/7254) — discussion on loop behavior with few slides
