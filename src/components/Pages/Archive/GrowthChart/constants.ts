@@ -3,6 +3,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   backend: '#10b981',
   infrastructure: '#f59e0b',
   observability: '#8b5cf6',
+  fullstack: '#ec4899',
 }
 
 export const CHART_WIDTH = 800

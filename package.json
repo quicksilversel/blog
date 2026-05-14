@@ -3,20 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": "24.14.1"
+    "node": "24.15.0"
   },
   "scripts": {
     "dev": "next dev",
     "build": "tsx scripts/generate-rss.ts && next build",
     "generate-rss": "tsx scripts/generate-rss.ts",
     "start": "next start",
-    "lint": "next lint",
-    "lint:js": "eslint \"./src/**/*.{ts,tsx}\"",
-    "lint:js:fix": "eslint --fix \"./src/**/*.{ts,tsx}\"",
-    "lint:css": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" 2>&1 | grep -v 'Unknown rule' || true",
-    "lint:css:fix": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" --fix",
-    "format": "prettier --check --cache --experimental-cli \"./**/*.{ts,tsx,js,jsx,mjs}\"",
-    "format:fix": "prettier --write --cache --experimental-cli --log-level error \"./**/*.{ts,tsx,js,jsx,mjs}\"",
+    "lint": "run-p lint:eslint lint:stylelint prettier",
+    "lint:fix": "run-p lint:eslint:fix lint:stylelint:fix prettier:fix",
+    "lint:eslint": "eslint \"./src/**/*.{ts,tsx}\"",
+    "lint:eslint:fix": "eslint --fix \"./src/**/*.{ts,tsx}\"",
+    "lint:stylelint": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" 2>&1 | grep -v 'Unknown rule' || true",
+    "lint:stylelint:fix": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" --fix",
+    "prettier": "prettier --check .",
+    "prettier:fix": "prettier --write .",
     "clean": "rm -rf .next .turbo node_modules/.cache",
     "clean:cache": "rm -rf .next/cache"
   },
@@ -48,6 +49,7 @@
     "eslint-config-next": "16.1.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-unused-imports": "4.2.0",
+    "npm-run-all": "^4.1.5",
     "postcss-styled-syntax": "^0.7.1",
     "prettier": "^3.8.3",
     "stylelint": "^17.8.0",

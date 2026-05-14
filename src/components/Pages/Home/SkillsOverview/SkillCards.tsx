@@ -1,7 +1,14 @@
 'use client'
 
 import styled from '@emotion/styled'
-import { Monitor, Server, Cloud, BarChart3, LucideIcon } from 'lucide-react'
+import {
+  Monitor,
+  Server,
+  Cloud,
+  BarChart3,
+  Layers,
+  LucideIcon,
+} from 'lucide-react'
 import Link from 'next/link'
 
 import type { SkillCategory } from '@/libs/getSkills'
@@ -15,6 +22,7 @@ const iconMap: Record<string, LucideIcon> = {
   Server,
   Cloud,
   BarChart3,
+  Layers,
 }
 
 export const SkillCards = ({ skills }: Props) => {

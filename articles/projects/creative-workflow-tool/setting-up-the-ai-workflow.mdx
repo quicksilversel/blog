@@ -1,0 +1,203 @@
+---
+title: 'Setting Up the AI-Assisted Workflow Before Writing Code'
+description: 'Configuring AGENTS.md, code conventions, and GitHub Copilot review rules before the codebase exists. The patterns that make AI coding assistants useful instead of a slow drag.'
+topics: ['AI', 'Claude Code', 'GitHub Copilot', 'AGENTS.md']
+published: true
+date: '2026-05-12'
+---
+
+## Intro
+
+In the [previous article](/projects/creative-workflow-tool/picking-the-stack), I picked the stack for an internal workflow tool: Cloud Run, Postgres via Drizzle, Next.js fullstack, Slack SSO. Boring choices for an internal tool at modest scale.
+
+Before writing a single line of code, I wanted to set up the AI-assisted workflow properly. Claude Code + GitHub Copilot is a force multiplier when the conventions are explicit, and a slow drag when they're vague. The conventions belong in files the agent auto-loads, written for the agent, not buried in docs the agent has to be told to read.
+
+This article documents the file structure I landed on and the reasoning behind a few non-obvious choices.
+
+## The core file: AGENTS.md
+
+`AGENTS.md` at the repo root is the canonical agent-instructions file. It's a cross-tool convention. Cursor, Codex, Claude Code, GitHub Copilot, and others all auto-load it on every session. A tiny `CLAUDE.md` next to it (`See @AGENTS.md`) catches tools that prefer the Claude-specific name. No duplication, no drift.
+
+The principle behind AGENTS.md: **everything the agent should know in every session goes here.** Project context, stack, conventions, anti-patterns, glossary. If you find yourself correcting the agent on the same thing twice, add a line to AGENTS.md.
+
+What goes in:
+
+- **Overview**: what this project is (one paragraph).
+- **Current state**: what exists vs. what's planned. Critical for projects mid-build.
+- **Architecture principles**: the design constraints (e.g., "one source of truth per concept").
+- **Tech stack**: bulleted list, no prose essays.
+- **Code conventions**: naming, server vs. client defaults, styling rules, etc.
+- **Anti-patterns**: what NOT to do.
+- **Important notes**: anything domain-specific the agent would otherwise get wrong.
+- **Glossary**: non-obvious terms used in the codebase.
+
+What stays out:
+
+- **Long architecture rationale.** That goes in a separate PLAN.md. AGENTS.md is operational ("here's how we write code"), not retrospective ("here's why we picked Cloud Run").
+- **Methodology essays.** "How to work with AI" is a one-time read, not auto-loaded context.
+- **Decision audits.** Approved decisions are facts. Unresolved decisions go in PLAN.md's "Open Questions" section.
+
+## The `.ai/` folder for everything else
+
+AGENTS.md is the auto-loaded file. Everything else AI-related lives under `.ai/`:
+
+```
+.ai/
+├── README.md            ← what each subfolder is for
+├── instructions/        ← long-form docs read on demand
+│   └── PLAN.md          ← architecture, data model, roadmap, open questions
+├── skills/              ← Anthropic Skills (placeholder)
+└── agents/              ← cross-tool subagent definitions (placeholder)
+```
+
+`.ai/` is for **cross-tool** AI artifacts: files that work for any agent. Anything tool-specific lives in its tool-specific path:
+
+- `.claude/commands/`, `.claude/agents/`: Claude Code-specific (auto-loaded from those exact paths).
+- `.github/copilot-instructions.md`: GitHub Copilot configuration.
+
+Two AI folders coexist on purpose. The boundary is "portable across tools" vs. "tool-specific."
+
+## Why I keep code conventions IN AGENTS.md, not separate
+
+There's a tempting pattern: put quality rules in a separate file (`code-quality.md`, `style-guide.md`) and have AGENTS.md reference it. Cleaner separation of concerns, smaller AGENTS.md.
+
+I tried that. It didn't work in practice.
+
+When Claude Code starts writing code, it has AGENTS.md in context. It does NOT auto-load every file AGENTS.md references. So the conventions that lived in a separate file got skipped. The agent would happily write inline `style={{...}}` because that rule wasn't in its working memory. The reference existed but the agent didn't traverse it for every change.
+
+**Conclusion: code quality rules belong directly inside AGENTS.md** if you want them honored at write time. The cost is AGENTS.md gets longer (~180 lines for me), but that's still well within the range where LLMs handle context cleanly. What hurts agent attention isn't line count, it's redundancy and disorganization.
+
+My code conventions section is split into 11 topical sub-sections: Naming, Server/client/data flow, Styling, React, TypeScript, DRY, Forms, Database, Accessibility, Testing, Security. Each is short bullet rules, no prose. Skimmable.
+
+## A few representative rules
+
+A taste of what the conventions section enforces:
+
+**Styling:**
+
+- No inline styles. `style={{ ... }}` is not allowed except for genuinely dynamic values that can't be expressed as Tailwind utilities.
+- No `!important`. If specificity is fighting you, fix the cause.
+- Custom CSS lives in `app/globals.css`. No CSS modules. No styled-components, no emotion.
+
+**TypeScript:**
+
+- No `any`. Use `unknown` and narrow with type guards.
+- No `@ts-ignore` or `@ts-expect-error` without an inline comment + TODO referencing an Issue.
+
+**DRY:**
+
+- If a function or component is duplicated 3+ times, extract it. Pure logic to `lib/`, hooks to `lib/hooks/`, components to `components/`.
+- Don't preemptively abstract. Wait for three concrete uses before extracting.
+
+**React:**
+
+- Don't use `useEffect` for derived state. Compute during render.
+- List keys are stable IDs, not array indices.
+- `useCallback` / `useMemo` only when measured.
+
+The full list is ~80 lines across the 11 sub-sections. The format matters: each rule is one line, no philosophy attached. Philosophy is buried in the higher-level Architecture Principles section.
+
+## The single-source-of-truth pattern
+
+Underneath the conventions, one rule earns its space more than any other. **For each concept the codebase touches, exactly one file is authoritative.** Everything else derives from it.
+
+For this project, post-bootstrap:
+
+- **Request shape** → `lib/schemas/request.ts` (Zod). The form imports it via `zodResolver`. API routes call `parse()` on it. The Drizzle table type is generated from it via `drizzle-zod`. Adding a field means editing one file.
+- **Status enum + transitions** → `lib/schemas/status.ts`. Both server (validation) and client (which buttons to show) consume the same `canTransition()` function.
+- **Reference data** → `db/seed.ts`. UI reads from the same constant the DB is seeded from.
+- **Slack message templates** → `lib/slack-templates.ts`. All copy in one place.
+- **Env vars** → `lib/env.ts`. Zod-validated, app refuses to boot if anything required is missing.
+
+You'll know you've gotten this right when adding a field takes 5 minutes total. You'll know you've gotten it wrong when adding a field touches 8 files and you forget one.
+
+## GitHub Copilot PR review: thin pointer
+
+GitHub Copilot can auto-review pull requests. It reads `.github/copilot-instructions.md` to know what rules to apply. The question: do I duplicate the conventions there?
+
+No. The Copilot file is a thin pointer:
+
+```markdown
+# GitHub Copilot Instructions
+
+This file is auto-loaded by GitHub Copilot when reviewing pull requests.
+
+## Shared instructions
+
+For project context, conventions, and all code quality rules, see:
+→ AGENTS.md (repo root)
+
+## Copilot-specific behavior
+
+### When reviewing PRs
+
+- Flag anything that violates the rules in AGENTS.md.
+- Reference the specific rule and link the file/line.
+- Suggest concrete fixes, not just objections.
+- For ambiguous calls, pose as a question rather than a blocking comment.
+- All review comments in English.
+```
+
+Single source of truth (AGENTS.md), two consumers (write-time and review-time). No drift between "rules for writing" and "rules for review."
+
+The actual auto-review trigger lives elsewhere: repo Settings → Branch rules → "Automatically request Copilot code review." The instructions file configures _behavior_, not the trigger. Easy to assume the file alone is enough; it isn't.
+
+## PLAN.md: architecture and unresolved questions
+
+Companion to AGENTS.md. PLAN.md is the _what we're building_ document, read on demand rather than auto-loaded:
+
+- Architecture diagram.
+- Data model (provisional, with explicit ⏳ flags where things are unresolved).
+- Status / workflow model.
+- Auth design.
+- Notification design.
+- Phased roadmap.
+- **Open Questions**: items not yet decided, grouped by what blocks them.
+
+The Open Questions section is the load-bearing one. It documents what NOT to assume. Items there have status markers: ⏳ for "deferred until external input," 📋 for "verify with stakeholders," 💬 for "discuss." The agent reads these and surfaces a question instead of inventing a default.
+
+## What I deleted along the way
+
+A few false starts that didn't survive the consolidation:
+
+**A decisions-audit document.** I tried tracking "what was decided" in a separate `DECISIONS_AUDIT.md` so I could review the AI's implicit assumptions and explicitly approve each one. Useful while planning. Useless after. Settled decisions became facts in AGENTS.md/PLAN.md, unsettled ones moved to Open Questions. The audit doc was redundant maintenance.
+
+**A methodology essay.** I had a 200-line `BUILD_WORKFLOW.md` describing AI-assisted dev patterns: plan-first, small diffs, "delegate testing to AI but not architecture decisions," code-review tactics for AI-assisted work. Useful as a one-time read. Counter-productive as auto-loaded context. The patterns matter; they don't need to live in the repo.
+
+**A bootstrap prompt file.** I had `.ai/prompts/BOOTSTRAP_PROMPT.md`, the exact prompt to paste into Claude Code to extend the scaffold. Removed because pasting from a saved file vs. pasting from chat history is the same effort, and removing it shrinks the repo footprint to the bare minimum.
+
+Net: a small handful of agent-facing files instead of a thicket of overlapping docs.
+
+## The pre-bootstrap reality
+
+One subtle thing worth flagging. AGENTS.md needs to be honest about what exists vs. what's planned. Right after `create-next-app`, the repo is a skeleton with no DB, no schema, no tests. If AGENTS.md lists commands like `npm run db:migrate`, the agent will try to run them, fail, and either get confused or fabricate the missing scripts.
+
+My AGENTS.md has a prominent "Current State" section near the top:
+
+> This repo is a fresh `create-next-app` output. The application does not exist yet:
+>
+> - No database, ORM schema, or migrations.
+> - No business logic in `lib/`, `app/`, or `db/` beyond defaults.
+> - No tests.
+> - No GCP infrastructure provisioned.
+>
+> The full intended architecture is in `.ai/instructions/PLAN.md`. Most of it is deliberately not yet implemented...
+>
+> **Do not implement features, the data model, or the schema before the design draft arrives.**
+
+Aspirational stack and conventions sections are explicitly labeled "(planned)" so the agent knows they're forward-looking. The one-time bootstrap session that extends the scaffold also has an instruction to update AGENTS.md afterward, adding back the Commands and Anti-Patterns sections that reference real files. AGENTS.md grows in step with the codebase.
+
+## Wrapping Up
+
+Time spent on AI workflow before writing code: maybe four hours, spread across a few sessions. Worth every minute. The alternative is the slow grind of explaining the same conventions over and over, every time you start a new session.
+
+Key takeaways:
+
+1. **AGENTS.md is the contract.** Cross-tool, auto-loaded, single source of truth for conventions. Keep `CLAUDE.md` as a one-line pointer.
+2. **Conventions belong inside AGENTS.md, not in a separate file.** Agents auto-load AGENTS.md, not files it references. If a rule isn't in the auto-loaded context, the agent will violate it.
+3. **PLAN.md for what we're building, AGENTS.md for how we write it.** Two docs, two purposes, no overlap.
+4. **Copilot instructions are a thin pointer.** `.github/copilot-instructions.md` points at AGENTS.md. Same rules at write-time (Claude Code) and review-time (Copilot). No drift.
+5. **Be honest about current state.** If the repo is pre-bootstrap, say so prominently. Aspirational rules that reference non-existent files confuse agents.
+6. **Single source of truth is the biggest determinant of maintainability** in an AI-assisted codebase. One file per concept; everything derives.
+
+Next up: GCP infrastructure provisioning. Project setup, Cloud SQL, Artifact Registry, Secret Manager, and the GitHub Actions deploy pipeline.
