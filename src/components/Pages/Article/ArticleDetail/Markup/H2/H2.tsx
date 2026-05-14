@@ -24,7 +24,6 @@ const StyledH2 = styled.h2`
   margin-block: 2rem 1rem;
   font-size: ${({ theme }) => theme.fontSize.large};
   color: ${({ theme }) => theme.colors.primary};
-  text-transform: capitalize;
   scroll-margin-top: 60px;
   border-top: 1px solid ${({ theme }) => theme.colors.muted};
 

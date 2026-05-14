@@ -42,4 +42,10 @@ export const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     icon: 'BarChart3',
     techKeywords: ['Datadog'],
   },
+  fullstack: {
+    displayName: 'Fullstack',
+    description: 'End-to-end features',
+    icon: 'Layers',
+    techKeywords: ['Next.js', 'Node.js', 'Python'],
+  },
 }

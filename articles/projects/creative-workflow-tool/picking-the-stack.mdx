@@ -1,0 +1,207 @@
+---
+title: 'Picking the Stack for an Internal Workflow Tool'
+description: 'Walking through the cloud, database, framework, and surrounding choices for a small internal tool on GCP. Why Cloud Run instead of GKE, why Postgres instead of NoSQL, why skip Redis, and the rest of the decisions worth thinking through before writing code.'
+topics: ['GCP', 'Next.js', 'Postgres', 'Architecture']
+published: true
+date: '2026-05-08'
+---
+
+## Intro
+
+I'm starting a new project, which is an internal workflow tool for designers receiving creative work requests. Standard internal-tool shape: a request form, a kanban view, status tracking, file upload, comments, audit log, dashboard. Built and planned to be AI-maintainable, on GCP, replacing a Slack-and-spreadsheets process that has gotten unwieldy.
+
+Before writing any code, I spent a couple of sessions planning the stack and infrastructure. Most of the decisions aren't exotic, but most of them have alternatives that look reasonable from a distance (Cloud Run vs GKE, Postgres vs NoSQL, Drizzle vs Prisma), and getting them wrong early costs more than thinking them through carefully.
+
+This article documents what I picked and why. The next post in the series covers planning the AI-assisted workflow before writing code.
+
+## The constraints
+
+Worth stating upfront, since they shape everything below:
+
+- **Internal-only.** Single Slack workspace as the user base. No external traffic.
+- **Modest load.** 100-200 users, 1-2 requests/second at peak.
+- **AI-maintainable build.** The codebase is planned so AI agents can extend and maintain it. Conventions and single-source-of-truth patterns over ad-hoc coordination.
+- **Cloud platform fixed.** GCP. Switching wasn't on the table.
+
+If any of those flip, several of the decisions below would flip too.
+
+## Compute: Cloud Run vs GKE
+
+The two "obvious" choices for containers on GCP:
+
+|                    | Cloud Run                 | GKE Autopilot                               |
+| ------------------ | ------------------------- | ------------------------------------------- |
+| Cluster management | None                      | Managed but exposed                         |
+| Cold starts        | Yes (mitigable)           | No                                          |
+| Min cost (idle)    | $0                        | ~$70/mo for control plane                   |
+| Scaling model      | Per-request               | Pod-based                                   |
+| Wins when...       | Web services, simple APIs | Multi-service, sidecars, custom controllers |
+
+For an internal tool serving 1-2 req/s, **GKE is paying for an idle cluster.** Cloud Run scales to zero, charges per-request, and has zero ops overhead. The only reasons to prefer GKE are needs I don't have: sidecars, operators, sharing a cluster with other services, complex networking.
+
+**Picked: Cloud Run** in `asia-northeast1`. Min instances = 1 in prod (~$15/mo to avoid cold starts during work hours), min = 0 in staging.
+
+## Database: Cloud SQL for Postgres vs NoSQL
+
+Looking at what the tool stores: users, requests, statuses, assignees, comments, attachments, audit log. Everything has relationships. Some fields are multi-valued, but those fit cleanly into Postgres array columns or `jsonb`.
+
+NoSQL on GCP (Firestore, Datastore) would work but force a denormalized model that fights the natural shape. Spanner is over-engineered for this scale. It shines at horizontal scale we won't approach. AlloyDB is overkill for the workload.
+
+**Picked: Cloud SQL for PostgreSQL.** Smallest tier in staging (`db-f1-micro`), modest tier in prod (`db-custom-1-3840`). Private IP only, accessed from Cloud Run via the [Cloud SQL Node.js Connector](https://cloud.google.com/sql/docs/postgres/connect-connectors). No proxy sidecar needed, no public IP.
+
+The connector matters. Traditional Cloud SQL access from Cloud Run uses the Cloud SQL Auth Proxy, which means either a sidecar in your container or a separate process. The Node.js Connector handles auth directly inside the app's process, which is cleaner on Cloud Run's container model.
+
+## Cache layer: skip Redis
+
+At 1-2 req/s, Postgres alone is more than enough. The two reasons people typically reach for Redis at this stage:
+
+1. **Background jobs.** Solved natively on GCP with Cloud Tasks (managed queue) + Cloud Scheduler (cron). No Redis required.
+2. **Rate limiting.** Not a real problem with 100-200 internal users.
+
+The GCP equivalent of ElastiCache is [Memorystore for Redis](https://cloud.google.com/memorystore), available if v2 demands change, but deploying it now would be premature complexity.
+
+**Picked: no cache layer.** Revisit if/when actual contention shows up in Postgres metrics.
+
+## Background jobs: Cloud Scheduler → Cloud Tasks → Cloud Run
+
+For reminder notifications, status auto-flips on schedule, and similar:
+
+```
+Cloud Scheduler (cron) ──► Cloud Tasks (queue) ──► Cloud Run endpoint
+```
+
+Cloud Scheduler fires on a cron schedule. It enqueues a task in Cloud Tasks. Cloud Tasks delivers it via HTTP to a designated endpoint on the Cloud Run service. The endpoint authenticates the request (Cloud Tasks signs it), does the work, returns.
+
+This buys you retries with exponential backoff (handled by Cloud Tasks), dedup, and zero infrastructure to maintain. Coming from AWS, this maps to EventBridge → SQS → Lambda.
+
+**Picked: Cloud Scheduler + Cloud Tasks** for any background work.
+
+## Backend topology: Next.js fullstack, not split
+
+Do I run a Next.js frontend with a separate backend service? Or everything in one Next.js app?
+
+For this scale and feature set, splitting is wrong:
+
+- Single deployment, single auth context, monorepo simplicity.
+- Next.js Route Handlers cover the API needs (queries, webhook receivers).
+- Server Actions cover the mutation needs (form submits, status changes).
+- You'd outgrow it at maybe 50× current scale, by which point the request shape has changed enough to justify a rewrite anyway.
+
+**Picked: Next.js fullstack.** Route Handlers (`app/api/*/route.ts`) for queries and webhooks, Server Actions for mutations called from forms.
+
+## Framework: Next.js 16 + React 19
+
+Next.js 16 is the current major version. React 19 ships with it. The App Router is the modern paradigm: Server Components by default, Server Actions for mutations, native data-fetching primitives.
+
+Notable for AI-assisted development: Next 16 has breaking changes from prior versions, so prompts to Claude Code need to point at `node_modules/next/dist/docs/` for current API guidance rather than relying on training data. The Next.js team ships an `AGENTS.md` block in the `create-next-app` output that warns agents about this. Keep that block intact verbatim.
+
+## ORM: Drizzle vs Prisma
+
+Both are competent TypeScript ORMs. The tradeoff:
+
+- **Drizzle:** SQL-first, lighter weight, faster cold starts on serverless. Smaller ecosystem.
+- **Prisma:** DSL-first, more polished migration tooling, bigger community. Heavier client (hundreds of KB of generated code), which matters on Cloud Run cold starts.
+
+For a service running min=1 in prod and min=0 in staging, every MB of cold-start cost is ~50-100ms of latency. Drizzle wins on that axis. It also integrates cleanly with Zod via `drizzle-zod`, which derives Zod schemas from your table definitions, useful for the single-source-of-truth pattern (more in the next article).
+
+**Picked: Drizzle.**
+
+## Forms: React Hook Form + Zod
+
+Lots of forms in a workflow tool, with non-trivial validation rules. The de facto pairing for React:
+
+- **React Hook Form** for form state, controlled inputs, error display.
+- **Zod** for schema validation.
+- **`zodResolver` from `@hookform/resolvers`** to bridge them.
+
+The same Zod schema that validates the form on the client is the schema that validates the input on the server (in the Server Action). Single source of truth, no drift between layers.
+
+## UI components: Tailwind v4 + shadcn/ui (selective)
+
+Tailwind v4 came pre-configured by `create-next-app`. CSS-based config now lives in `app/globals.css` rather than `tailwind.config.js`. Small detail, worth knowing if you're used to v3.
+
+For components, I went with **selective shadcn**. shadcn isn't a framework. Its CLI pastes Radix-based component source into your repo (e.g., `npx shadcn add dialog` drops ~200 lines of accessible Dialog component into `components/ui/dialog.tsx`). You own the file.
+
+I'll use shadcn only for components that are hard to build correctly:
+
+- Dialog, Select, Combobox, Checkbox group, Toast, Date Picker
+
+For simple components (Button, layout, cards, badges), I'll write them with raw Tailwind. Saves repo bloat and avoids opinions where they're not earned.
+
+## Client-side data caching: deferred
+
+The classic React stack for client-side caching is SWR or TanStack Query. But Next 16 + React 19 ship native primitives that cover most of what they did:
+
+- Server Components for read paths.
+- Server Actions for mutations.
+- `revalidatePath()` / `revalidateTag()` for cache invalidation.
+- `useOptimistic()` for instant-feedback UI.
+
+I'm deferring the client-cache decision until I see the actual UI patterns and find a case where the native primitives aren't enough. SWR remains in my back pocket; TanStack Query if I need its DevTools and more advanced cache semantics.
+
+## Auth: Slack SSO via Auth.js v5
+
+The user base lives in our Slack workspace. "Sign in with Slack" (OIDC) is the cleanest path. Auth.js v5 (`next-auth@beta`) has a built-in Slack provider, ~15 lines of config. The `signIn` callback rejects logins from any workspace other than ours by checking `team_id`.
+
+The same Slack app provides a bot token for outbound `chat.postMessage` calls (notifications, deadline reminders). Two separate concerns, one Slack app, stored separately in Secret Manager.
+
+`next-auth@beta` is, well, beta, but it's the right direction for Next 16 (v4 doesn't support modern Next features properly). I'm holding off on installing it until the SSO wiring session. Installing now would pin to a version that may ship breaking changes before I'm ready to use it.
+
+## File storage: GCS with signed URLs
+
+For uploaded files (delivered assets), the standard GCP pattern:
+
+1. Browser asks the server for a signed upload URL.
+2. Server generates a pre-signed PUT URL via the GCS API.
+3. Browser uploads directly to GCS. The app never proxies file content.
+4. Server stores the resulting object path in Postgres.
+
+Downloads work the same way (signed GET URLs). The app process never sees bytes, which keeps it lightweight and removes the file-size ceiling that comes with passing through a Cloud Run instance.
+
+## Secrets: Secret Manager
+
+Slack tokens, DB password, Auth.js secret all in [Secret Manager](https://cloud.google.com/secret-manager). Mounted into Cloud Run as env vars at deploy time. Production credentials never in code, never in `.env` files committed to the repo.
+
+The app reads env vars through a Zod-validated wrapper (`lib/env.ts`) that fails fast at boot if anything required is missing. Beats discovering at 3 AM that one of the env vars never got set.
+
+## CI/CD: GitHub Actions → Artifact Registry → Cloud Run
+
+Standard chain:
+
+1. **GitHub Actions** runs the build, tests, lint, and container build.
+2. Image gets pushed to **Artifact Registry** (GCP's container registry).
+3. Cloud Run deploys the new revision.
+
+Two workflows: staging on merge to `main`, prod on git tag.
+
+## Package manager: npm
+
+`create-next-app` defaults to npm. I left it. pnpm and yarn are fine alternatives, but for a project with no shared workspaces, the default package manager is the path of least resistance.
+
+## Cost rough estimate
+
+Order-of-magnitude monthly costs at projected scale:
+
+- Cloud Run (prod, min=1): ~$20
+- Cloud Run (staging, min=0): ~$2
+- Cloud SQL (prod, smallest custom tier): ~$50
+- Cloud SQL (staging, `db-f1-micro`): ~$10
+- Cloud Storage: under $5
+- Serverless VPC connector: ~$10
+- Secret Manager, Cloud Tasks, Cloud Scheduler: cents
+
+Roughly **$80-120/mo prod, $30/mo staging**. Trivial for the developer-hours it's meant to save.
+
+## Wrapping Up
+
+The decisions above took a few hours of thinking, not days. The pattern that kept showing up: at this scale, the simple thing is the correct thing. No GKE when Cloud Run will do. No Redis when Postgres will do. No separate backend when Next.js will do. No Prisma when Drizzle will do.
+
+Key takeaways:
+
+1. **State your constraints first.** Internal-only / modest load / AI-maintainable build flips most of the "default" advice you'd find online.
+2. **Pick managed services where they're a wash on cost.** Cloud Tasks beats running your own queue. Secret Manager beats env files. Cloud SQL beats self-managed Postgres.
+3. **Don't pre-install for hypothetical needs.** SWR, date-fns, `next-auth@beta` are all deferred until I actually need them. Pinning beta packages now is just a future migration.
+4. **The single-source-of-truth pattern matters more than the framework.** Zod schemas → form, API, DB types via `drizzle-zod`. One file changes when adding a field.
+5. **Cold-start cost on serverless is real but bounded.** Drizzle over Prisma, native Next primitives over SWR. Small wins that compound.
+
+Next up: planning the AI-assisted development workflow before writing code. The AGENTS.md file, code conventions baked into auto-loaded agent context, and what NOT to put there.
