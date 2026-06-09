@@ -1,0 +1,155 @@
+---
+title: 'Private DMs from a Slack Workflow Without the Webhook Step'
+description: 'Slack Workflow Builder dropped the outbound webhook action, so a form can no longer call your service directly. Here is how I worked around it by routing form submissions through a private channel that a bot reads, then DMing the requester a computed deadline, all without paying for a third-party connector.'
+topics: ['Python', 'Slack', 'GCP']
+published: true
+date: '2026-06-02'
+---
+
+## Intro
+
+This is the first of a few automations I built around Slack Workflow Builder forms. The team fills out a short form, and a bot turns that submission into something useful: a private message, a spreadsheet row, an owner mention, or a pull request.
+
+This first one is the simplest in scope but had the most annoying constraint. The goal:
+
+> A user submits an intake form. The bot calculates a deadline (the date of the next weekly review meeting) and DMs it back to that user privately, so the channel does not get spammed with one message per submission.
+
+The catch is how a Slack Workflow talks to your backend at all.
+
+## The Constraint: No More Outbound Webhook
+
+Older Slack workflows had a "send a web request" step, so a form could POST its fields straight to your service. Slack removed that step from the standard Workflow Builder. A workflow can now post a message into a channel, but it cannot call an arbitrary HTTP endpoint.
+
+So the bot needs to read the submission _somewhere_. The two realistic options:
+
+1. Have the workflow post into a channel, and let the bot listen for messages in that channel.
+2. Use a paid connector (a third-party automation platform) to bridge the form to an HTTP call.
+
+Option 2 means another vendor and a recurring bill for what is essentially "move this text from A to B." Not worth it. So option 1 it is, with one wrinkle: I do not want a public channel filling up with internal form dumps.
+
+The fix is boring and effective: **the workflow posts into a dedicated private channel that only the bot and a couple of admins are in.** The bot reads messages there, does its work, and DMs the actual requester. The noisy intermediate message lives somewhere nobody watches.
+
+## What We're Building
+
+```
+┌──────────────────────────────────────────────┐
+│  Slack Workflow form (deadline request)        │
+│   Requester: @someone                          │
+│   Attendees: @a, @b                            │
+└───────────────────────┬────────────────────────┘
+                        │  posts into
+                        ▼
+┌──────────────────────────────────────────────┐
+│  #private-intake  (bot + admins only)          │
+└───────────────────────┬────────────────────────┘
+                        │  message event
+                        ▼
+┌──────────────────────────────────────────────┐
+│  Flask + slack-bolt bot (Cloud Run)            │
+│   • compute next meeting date (skip holidays)  │
+│   • DM the requester the deadline              │
+└──────────────────────────────────────────────┘
+```
+
+## The Shared Routing Pattern
+
+All of these automations share one detail worth establishing up front, because the other articles reuse it. A Slack Workflow message arrives as a **bot message**, and modern Workflow Builder does not include a stable workflow id in the event metadata. So I identify which workflow sent a message with three cheap checks:
+
+```python
+@app.event("message")
+def _message(event, say, client, logger):
+    bot_id = event.get("bot_id")
+    channel = event.get("channel")
+    app_id = event.get("app_id")
+    text = event.get("text", "") or ""
+
+    if (
+        bot_id
+        and channel == INTAKE_CHANNEL_ID
+        and DEADLINE_MARKER in text          # a label unique to this form
+        and app_id == DEADLINE_WORKFLOW_APP_ID
+    ):
+        event_ts = event.get("event_ts") or event.get("ts")
+        if _is_duplicate(f"deadline:{event_ts}"):
+            return
+        handle_deadline_request(event, say, client, logger)
+        return
+```
+
+- **`bot_id`** is set because workflow posts come from a bot, not a person.
+- **channel + a marker string** (a label that only this form contains) narrows it down.
+- **`app_id`** pins it to the specific Workflow Builder app, so another bot in the same channel cannot trigger us.
+- **`_is_duplicate`** guards against Slack redelivering the same event. It is a small time-boxed set of seen event timestamps.
+
+## Computing the Deadline
+
+The business rule: the deadline is the date of the next weekly review meeting (say, the next Tuesday), but never a public holiday. A holiday library handles the calendar so I do not maintain a list by hand.
+
+```python
+import datetime
+import jpholiday  # any holiday calendar lib works
+
+def next_meeting_date(today: datetime.date, weekday: int = 1) -> datetime.date:
+    # weekday: Monday=0 ... so Tuesday=1
+    days_ahead = (weekday - today.weekday()) % 7
+    days_ahead = days_ahead or 7  # always strictly in the future
+    candidate = today + datetime.timedelta(days=days_ahead)
+    while jpholiday.is_holiday(candidate):
+        candidate += datetime.timedelta(days=7)
+    return candidate
+```
+
+Keeping this as a pure function (date in, date out) makes it trivial to unit test, which matters more than it sounds: off-by-one weekday math is exactly the kind of thing that silently ships wrong.
+
+## Sending the DM
+
+To DM a user you open a conversation with their user id and post to it. The requester's id comes from the form text, where Slack has already converted a typed `@name` into a `<@U…>` token:
+
+```python
+import re
+
+def extract_user_id(text: str) -> str | None:
+    m = re.search(r"<@([A-Z0-9]+)>", text)
+    return m.group(1) if m else None
+
+def dm_user(client, user_id: str, message: str) -> None:
+    # chat.postMessage to a user id opens/uses the bot DM channel
+    client.chat_postMessage(channel=user_id, text=message)
+```
+
+The handler ties it together: parse the requester, compute the date, format a friendly message, send it.
+
+```python
+def handle_deadline_request(event, say, client, logger):
+    text = event.get("text", "") or ""
+    user_id = extract_user_id(text)
+    if not user_id:
+        logger.warning("deadline request without a requester mention")
+        return
+
+    deadline = next_meeting_date(datetime.date.today())
+    client.chat_postMessage(
+        channel=user_id,
+        text=DEADLINE_DM_MESSAGE.format(date=deadline.isoformat()),
+    )
+```
+
+## Gotchas
+
+### 1. The bot must be a member of the private channel
+
+A bot only receives `message` events from a private channel if it is invited to it, and the app needs the `groups:history` scope plus a `message.groups` event subscription (public channels use `channels:history` and `message.channels`). Forget any one of those and the bot simply goes quiet, with no error to tell you why.
+
+### 2. DMs need the message to be openable
+
+Posting to a user id with `chat.postMessage` works when the bot has `chat:write` and the user has not blocked it. There is no separate "open DM" call needed in practice; posting to the user id is enough.
+
+### 3. Keep the intermediate channel boring
+
+Because the workflow posts a full form dump into the private channel on every submission, that channel is intentionally a junk drawer. The value is in the DM. I keep the channel private and unwatched so nobody mistakes it for a feed they need to read.
+
+## Wrapping Up
+
+The whole feature exists to dodge one missing Slack feature. The lesson that carried into the rest of the project: when a managed tool removes the integration point you wanted, a private channel plus a bot that listens is often a cheaper and more flexible bridge than paying a connector to do the same thing.
+
+Next: turning a richer form into a [spreadsheet row and a calendar event](/projects/slack-workflow-automations/slack-form-to-spreadsheet-and-calendar), with an approval button in the middle.

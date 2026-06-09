@@ -1,0 +1,167 @@
+---
+title: 'From a Slack Form to a Spreadsheet Row and a Calendar Event'
+description: 'Parsing a multi-field Slack Workflow form into structured data, appending it to a Google Sheet, posting a review message with an Approve button, and on approval booking a Google Calendar event. Covers form parsing, the Sheets API, Slack interactive buttons, and the Calendar API.'
+topics: ['Python', 'Slack', 'GCP', 'Google Sheets']
+published: true
+date: '2026-06-04'
+---
+
+## Intro
+
+The second automation handles a heavier intake form: a request with a title, dates, owners, and a handful of yes/no flags. When someone submits it, the bot should:
+
+1. Parse the form into a clean structure.
+2. Append a row to a master spreadsheet so the request is tracked.
+3. Post a review message with an **Approve** button.
+4. When a reviewer clicks Approve, create a calendar event for the launch date.
+
+This one is interesting because it touches three Google and Slack surfaces at once: the Sheets API, Slack interactivity (a button that calls back into the bot), and the Calendar API.
+
+## What We're Building
+
+```
+ Slack form ──▶ bot parses + validates ──▶ append row to Google Sheet
+                                            │
+                                            ▼
+                              post "review" message + [Approve] button
+                                            │  reviewer clicks
+                                            ▼
+                              create Google Calendar event for launch date
+```
+
+## 1. Parsing the Form
+
+Workflow Builder posts one message with labeled fields. A field can span multiple lines (a description), and some fields hold multiple users. I keep the label-to-key mapping in config so adding a field is a one-line change:
+
+```python
+FORM_FIELDS = {
+    "title": "Title",
+    "start_date": "Launch date",
+    "owners": "Owners",
+    "is_priority": "Priority request?",
+}
+```
+
+The parser walks the lines, switches "current field" when it sees a known label, and accumulates everything else into that field. A small dataclass holds the result:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class RequestData:
+    title: str
+    start_date: str
+    owners: list[str]
+    is_priority: bool
+```
+
+A couple of real-world wrinkles I had to handle:
+
+- **Optional datetime fields.** If a form's date field is optional and left blank, Slack can still send a default value (the current time). I treat an end date that is not strictly after the start date as "not provided" and drop it, rather than booking a zero-length event.
+- **Yes/no flags.** A "yes" becomes a checkmark in the sheet and "no" becomes an empty cell, which reads far better in a spreadsheet than the literal words.
+
+## 2. Appending to Google Sheets
+
+I use a service account for Sheets access. The credentials live in a secret and are loaded at runtime:
+
+```python
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+def sheets_client():
+    creds = Credentials.from_service_account_info(
+        json.loads(os.environ["SHEETS_CREDENTIALS"]),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    return build("sheets", "v4", credentials=creds)
+```
+
+Appending a row is one API call. The one trap worth noting: the sheet/tab name needs single quotes in the A1 range if it contains anything unusual, so I always quote it:
+
+```python
+def a1(sheet: str, cell: str) -> str:
+    return f"'{sheet.replace(chr(39), chr(39) * 2)}'!{cell}"
+
+def append_row(svc, spreadsheet_id, sheet, values: list):
+    svc.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=a1(sheet, "A:A"),
+        valueInputOption="USER_ENTERED",
+        body={"values": [values]},
+    ).execute()
+```
+
+## 3. The Approve Button
+
+Slack interactivity is the fun part. I post the review message with a button block, and slack-bolt routes the click to an action handler by the button's `action_id`:
+
+```python
+def review_blocks(summary: str):
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": summary}},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve"},
+                    "style": "primary",
+                    "action_id": "request_approve",
+                }
+            ],
+        },
+    ]
+```
+
+```python
+@app.action("request_approve")
+def on_approve(ack, body, client, logger):
+    ack()  # acknowledge within 3 seconds or Slack shows an error
+    message_ts = (body.get("message") or {}).get("ts") or ""
+    if _is_duplicate(f"approve:{message_ts}"):
+        return
+    handle_approval(body, client, logger)
+```
+
+Two things that bite people here:
+
+- **You must `ack()` fast.** Slack expects acknowledgement within three seconds. Do the slow work (Calendar API call) after acking.
+- **Deduplicate the click.** A double click, or Slack retrying, can fire the handler twice. The same dedup helper from the other automations covers it.
+
+## 4. Booking the Calendar Event
+
+On approval, I read the stored request and create an all-day event for the launch date with the Calendar API (same service-account pattern as Sheets, with a calendar scope):
+
+```python
+def create_event(svc, calendar_id, title, date_str):
+    svc.events().insert(
+        calendarId=calendar_id,
+        body={
+            "summary": title,
+            "start": {"date": date_str},
+            "end": {"date": date_str},
+        },
+    ).execute()
+```
+
+The bot then edits the original message to show it is approved, so the button cannot be clicked again and the channel reflects the new state.
+
+## Gotchas
+
+### 1. Column alignment when reading back
+
+When I later read a row back to look up related fields, I read a single contiguous range (`A:` through the rightmost column I need) in one call. Reading scattered columns with separate calls and zipping them is how columns silently misalign when a row has blanks. One range, one read.
+
+### 2. Duplicate entries in the source
+
+The master sheet occasionally had two rows with the same entry id (a human pasted a duplicate). When looking up "the" row for an id, I dedupe by a stable field and take the most recent match rather than assuming uniqueness.
+
+### 3. Service account sharing
+
+The service account email has to be granted access to both the spreadsheet and the calendar. This is easy to forget and produces a permission error that looks like a code bug but is just a sharing setting.
+
+## Wrapping Up
+
+This automation replaced a manual "copy the form into the tracker, then put it on the calendar" chore with a parse, an append, and a click. The interactive button is what makes it feel like an app rather than a script: a human stays in the loop to approve, but everything around that click is automated.
+
+Next: when a form just needs to reach the right person, [auto-routing a report to its owner](/projects/slack-workflow-automations/auto-routing-reports-to-the-right-owner) by looking the URL up in the same spreadsheet.
