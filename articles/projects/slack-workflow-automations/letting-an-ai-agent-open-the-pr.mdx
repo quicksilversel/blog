@@ -1,0 +1,182 @@
+---
+title: 'Letting an AI Agent Open the Pull Request'
+description: 'A form sends a URL. The bot decides whether the page lives in a repo it can change, and if so it triggers a CI workflow where an AI coding agent makes a fixed, repetitive edit and opens a pull request, then reports back into the Slack thread. Covers classifying a page via the GitHub contents API, the reusable-workflow pattern, an AI agent in CI, and a secured callback.'
+topics: ['Python', 'Slack', 'GHA', 'AI', 'Claude']
+published: true
+date: '2026-06-09'
+---
+
+## Intro
+
+The last automation is the most involved, and the one I am most happy with. There is a recurring chore: take a page that should now return a 404, and make the small, always-identical code change that turns it into a 404. For one class of pages this is pure boilerplate, the same two-file edit every time.
+
+The goal:
+
+> A user submits a URL. If the page lives in the modern app repo (where the edit is mechanical), trigger an automated pull request that makes the change. If it lives in a legacy repo (where it is not automatable), just mention the owner so a human handles it.
+
+So the bot has to do two new things: **classify** where a URL lives, and **drive a code change in another repository** without doing the editing itself inside the request.
+
+## What We're Building
+
+```
+ form (URL) ──▶ bot: is this page in the modern repo?
+                 │
+        ┌────────┴───────────────┐
+        │ no (legacy)            │ yes
+        ▼                        ▼
+   mention owner          dispatch a CI workflow
+   (handled by humans)          │
+                                ▼
+                     AI coding agent makes the fixed edit
+                                ▼
+                     open PR, request review
+                                ▼
+                     call back to the bot → post PR link in thread
+```
+
+## 1. Classifying the URL Without Cloning Anything
+
+The modern app is a file-routed framework, and it commits a generated route map (a single file listing every served path). I do not need to clone the repo to know whether a path exists; I fetch that one file through the GitHub contents API and check for the path:
+
+```python
+import base64, json, urllib.request
+
+def fetch_text(repo: str, path: str, ref: str) -> str | None:
+    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={ref}"
+    req = urllib.request.Request(url, headers=auth_headers(), method="GET")
+    try:
+        with urllib.request.urlopen(req) as resp:
+            payload = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    return base64.b64decode(payload["content"]).decode()
+
+def is_in_modern_repo(page_path: str) -> bool:
+    content = fetch_text(MODERN_REPO, ROUTE_MAP_PATH, "main")
+    return bool(content) and f"'{page_path}'" in content
+```
+
+This is one cheap HTTP call. I chose the generated route map over listing the routes directory because the map already contains the real served paths as string literals, so matching is a substring check with no path-shape guessing. If the literal is present, the page is in the modern repo; if not, treat it as legacy. The legacy branch reuses the exact owner-mention logic from the [report router](/projects/slack-workflow-automations/auto-routing-reports-to-the-right-owner).
+
+## 2. Why the Edit Runs in CI, Not in the Bot
+
+The edit itself (open two files, swap an import, replace a function body) is mechanical but not perfectly templatable: the target files sit in slightly different places per page. That irregularity is exactly what an AI coding agent is good at, and exactly what a brittle string-replacement script is bad at.
+
+But the bot runs behind a Slack request that must be acknowledged in about three seconds, and an agent edit plus a git push plus a pull request takes minutes. So the heavy work cannot live in the request. The bot's job ends at "trigger the job and acknowledge." The job runs in GitHub Actions, where the repo and credentials already live:
+
+```python
+def dispatch_pr_workflow(page_path, slug, channel, thread_ts):
+    dispatch_workflow(
+        repo=AUTOMATION_REPO,
+        workflow_file="auto-pr.yml",
+        ref="main",
+        inputs={
+            "page_path": page_path,
+            "slug": slug,
+            "slack_channel": channel,
+            "slack_thread_ts": thread_ts,
+        },
+    )
+```
+
+`dispatch_workflow` is a `POST` to the Actions `workflow_dispatch` endpoint. A note that cost me debugging time: a `workflow_dispatch` only becomes triggerable once its workflow file is on the repository's **default branch** and Actions has registered it. Until then the dispatch returns 404, which is easy to misread as a permissions problem.
+
+## 3. The Reusable Workflow Pattern
+
+I wanted the workflow logic maintained alongside the bot, not scattered across repos. GitHub's reusable workflows fit, but with a sharp edge worth calling out:
+
+> A reusable workflow reads secrets from the **caller's** repository, never from the repo where the workflow file lives.
+
+So you cannot keep the secrets next to the logic and have a caller in another repo borrow them. The logic lives as a `workflow_call` workflow in one repo; a thin caller in the target repo invokes it and forwards the secrets it owns:
+
+```yaml
+# caller in the target repo: just forwards inputs + secrets
+jobs:
+  auto-pr:
+    uses: my-org/automation-repo/.github/workflows/auto-pr.yml@main
+    with:
+      page_path: ${{ inputs.page_path }}
+      slug: ${{ inputs.slug }}
+    secrets:
+      AI_AGENT_ROLE_ARN: ${{ secrets.AI_AGENT_ROLE_ARN }}
+      CALLBACK_URL: ${{ secrets.CALLBACK_URL }}
+      CALLBACK_SECRET: ${{ secrets.CALLBACK_SECRET }}
+```
+
+The reusable workflow checks out the caller, runs the agent, commits, and opens the PR.
+
+## 4. The AI Agent Step
+
+The agent runs headlessly with a fixed prompt describing the exact end state of the edit. The prompt does the editing only; the surrounding steps own git, so the branch name, reviewer, and PR body stay deterministic:
+
+```yaml
+- name: Make the edit with an AI coding agent
+  uses: anthropics/claude-code-action@v1
+  with:
+    prompt: |
+      Apply the standard 404 change for the page "${{ inputs.page_path }}".
+      Edit only two files, and do NOT commit or open a PR:
+        1. the page component: render the shared 404 component instead of
+           the normal page body.
+        2. the page's data-fetching module: replace its body so it returns
+           the shared 404 data handler.
+      The data-fetching file's location varies; locate it with search tools.
+    claude_args: --allowedTools "Read,Edit,Glob,Grep"
+
+- name: Commit, push, open PR
+  run: |
+    git checkout -b "auto-404/${SLUG}"
+    git commit -am "make ${PAGE_PATH} return 404"
+    git push -u origin "auto-404/${SLUG}"
+    gh pr create --base develop --reviewer "$REVIEWER" \
+      --title "make ${PAGE_PATH} return 404" --body "automated change"
+```
+
+Describing the desired end state and letting the agent find the files is what makes this resilient to the per-page irregularity that defeated a templated script.
+
+## 5. Reporting Back to Slack
+
+The bot already posted "working on it" when it dispatched. To close the loop, the workflow calls a small endpoint on the bot with the PR link, and the bot posts it into the original thread. The endpoint is public (the bot also serves Slack's events, which must be reachable), so it is authenticated with a shared secret rather than left open:
+
+```python
+@app.route("/internal/pr-callback", methods=["POST"])
+def pr_callback():
+    provided = request.headers.get("X-Callback-Secret", "")
+    if not hmac.compare_digest(os.environ["CALLBACK_SECRET"], provided):
+        return jsonify({"error": "unauthorized"}), 401
+    body = request.get_json(silent=True) or {}
+    slack_app.client.chat_postMessage(
+        channel=body["channel"],
+        thread_ts=body["thread_ts"],
+        text=pr_ready_message(body),
+    )
+    return jsonify({"ok": True}), 200
+```
+
+Routing the result through the bot keeps the Slack token in exactly one place. The target repo only needs the callback URL and the shared secret, not Slack credentials.
+
+## Gotchas
+
+### 1. A dispatch failure is not a "legacy page"
+
+My first version wrapped classification and dispatch in one try/except, so when a dispatch failed (the workflow was not registered yet) it fell through to the legacy "mention the owner" path, which falsely implied the page was legacy. I split them: a classification failure falls back to a mention, but a dispatch failure posts a distinct "could not start the PR job" message. Failures should name which half failed.
+
+### 2. Read works without the workflow; the PR does not
+
+Classifying a URL only needs the contents API (read). Opening the PR needs the Actions API (write) plus the workflow being registered. These are separate permissions on separate API surfaces, so the classify step can work perfectly while the dispatch still 404s. Diagnose them independently.
+
+### 3. The PR author cannot be its own reviewer
+
+If the token that pushes the branch is owned by the same person you request review from, GitHub rejects the review request. I made the PR step tolerant (request the reviewer, but do not fail the run if that request is rejected) so a self-owned token does not break the whole flow.
+
+### 4. Don't test with an already-done page
+
+The first page I reached for as a test had already been converted. The agent correctly made no changes, and my "abort if no diff" guard kicked in. Obvious in hindsight, but worth a sentence: pick a fixture that actually needs the edit.
+
+## Wrapping Up
+
+This automation hands a repetitive, slightly-irregular code change to an AI agent running in CI, triggered by a Slack form and reported back into the same thread. The bot stays lightweight (classify and dispatch), the heavy lifting happens where the code and credentials already are, and a human still reviews the PR.
+
+Across the four automations, the throughline is the same: a Slack Workflow form is a surprisingly good front door, and a small bot that listens to a channel can fan a single submission out to spreadsheets, calendars, mentions, or an AI-authored pull request, whichever the situation calls for.

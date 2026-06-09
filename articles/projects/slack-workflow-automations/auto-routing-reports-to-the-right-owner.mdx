@@ -1,0 +1,148 @@
+---
+title: 'Auto-Routing a Report to the Right Owner with a Spreadsheet Lookup'
+description: 'A report form sends a URL. The bot normalizes the URL, looks it up in a master spreadsheet to find who owns that page, and @mentions them in-thread, with sensible fallbacks. Covers URL normalization, an efficient bottom-up sheet lookup, and Slack mention resolution including subteam groups.'
+topics: ['Python', 'Slack', 'Google Sheets']
+published: true
+date: '2026-06-06'
+---
+
+## Intro
+
+The third automation is small but high-leverage. People file a "something is broken on this page" report through a Slack form, and historically nobody was automatically notified, so reports sat. The goal:
+
+> Given the reported URL, figure out who owns that page and @mention them in the thread, so the report reaches a human immediately.
+
+The owner information already lived in the same master spreadsheet from the [previous automation](/projects/slack-workflow-automations/slack-form-to-spreadsheet-and-calendar). So this is really three problems: normalize the URL, find the matching row, and turn the owner into a Slack mention.
+
+## What We're Building
+
+```
+ report form (URL) ──▶ normalize URL ──▶ look up owner in master sheet
+                                          │
+              ┌───────────────────────────┼───────────────────────────┐
+              ▼                            ▼                           ▼
+      owner found              special path prefix              no match
+      mention the owner        mention the brand group          mention default group
+```
+
+## 1. Normalizing the URL
+
+URLs in the wild are messy: trailing slashes, query strings, fragments, and a separate mobile path prefix. Two URLs that point at the same page must compare equal, so I normalize before matching anything:
+
+```python
+from urllib.parse import urlsplit
+
+def normalize_url(url: str) -> str:
+    parts = urlsplit((url or "").strip())
+    if not parts.netloc:
+        return (url or "").strip()
+    path = parts.path.rstrip("/")
+    # fold the mobile path back to the desktop one: /m/foo -> /foo
+    if path == "/m" or path.startswith("/m/"):
+        path = path[len("/m"):]
+    return f"{parts.scheme}://{parts.netloc}{path}"
+```
+
+Dropping the query and fragment, normalizing the trailing slash, and folding the mobile prefix means `https://site/m/foo/?ref=x#top` and `https://site/foo` resolve to the same key.
+
+## 2. Looking Up the Owner Efficiently
+
+The master sheet is large, and the same URL can appear in more than one row over time. I want the most recent matching row, and I do not want to pull the whole sheet to get it. So the lookup reads only the URL column first, scans it from the bottom up (newest rows last), and stops at the first match. Then it reads just that one row for the owner fields:
+
+```python
+def find_owner(svc, sheet_id, sheet, target_url: str):
+    target = normalize_url(target_url)
+
+    # read only the URL column
+    url_col = read_range(svc, sheet_id, a1(sheet, "AF:AF"))
+    match_row = None
+    for i in range(len(url_col) - 1, -1, -1):       # bottom-up: latest wins
+        cell = (url_col[i] or [""])[0].strip()
+        if cell and normalize_url(cell) == target:
+            match_row = i + 1
+            break
+    if match_row is None:
+        return None
+
+    # now read just that row for the owner + type columns
+    row = read_range(svc, sheet_id, a1(sheet, f"A{match_row}:AF{match_row}"))[0]
+    return Owner(developer=cell_at(row, "U"), kind=cell_at(row, "E"))
+```
+
+Two cheap calls instead of one huge one, and "latest wins" falls out naturally from scanning bottom-up.
+
+## 3. Resolving the Mention
+
+An owner name becomes a Slack mention. Slack supports two mention shapes that matter here:
+
+- A user: `<@U12345>`
+- A group (subteam): `<!subteam^S12345>`
+
+I keep a small name-to-user-id map for known people, and fall back to a team group when the owner is blank or unknown. The resolution has a clear priority order:
+
+```python
+def resolve_mention(developer: str, kind: str) -> str:
+    developer = (developer or "").strip()
+    if developer in USER_MAP:
+        return f"<@{USER_MAP[developer]}>"
+    # no named owner: fall back by the page type
+    if "type-a" in kind:
+        return DEFAULT_GROUP_A      # <!subteam^...>
+    if "type-b" in kind:
+        return DEFAULT_GROUP_B
+    return DEFAULT_GROUP_A
+```
+
+There is also a special case: some URLs follow a path prefix that maps directly to a brand's owner group, no spreadsheet needed. I check that prefix first, because it is both cheaper and more specific than the sheet lookup:
+
+```python
+def resolve_report_mention(url: str) -> str:
+    url = normalize_url(url)
+    if url.startswith(BRAND_PREFIX):
+        slug = url[len(BRAND_PREFIX):].split("/")[0]
+        group = brand_group(slug)            # a static slug -> group map
+        return group or REVIEWERS_FALLBACK
+    owner = find_owner(...)
+    if owner is None:
+        return DEV_MANAGERS_GROUP            # not in the sheet at all
+    return resolve_mention(owner.developer, owner.kind)
+```
+
+## 4. Posting in the Thread
+
+The handler extracts the first URL from the form text, resolves the mention, and replies in the same thread so the report and the ping stay together:
+
+```python
+def handle_report(event, say, client, logger):
+    text = event.get("text", "") or ""
+    ts = event.get("ts", "")
+    url = extract_first_url(text)
+    if not url:
+        return
+    try:
+        mention = resolve_report_mention(url)
+    except Exception as e:
+        logger.exception(f"failed to resolve mention for {url!r}: {e}")
+        mention = DEV_MANAGERS_GROUP        # never fail silently
+    say(text=NOTIFY_MESSAGE.format(mention=mention, url=url), thread_ts=ts)
+```
+
+## Gotchas
+
+### 1. Normalize on both sides
+
+It is not enough to normalize the incoming URL; the values stored in the sheet are just as messy. I normalize the cell value too before comparing, otherwise a stored trailing slash defeats the match.
+
+### 2. Pick the fallback group deliberately
+
+The "no match" case is where reports used to vanish. Sending them to a specific owners group (rather than a generic default) means an unmatched URL still lands on people who can act on it. A graceful fallback is the whole point of the feature.
+
+### 3. Reuse, do not re-implement
+
+The URL extraction, the normalization, and the mention resolution are shared with other automations in this project. I pulled them into a common module so there is exactly one definition of "how do we turn a URL into a mention," which paid off immediately when the next automation needed the same classification logic.
+
+## Wrapping Up
+
+Three small pieces (normalize, look up, mention) turned a silent form into an instant ping to the right person. The shared normalization and mention helpers also set up the most involved automation in the set, where the same URL has to be classified well enough to decide whether a machine can fix the page itself.
+
+Next: [letting an AI agent open the pull request](/projects/slack-workflow-automations/letting-an-ai-agent-open-the-pr) when the page lives in a repo we can change automatically.
