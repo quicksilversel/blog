@@ -1,0 +1,259 @@
+---
+title: 'Escaping the Supabase Free-Tier Freeze: Migrating to Neon, Auth.js, and Vercel Blob'
+description: 'My hobby recipe app got paused after 90 days of inactivity and could no longer be restored from the dashboard. Here is how I rescued the data from a backup and rebuilt the stack on platforms that do not freeze - swapping Supabase for Neon + Drizzle, Auth.js, and Vercel Blob.'
+date: 2026-06-10
+topics: ['Supabase', 'Neon', 'Next.js']
+published: true
+---
+
+## The Freeze
+
+I built a small recipe site for a friend. One or two users, a couple dozen recipes, maintained by exactly one person (me). It ran on Supabase - Postgres for the data, Supabase Auth for login, Supabase Storage for the photos. For a free side project, it was a great starting point.
+
+The problem is Supabase's free tier pauses a project after a week of inactivity, and a recipe site doesn't get touched every week. I'd been ignoring the pause emails, figuring I'd click "restore" whenever I next needed it.
+
+Then I opened the dashboard and saw this:
+
+```
+This project has been paused for over 90 days and cannot be
+restored through the dashboard.
+```
+
+That's a different category of problem. A pause you can undo. A 90-day deletion you cannot. The only thing I had was a `pg_dump` backup file sitting in my Downloads folder from months earlier.
+
+So this turned into two jobs: get the data back, and move to a stack that won't do this to me again.
+
+## Step 1: What's Actually in the Backup?
+
+Before picking anything new, I needed to know what survived. The backup was a plain-text SQL cluster dump (`pg_dump` output), so I could just read it.
+
+```bash
+file db_cluster.backup
+# ASCII text
+
+grep "CREATE TABLE public" db_cluster.backup
+```
+
+The `public` schema had what mattered: `recipes`, `bookmarks`, `profiles`. Counting the `COPY ... FROM stdin` blocks told me the data was intact - 19 recipes, 4 bookmarks, 1 user. The recipe rows still had their full Japanese titles, ingredients, and step-by-step directions.
+
+One thing that did _not_ survive: the images. A `pg_dump` only contains the database. The actual image blobs live in a separate object store, and the URLs in my `recipes.image_url` column pointed at `my-project.supabase.co` - a host that no longer resolves now that the project is deleted.
+
+```bash
+curl -I "https://my-project.supabase.co/storage/v1/object/public/recipe-images/foo.webp"
+# curl: (6) Could not resolve host
+```
+
+The lesson there is blunt: **a database backup is not a storage backup.** Luckily only 4 of 19 recipes had photos, so re-shooting them was a non-issue. Everything else was recoverable.
+
+I extracted the recipes into a clean, portable JSON file so the data was safe regardless of what I did next. That file later became my seed source.
+
+## Step 2: Picking a Stack That Doesn't Freeze
+
+The important realization: I wasn't just using Supabase as a _database_. I was using three Supabase products glued together - Database, Auth, and Storage. Most "free Postgres" alternatives only replace the first one. I'd have to replace all three.
+
+Here's what I landed on, and why:
+
+- **Database → [Neon](https://neon.tech/) + [Drizzle ORM](https://orm.drizzle.team/)**. Neon is serverless Postgres - it auto-suspends on idle and auto-resumes on the next query, but it _never deletes your project for inactivity_. That single policy difference is the whole reason for the migration. Drizzle gives me type-safe queries without the heaviness of a full ORM.
+- **Auth → [Auth.js (NextAuth v5)](https://authjs.dev/)**, with a single locked account. It's a private site for two people. I don't need public signup; I need one login.
+- **Storage → [Vercel Blob](https://vercel.com/docs/storage/vercel-blob)**. The app already deploys on Vercel, so this is one dashboard, one token, and it never freezes either.
+
+A nice property of moving off Supabase Auth: my recipe data was all Postgres, so the _database_ migration is nearly free. The work is in Auth and Storage.
+
+## Keeping the Validation Layer Intact
+
+My old data access used the Supabase client (PostgREST) and converted snake*case columns to camelCase with [ts-case-convert](https://github.com/tonivj5/ts-case-convert), then validated everything with Zod. I wanted to keep that contract exactly so my components and schemas wouldn't need to change - only the \_internals* of each query function would swap from PostgREST to Drizzle.
+
+```ts
+// Before (Supabase / PostgREST)
+const { data } = await supabase
+  .from('recipes')
+  .select('*')
+  .eq('is_public', true)
+  .order('created_at', { ascending: false })
+
+// After (Drizzle)
+const data = await db
+  .select()
+  .from(recipes)
+  .where(eq(recipes.isPublic, true))
+  .orderBy(desc(recipes.createdAt))
+
+// Both paths end the same way - unchanged:
+const camel = objectToCamel(data)
+if (!isValidOf(recipeListSchema, camel)) return []
+return camel
+```
+
+### The Nested jsonb Gotcha
+
+My `ingredients` column is `jsonb`, and each ingredient looks like `{ name, amount, is_spice }`. The old read path ran `objectToCamel` over the _entire row_, which also converted the nested `is_spice` → `isSpice` that my Zod schema expects. Drizzle returns the top-level columns however you name them in the schema, but it leaves jsonb contents exactly as stored.
+
+The fix was to not get clever: keep running `objectToCamel` on the whole row on reads, and `objectToSnake` on the nested arrays on writes, exactly like before. The DB consistently stores `is_spice`; the app consistently sees `isSpice`. Don't fight the existing convention during a migration.
+
+### Timestamps as Strings
+
+One small Drizzle detail bit me. By default Drizzle returns `timestamp` columns as JavaScript `Date` objects, but my Zod schema expected ISO strings (that's what PostgREST returned). The clean fix is telling Drizzle to hand back strings:
+
+```ts
+createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
+  .notNull()
+  .defaultNow()
+```
+
+## Mutations Have to Move to the Server
+
+Here's a structural change I didn't fully anticipate. With Supabase, my recipe create/edit/delete and bookmark toggles all ran _in the browser_ via the Supabase JS client (with row-level security enforcing access). Drizzle talks to Postgres directly, which is server-only. So every mutation - and any read called from a client component - had to become a **Server Action**.
+
+```ts
+'use server'
+
+export async function createRecipe(recipe: Omit<Recipe, 'id'>) {
+  const session = await auth()
+  if (!session?.user?.id) return null
+
+  const { ingredients, directions, ...rest } = recipe
+  const [data] = await db
+    .insert(recipes)
+    .values({
+      ...rest,
+      userId: session.user.id, // derived from the session, never the client
+      ingredients: objectToSnake(ingredients) as never,
+      directions: objectToSnake(directions) as never,
+    })
+    .returning()
+
+  revalidatePath('/')
+  revalidatePath('/recipes/[id]', 'page')
+  return data ? objectToCamel(data) : null
+}
+```
+
+This is actually a security upgrade: instead of trusting a `user_id` sent from the client, the action derives it from the server-side session.
+
+### The Bug That Cost Me an Hour: "Missing DATABASE_URL" in the Browser
+
+After the rewrite, the home page rendered a client-side crash:
+
+```
+Application error: a client-side exception has occurred
+```
+
+The console said `Missing DATABASE_URL environment variable` - which is the error my `db/index.ts` throws on import. But why was the database client being imported _into the browser bundle_?
+
+The culprit was a barrel file. My `queries/recipe/index.ts` re-exported everything together:
+
+```ts
+// The trap: a barrel mixing server-only reads with Server Actions
+export { getRecipes } from './getRecipes' // imports the db client
+export { getRecipeById } from './getRecipeById' // imports the db client
+export { createRecipe } from './createRecipe' // 'use server'
+```
+
+When a client component imported `createRecipe` from that barrel, the bundler pulled in the _entire_ barrel module graph - including `getRecipes`, which imports the Neon client, which throws on the browser where `DATABASE_URL` doesn't exist.
+
+The fix is to keep server-only modules out of any barrel that client code touches. Server Actions (`'use server'`) are safe to import from the client - they become RPC stubs. Plain server functions are not.
+
+```ts
+// Barrel now exports ONLY Server Actions - safe for client imports
+export { getAllTags } from './getAllTags'
+export { createRecipe } from './createRecipe'
+export { updateRecipe } from './updateRecipe'
+export { deleteRecipe } from './deleteRecipe'
+
+// Server Components import the reads directly from their files:
+// import { getRecipes } from '@/lib/db/queries/recipe/getRecipes'
+```
+
+## Auth.js With a Single Locked Account
+
+For a two-person private site, full signup is the wrong shape. I used Auth.js with the Credentials provider, backed by a single `users` row, and removed the signup UI entirely.
+
+```ts
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  session: { strategy: 'jwt' },
+  providers: [
+    Credentials({
+      authorize: async (credentials) => {
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, credentials.email as string))
+          .limit(1)
+        if (!user) return null
+        const ok = await bcrypt.compare(
+          credentials.password as string,
+          user.passwordHash,
+        )
+        return ok ? { id: user.id, email: user.email } : null
+      },
+    }),
+  ],
+  callbacks: {
+    jwt: ({ token, user }) => (user?.id ? { ...token, id: user.id } : token),
+    session: ({ session, token }) => {
+      if (token.id) session.user.id = token.id as string
+      return session
+    },
+  },
+})
+```
+
+To keep my existing components working, I kept the old `useAuth()` context but turned it into a thin adapter over `next-auth/react`'s `useSession`/`signIn`/`signOut`. None of the consuming components had to change.
+
+One detail that made the seed clean: I created the new `users` row with the **same UUID** as the original Supabase auth user. That way the rescued `recipes.user_id` and `bookmarks.user_id` foreign references still pointed at the right owner with zero remapping.
+
+## Storage on Vercel Blob
+
+Vercel Blob is refreshingly boring. There's no public/private bucket setting to agonize over - visibility is set per upload in code, and `del()` is server-only so it lives behind the same authenticated API route as the upload.
+
+```ts
+// upload
+const blob = await put(fileName, file, {
+  access: 'public',
+  contentType: file.type,
+})
+return NextResponse.json({ url: blob.url })
+
+// delete (separate handler, behind auth())
+await del(url)
+```
+
+The only `next/image` gotcha: you have to allow the blob host, or uploaded images won't render.
+
+```ts
+images: {
+  remotePatterns: [
+    { protocol: 'https', hostname: '**.public.blob.vercel-storage.com' },
+  ],
+}
+```
+
+## Two Caching Gotchas
+
+**Empty strings vs null.** When I exported the rescued data to JSON, I "helpfully" converted empty optional fields (`summary`, `tips`) to `null`. But the original DB stored them as empty strings, and my Zod schema declared them `z.string().optional()` - which accepts `undefined`, not `null`. The whole list silently failed validation and returned `[]`. I changed the seed to store `''` to match the original model, and the recipes appeared. Match the existing data shape; don't "improve" it mid-migration.
+
+**`unstable_cache` persists to disk.** While debugging the empty-list issue, I fixed the data but the page _still_ showed nothing - even after restarting the dev server. It turns out `unstable_cache` writes to `.next/cache`, which survives restarts. It had cached the empty result from before my fix. A `rm -rf .next/cache` and the data showed up instantly. (I later dropped `unstable_cache` entirely in favor of route-level revalidation, which is simpler and avoids this trap.)
+
+## Why There's No Keep-Alive Cron
+
+The obvious instinct after getting burned is "I'll set up a cron job to ping the database every few days so it never goes idle." On Supabase that's a common workaround. **On Neon, don't.**
+
+Neon's free tier auto-suspends the compute after a few minutes of inactivity and auto-resumes in around half a second on the next request. It does not delete your project. The suspend is a _feature_ - it's what keeps you under the free monthly compute-hour budget. A keep-alive cron would burn those hours for no reason and risk hitting the limit. The right amount of maintenance is zero.
+
+## Lessons Learned
+
+**A database backup is not a complete backup.** `pg_dump` saves your rows, not your object storage. If you rely on a managed storage bucket, back that up separately - or you'll recover your recipes and lose your photos.
+
+**Understand which products you actually use.** "Migrate off Supabase" sounds like a database task. It was three tasks - database, auth, and storage - and the database was the easy one.
+
+**Keep your contracts, swap the internals.** By preserving the Zod schemas and the snake/camel conversion, the migration touched the data layer and almost nothing else. The blast radius stayed small.
+
+**Server-only code must never reach a client barrel.** The `Missing DATABASE_URL` crash was entirely self-inflicted by a convenient `index.ts`. Server Actions are safe to import from the client; plain server functions that import a DB client are not.
+
+**Don't carry old workarounds into the new platform.** The keep-alive cron that makes sense on Supabase is actively harmful on Neon. Re-evaluate your habits against the new platform's actual behavior.
+
+## Wrapping Up
+
+What started as a "my project got deleted" panic turned into a clean weekend migration. The data came back from a forgotten backup file, the stack moved to platforms that scale to zero without losing anything, and the app ended up simpler than before - fewer moving parts, one login, direct database access, no inactivity timer hanging over it.
+
+If you're running a low-traffic side project on a free tier with an aggressive inactivity policy, it's worth checking what _actually_ happens when it goes idle. "Pauses and resumes" and "pauses then deletes" look the same right up until the day they don't.
