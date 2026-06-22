@@ -1,0 +1,102 @@
+---
+title: 'Building the UI First, Against a Mock Data Layer'
+description: 'Why I built the entire UI of an internal workflow tool before standing up Postgres, and how the mock layer worked: an in-memory store, MSW interception, Zod as the single source of truth, and a cookie-based mock session to exercise every role.'
+topics: ['Next.js', 'Zod', 'MSW']
+category: 'fullstack'
+published: true
+date: '2026-05-30'
+---
+
+## Intro
+
+The [last article](/projects/creative-workflow-tool/setting-up-the-ai-workflow) ended by promising GCP infrastructure next: Cloud SQL, Artifact Registry, the deploy pipeline. I didn't do that next. I built the entire UI first, against a mock data layer, with no database in sight.
+
+That reorder was deliberate, and it's the single decision that most shaped how the build went. This article is why, and how the mock layer was put together.
+
+## Why UI-first, before the DB
+
+The data model was still a draft when I was ready to write code. The design was close but not frozen, and a few fields were genuinely undecided. Two ways to handle that:
+
+1. **Freeze the schema, run migrations, build on top.** Then every schema change during UI work is a migration + a reseed + a redeploy.
+2. **Build the UI against mock data, let the screens shake out the schema, then do the DB once.**
+
+I went with the second. The reasoning: **the UI is the better forcing function for the data model than the data model is for the UI.** You discover that a field needs to be multi-valued, or that two concepts are really one, by trying to render and edit them — not by staring at a table diagram. Building the screens first surfaces those before they're expensive to change.
+
+The cost is throwaway work (the mock layer eventually gets deleted). But that cost is bounded if the mock layer is built so the _application code doesn't know it's talking to a mock_. That's the whole trick.
+
+## The seam: one place that knows it's fake
+
+Every read and write in the app goes through a thin data-access module (`lib/api/*`). The components, the Server Actions, the pages — none of them know whether the data is coming from a mock or Postgres. They call `fetchRequests()` and `createRequest(input)`.
+
+During the mock phase, those functions hit an internal endpoint that's intercepted before it reaches a real handler. In the DB phase, the bodies get swapped for real queries and the signatures stay identical. One seam, swapped once.
+
+That discipline — **one module per data concept, identical signatures across the mock/real boundary** — is what makes UI-first cheap instead of a rewrite tax.
+
+## Zod as the single source of truth
+
+The [first article](/projects/creative-workflow-tool/picking-the-stack) flagged the single-source-of-truth pattern as the most important one for maintainability. The mock phase is where it earns its keep.
+
+Each data concept has one Zod schema in `lib/schemas/`. The mock seed data is typed against it with `satisfies`:
+
+```ts
+export const seedRequests = [
+  { id: '…', displayNo: 1, status: 'draft' /* … */ },
+  // …
+] satisfies RequestRow[]
+```
+
+`satisfies` is the key word, not a type annotation. It checks the literal against the type **without widening it**, so the seed stays a precise tuple of known values _and_ any drift from the schema is a compile error. Change the schema, and every seed object that no longer conforms lights up red. The mock data can't silently fall out of sync with the contract the real DB will later enforce.
+
+The same schemas validate the forms (via `zodResolver`) and the write paths (via `.parse()`). When the DB lands, `drizzle-zod` derives the table types from these same schemas. The mock seed becomes the DB seed by construction.
+
+## The in-memory store
+
+Behind the seam is an in-memory store: a plain module holding arrays and `Map`s, seeded from the typed seed objects via `structuredClone` so mutations don't corrupt the seed. It exposes the same operations the real DB will: list, get, create, update, status transitions, sub-form submits.
+
+Two things made it more than a toy:
+
+- **Every meaningful mutation writes an audit entry**, the same way the real transactional writes will. Building the audit trail into the mock meant the audit UI had real data to render from day one.
+- **Status changes go through one gate.** A single `canTransition(from, to, role)` function decides whether a transition is legal, and both the mock store and the UI consume it. The mock isn't a free-for-all; it enforces the same rules the server will.
+
+State lives for the process lifetime and resets on restart. For a development mock, that's a feature, not a bug — every reload is a clean slate.
+
+## MSW for the network seam
+
+The interception itself is [Mock Service Worker](https://mswjs.io/). MSW patches `fetch` at the network layer, in both the browser (service worker) and Node (via `setupServer`). The application makes a normal `fetch` to an internal path; MSW catches it before it touches the network and returns data from the store.
+
+The reason to use MSW rather than just calling the store directly: it keeps the _network shape_ real. The app genuinely makes requests, with headers and status codes and error responses, exactly as it will against real endpoints. The mock is invisible to everything above the fetch.
+
+A couple of gotchas worth flagging for anyone doing this on the App Router:
+
+- **Server-side interception needs starting before the first render.** The framework's instrumentation hook is the right place to start the Node mock conditionally, so Server Components and Server Actions get intercepted too — not just browser fetches.
+- **Disable fetch caching for the mock endpoints.** Default caching will happily serve a stale mock response across reloads and make your mutations look like no-ops. `cache: 'no-store'` on the internal calls.
+
+(Spoiler for a later article: once real auth and a network gate entered the picture, the internal self-`fetch` became a liability and I collapsed the seam to direct in-process calls. The signatures didn't change, which is the whole point.)
+
+## Faking auth: a cookie session and a role switcher
+
+The app is role-gated (an admin role, a requester, a designer, a viewer), and almost every screen behaves differently per role. Wiring real SSO just to click around would have been a tax on every UI iteration.
+
+So the mock phase has a fake session: a server helper returns a current user, read from a cookie that defaults to the admin. A small role-switcher in the sidebar (dev-only) flips the cookie between the four roles. You can exercise every permission path — what an admin sees vs. a designer vs. a viewer — without a login screen, in one click.
+
+When real SSO arrives, the same `getCurrentUser()` helper gets a real implementation; the switcher is gated off in production. Components keep calling the same helper.
+
+## What this bought
+
+By the end of the mock phase, the whole product was clickable: the list with filters and column toggles, the multi-step detail page, the create/duplicate flows, the dashboard, the schedule. All against typed mock data, all role-gated, all runnable with one command and no cloud dependencies.
+
+That meant stakeholders could click a real running app early, the schema got exercised by real screens before any migration was written, and the eventual DB phase became a focused swap rather than a parallel concern competing with UI work.
+
+## Wrapping Up
+
+Building UI-first against mocks is only cheap if the mock is built to be deleted. The discipline that makes that true is the same single-source-of-truth pattern that makes the whole codebase maintainable.
+
+Key takeaways:
+
+1. **The UI shakes out the schema better than the schema shapes the UI.** Build the screens first; let them surface the data-model corrections while they're cheap.
+2. **Keep one seam between app code and the data backend.** Identical function signatures across the mock/real boundary turn the DB phase into a body-swap, not a rewrite.
+3. **`satisfies`, not a type annotation, on seed data.** It keeps literals precise and turns schema drift into a compile error.
+4. **Make the mock enforce the real rules.** One `canTransition` gate, audit writes on every mutation — so the mock teaches you the same lessons the real backend would.
+5. **Fake the session, don't skip it.** A cookie-based mock user + a role switcher lets you exercise every permission path without a login flow.
+
+Next up: implementing the multi-step workflow UI on Next.js 16 — intercepting routes for modals, the React Hook Form + Zod typing gotcha, and gating a stepper by status.
