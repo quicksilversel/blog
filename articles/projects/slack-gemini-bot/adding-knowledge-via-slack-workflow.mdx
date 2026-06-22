@@ -80,14 +80,13 @@ target_path: docs/manuals/manual-42_coffee-machine-guide.md
 title: Coffee Machine Guide
 description: How to use the office coffee machine
 created: 2026-03-23
-creator: "@john.doe"
+creator: '@john.doe'
 source_url: https://slack.com/archives/C123/p456
-contact_info: "#faq-support @ops-team"
+contact_info: '#faq-support @ops-team'
 tags:
   - office
   - equipment
 ---
-
 # Coffee Machine Guide
 
 ## Overview
@@ -133,6 +132,7 @@ Reason: {error_details}"""
 ```
 
 A few notes:
+
 - **`WORKFLOW_ID`** filters messages to only process from our specific workflow
 - **`WF_FIELDS`** maps field names to Japanese labels used in the workflow form
 - **`REVIEW_TEAM_MENTION`** uses Slack's subteam mention syntax `<!subteam^ID>`
@@ -176,6 +176,7 @@ def handle_message(event, say, client, logger):
 ```
 
 Key points:
+
 - **Bot messages only** - Workflow posts come from a bot, not a user
 - **Channel filter** - Only process messages in the designated workflow channel
 - **Workflow ID filter** - The channel might have multiple workflows posting; we only want ours
@@ -413,12 +414,12 @@ def extract_frontmatter(content: str) -> dict:
 If the user's input is missing required fields, DCP returns a JSON error:
 
 ```json
-{"status": "error", "missing": ["title", "description"]}
+{ "status": "error", "missing": ["title", "description"] }
 ```
 
 I detect and handle this:
 
-```python
+````python
 def is_dcp_error(content: str) -> Tuple[bool, Optional[list]]:
     content_stripped = content.strip()
 
@@ -438,7 +439,7 @@ def is_dcp_error(content: str) -> Tuple[bool, Optional[list]]:
             pass
 
     return False, None
-```
+````
 
 ### 10. The Main Handler
 
@@ -754,6 +755,7 @@ The complete flow:
 What used to require manual markdown writing, file uploading, and PR creation now happens in seconds with a Slack form. The knowledge actually gets documented.
 
 **Files changed:**
+
 - `app/handlers/workflow_handler.py` - New orchestration handler
 - `app/services/github.py` - New GitHub API service
 - `app/services/gemini.py` - Added `generate_document()` method
