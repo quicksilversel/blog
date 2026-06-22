@@ -56,10 +56,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title,
     description,
     keywords,
+    alternates: {
+      canonical: `/articles/${category}/${slug}`,
+    },
     openGraph: {
+      type: 'article',
       title,
       description,
+      url: `/articles/${category}/${slug}`,
       images: [`/og?${ogParams.toString()}`],
+      publishedTime: frontmatter.date ? String(frontmatter.date) : undefined,
     },
     twitter: {
       card: 'summary_large_image',
@@ -69,6 +75,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
   }
 }
+
+const SITE_URL = 'https://zoelog.vercel.app'
 
 export default async function ArticlePage({ params }: Props) {
   const { category, slug } = await params
@@ -93,26 +101,56 @@ export default async function ArticlePage({ params }: Props) {
     3,
   )
 
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: String(frontmatter.title),
+    description: frontmatter.description
+      ? String(frontmatter.description)
+      : undefined,
+    datePublished: frontmatter.date ? String(frontmatter.date) : undefined,
+    keywords: Array.isArray(frontmatter.topics)
+      ? frontmatter.topics.join(', ')
+      : undefined,
+    url: `${SITE_URL}/articles/${category}/${slug}`,
+    author: {
+      '@type': 'Person',
+      name: 'Zoe',
+      url: SITE_URL,
+    },
+    publisher: {
+      '@type': 'Person',
+      name: 'Zoe',
+      url: SITE_URL,
+    },
+  }
+
   return (
-    <ArticleDetail
-      content={content}
-      frontmatter={{
-        title: String(frontmatter.title),
-        date: frontmatter.date ? String(frontmatter.date) : undefined,
-        topics: frontmatter.topics as string[] | undefined,
-      }}
-      rawContent={rawSource}
-      relatedArticles={relatedArticles}
-      readingTime={readingTime}
-      breadcrumbItems={[
-        { label: 'Home', href: '/' },
-        { label: 'Articles', href: '/articles' },
-        {
-          label: category,
-          href: `/articles/${category}`,
-        },
-        { label: String(frontmatter.title) },
-      ]}
-    />
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <ArticleDetail
+        content={content}
+        frontmatter={{
+          title: String(frontmatter.title),
+          date: frontmatter.date ? String(frontmatter.date) : undefined,
+          topics: frontmatter.topics as string[] | undefined,
+        }}
+        rawContent={rawSource}
+        relatedArticles={relatedArticles}
+        readingTime={readingTime}
+        breadcrumbItems={[
+          { label: 'Home', href: '/' },
+          { label: 'Articles', href: '/articles' },
+          {
+            label: category,
+            href: `/articles/${category}`,
+          },
+          { label: String(frontmatter.title) },
+        ]}
+      />
+    </>
   )
 }

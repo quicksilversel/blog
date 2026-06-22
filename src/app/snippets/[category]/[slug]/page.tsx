@@ -37,13 +37,34 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   const { frontmatter } = await parseMarkdownFile(filePath)
+  const title = String(frontmatter.title)
+  const description = String(frontmatter.description)
+
+  const ogParams = new URLSearchParams({ title })
+  if (frontmatter.date) {
+    ogParams.set('date', String(frontmatter.date))
+  }
+  if (Array.isArray(frontmatter.topics) && frontmatter.topics.length > 0) {
+    ogParams.set('topics', frontmatter.topics.join(','))
+  }
 
   return {
-    title: `${frontmatter.title} - Code Snippet`,
-    description: String(frontmatter.description),
+    title: `${title} - Code Snippet`,
+    description,
+    alternates: {
+      canonical: `/snippets/${category}/${slug}`,
+    },
     openGraph: {
-      title: String(frontmatter.title),
-      description: String(frontmatter.description),
+      title,
+      description,
+      url: `/snippets/${category}/${slug}`,
+      images: [`/og?${ogParams.toString()}`],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [`/og?${ogParams.toString()}`],
     },
   }
 }

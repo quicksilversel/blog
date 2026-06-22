@@ -218,6 +218,7 @@ The realization: nobody was actually reviewing those JSON diffs. 600 records of 
 So I cut the repo out entirely. The GHA fetches from the CMS and uploads straight to GCS. The JSON never touches git. The app reads it from GCS at runtime via the same `MemoryService` that loads knowledge files.
 
 Benefits:
+
 - Zero git history bloat
 - No weekly noise PRs
 - Data updates are decoupled from app deploys
