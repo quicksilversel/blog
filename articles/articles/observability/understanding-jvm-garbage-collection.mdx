@@ -13,7 +13,7 @@ To optimize performance, I needed a clear understanding of how garbage collectio
 
 ## TL;DR – Watch out for Major GC!
 
-- Major GC (a.k.a. Full GC) causes your whole app to pause—and not in a chill way 😵
+- Major GC (a.k.a. Full GC) causes your whole app to pause, and not in a chill way 😵
 - We saw memory usage spike, GC old gen size grow, and major GC run more frequently
 - The root cause? The service that was newly released was consuming too much memory
 - Always keep an eye on major GC metrics to catch issues early before users feel the lag!

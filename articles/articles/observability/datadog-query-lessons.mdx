@@ -1,6 +1,6 @@
 ---
 title: 'Lessons Learned from Datadog Query Mistakes'
-description: 'Refined Datadog queries for ALB metrics, latency, unit handling, and rate computations—mistakes learned and correct patterns.'
+description: 'Refined Datadog queries for ALB metrics, latency, unit handling, and rate computations: mistakes learned and correct patterns.'
 topics: ['Datadog']
 published: true
 date: '2025-07-30'
@@ -37,7 +37,7 @@ sum:aws.applicationelb.httpcode_elb_5xx{...}.as_rate()
 min(last_5m):sum:trace.servlet.request.errors{...} by {resource_name}.as_count() / sum:trace.servlet.request.hits{...} by {resource_name}.as_count() * 100 > ${each.value.request_errors_threshold
 ```
 
-Terraform creation passed, but Datadog query UI showed `sum(...)`—min didn’t apply, and error rate always showed 100%. The `min()` vs `sum()` mismatch happens because DataDog sum aggregation overrides the min. The fix was:
+Terraform creation passed, but Datadog query UI showed `sum(...)`, min didn’t apply, and error rate always showed 100%. The `min()` vs `sum()` mismatch happens because DataDog sum aggregation overrides the min. The fix was:
 
 ✅ Good example
 
@@ -65,7 +65,7 @@ Using `sum` across multiple instances aggregated raw latency values and skewed n
 
 ## 4. Explicitly set units with number_format
 
-If multiple requests or series in a widget, Datadog may drop unit inference—leading to blank or confusing units. This is especially true when mixing queries.
+If multiple requests or series in a widget, Datadog may drop unit inference, leading to blank or confusing units. This is especially true when mixing queries.
 
 Use Terraform's `number_format` in formula blocks to force units:
 
@@ -89,7 +89,7 @@ This ensures consistent unit display in dashboards. Feature available since Terr
 
 Querying `sum:trace.servlet.request.hits{...}.as_rate()` includes both successful and error requests:
 
-If 100 hits, 10 of which returned 500, the value is still 100. So using this for error rate numerator/denominator is fine—but avoid summing separate 4xx/5xx when counting total hits. The clean way:
+If 100 hits, 10 of which returned 500, the value is still 100. So using this for error rate numerator/denominator is fine, but avoid summing separate 4xx/5xx when counting total hits. The clean way:
 
 ❌ Bad example
 
@@ -108,7 +108,7 @@ Avoid redundant sums over error code categories.
 ## Final takeaways
 
 - Use `httpcode_elb_5xx` to monitor load balancer health; leave target errors to backend monitors.
-- Never mix `min()` with `sum()` in Datadog queries—use `.as_rate()`.
+- Never mix `min()` with `sum()` in Datadog queries, use `.as_rate()`.
 - Monitor latency with `avg()` to avoid skew.
 - Always define units explicitly when mixing query series.
 - Be mindful of how Datadog aggregates error counts in “hits.”

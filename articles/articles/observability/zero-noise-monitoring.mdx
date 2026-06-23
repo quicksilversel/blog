@@ -8,16 +8,16 @@ date: '2025-08-15'
 
 ## Introduction
 
-When managing a complex application, it's easy to fall into the trap of “silent monitoring”—setting up alerts that don't actually help you understand your service's health.
+When managing a complex application, it's easy to fall into the trap of “silent monitoring”, setting up alerts that don't actually help you understand your service's health.
 This leads to alert fatigue and confusion during incidents.
-Instead, we need to focus on **meaningful monitoring**—designing monitors that detect only your service's own failures, while filtering out upstream noise.
+Instead, we need to focus on **meaningful monitoring**, designing monitors that detect only your service's own failures, while filtering out upstream noise.
 
 ## 1. If You're Monitoring ALB 5xx in Datadog, Use `elb_5xx`
 
 ### Why `target_5xx` wasn't the right fit in our case
 
 There's nothing inherently wrong with `aws.applicationelb.httpcode_target_5xx`.  
-But in our setup, we already have application-level monitors. This led to double alerts for the same incident—which became noise.
+But in our setup, we already have application-level monitors. This led to double alerts for the same incident, which became noise.
 
 If you don't have app-side monitoring, then using `target_5xx` _can_ still be a valid option.
 
@@ -55,7 +55,7 @@ This means: _this is not an error_. It's expected behavior. Alerting on it just 
 **Bottom line: Only upstream monitors should page for upstream failures. The Gateway should alert _only_ on its own problems.**
 
 The Gateway's job is to _forward_ requests properly.
-If a request results in a 504 (timeout) due to upstream delay or failure—that's not the Gateway's fault, and shouldn't page.
+If a request results in a 504 (timeout) due to upstream delay or failure, that's not the Gateway's fault, and shouldn't page.
 
 However, Gateway-side issues like misrouting, middleware errors, or rate limiting _should_ trigger alerts (502/503/500).
 
@@ -74,7 +74,7 @@ If you monitor error rate per API path, low-traffic endpoints can easily trigger
 Example:
 
 - One request in 5 minutes → one failure = 100% error rate.
-- If you aggregate using `sum(last_5m)`, you'll pick up these random blips and end up paging—despite no real impact.
+- If you aggregate using `sum(last_5m)`, you'll pick up these random blips and end up paging, despite no real impact.
 
 So I switched from `sum()` to `min()` for the time aggregation.
 Using `min(last_5m)` makes the monitor more resilient to sudden spikes, reducing false positives for low-traffic endpoints.

@@ -49,7 +49,7 @@ I added a simple polling step to wait for the change set to reach `CREATE_COMPLE
 
 ## When It Happens
 
-This happens because `create-change-set` is asynchronous — it returns instantly while still processing in the background. If you try to execute it right away, CloudFormation throws an error.
+This happens because `create-change-set` is asynchronous. It returns instantly while still processing in the background. If you try to execute it right away, CloudFormation throws an error.
 
 ## The Full Code
 

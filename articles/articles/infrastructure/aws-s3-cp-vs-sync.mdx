@@ -6,9 +6,9 @@ published: true
 date: '2025-08-02'
 ---
 
-## `cp` vs `sync` — What’s the deal?
+## `cp` vs `sync`: What’s the deal?
 
-These two AWS CLI commands do very similar things at first glance — but they're built for different use cases.
+These two AWS CLI commands do very similar things at first glance, but they're built for different use cases.
 
 ### `aws s3 cp`
 
@@ -72,11 +72,11 @@ It’ll skip identical files, saving time (and cost). Super useful in CI/CD!
 
 Tried using --exact-timestamps with aws s3 sync to avoid uploading unchanged files… but it didn’t help. Everything still got re-uploaded every single time.
 
-Turns out, it wasn’t sync’s fault — it was the way Docker builds work.
+Turns out, it wasn’t sync’s fault. It was the way Docker builds work.
 
 Since I was copying files into the Docker image using `COPY . .`, every file got a fresh modified timestamp during the build, even if the content hadn’t changed. So from sync’s perspective, every file looked new. In that case, sync behaves basically the same as cp.
 
-So yeah — `--exact-timestamps` is great if the timestamps are reliable. But with Docker builds, they’re not.
+So yeah, `--exact-timestamps` is great if the timestamps are reliable. But with Docker builds, they’re not.
 
 ## Where I Actually Use Each
 

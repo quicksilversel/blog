@@ -15,7 +15,7 @@ Most of it was unremarkable React. A handful of things on Next.js 16 + React 19 
 
 ## Modals as routes: intercepting + parallel routes
 
-The create flow opens from a `＋ New` button and should feel like a modal over the list — but it also needs a real URL (`/requests/new`) that works on a hard refresh or a shared link. The idiomatic Next.js answer is **intercepting routes + parallel routes**, and it's worth knowing because the file conventions are not guessable.
+The create flow opens from a `＋ New` button and should feel like a modal over the list, but it also needs a real URL (`/requests/new`) that works on a hard refresh or a shared link. The idiomatic Next.js answer is **intercepting routes + parallel routes**, and it's worth knowing because the file conventions are not guessable.
 
 The shape:
 
@@ -28,7 +28,7 @@ app/(app)/requests/
 └── new/page.tsx        ← the full-page version (hard nav / refresh)
 ```
 
-The `@modal` folder is a **parallel route slot** — it renders alongside `children` in the layout, independently. The `(.)new` folder is an **intercepting route**: `(.)` means "intercept the `new` segment at this level." On a soft navigation from the list, the interceptor renders the modal overlay while the list stays mounted underneath. On a hard load of `/requests/new`, the interceptor doesn't fire and the standalone page renders instead.
+The `@modal` folder is a **parallel route slot** that renders alongside `children` in the layout, independently. The `(.)new` folder is an **intercepting route**: `(.)` means "intercept the `new` segment at this level." On a soft navigation from the list, the interceptor renders the modal overlay while the list stays mounted underneath. On a hard load of `/requests/new`, the interceptor doesn't fire and the standalone page renders instead.
 
 The payoff: a shareable URL, browser-back closes the modal, and the list never unmounts. The cost: four files and a mental model that takes a beat to load. Both `(.)new/page.tsx` and `new/page.tsx` render the same modal component, so there's no duplication beyond the routing scaffold.
 
@@ -38,9 +38,9 @@ One framework note that bit me later in the same project: in Next.js 16 the old 
 
 This one is subtle and will waste an afternoon if you don't know it.
 
-Forms use React Hook Form with a Zod resolver. The Zod schemas have defaults — `description: z.string().default('')`, `campaign: z.boolean().default(false)`, and so on. That's correct: defaults belong on the schema.
+Forms use React Hook Form with a Zod resolver. The Zod schemas have defaults, `description: z.string().default('')`, `campaign: z.boolean().default(false)`, and so on. That's correct: defaults belong on the schema.
 
-But a Zod schema with `.default()` has **two different types**: the _input_ type (the field is optional — the default fills it) and the _output_ type (the field is always present after parsing). `z.infer` gives you the output type. If you type the form with the output type, the resolver's input type no longer matches and the build fails with an opaque "Resolver is not assignable" wall of text.
+But a Zod schema with `.default()` has **two different types**: the _input_ type (the field is optional, the default fills it) and the _output_ type (the field is always present after parsing). `z.infer` gives you the output type. If you type the form with the output type, the resolver's input type no longer matches and the build fails with an opaque "Resolver is not assignable" wall of text.
 
 The fix is to give the form hook all three of its generics explicitly, splitting input from output:
 
@@ -50,7 +50,7 @@ useForm<InputType, unknown, OutputType>({ resolver, defaultValues })
 
 With `z.input<typeof schema>` for the first and `z.output<typeof schema>` for the third, the field registrations accept the optional-input shape, and the submit handler receives the fully-resolved output shape. Once you've seen it, every form in the project uses the same three-generic pattern; until you've seen it, the error message points everywhere except the cause.
 
-A related, smaller one: where the UI shape genuinely differs from the stored shape — splitting one stored timestamp into separate date and time inputs, say — I let the form have its own small schema (`schema.omit({...}).extend({...})`) and map back to the canonical input on submit. The canonical schema still validates server-side; the form schema is a UX detail. The convention "client validation is a nicety, server validation is the source of truth" makes that divergence safe.
+A related, smaller one: where the UI shape genuinely differs from the stored shape (splitting one stored timestamp into separate date and time inputs, say), I let the form have its own small schema (`schema.omit({...}).extend({...})`) and map back to the canonical input on submit. The canonical schema still validates server-side; the form schema is a UX detail. The convention "client validation is a nicety, server validation is the source of truth" makes that divergence safe.
 
 ## A stepper gated by status and role
 
@@ -59,34 +59,34 @@ The detail page is a four-step stepper. Steps unlock as the request advances: st
 The trap here is scattering that logic. It wants to live in two single-purpose places:
 
 - **Unlock-by-status** derives from one ordered status list: a step is open if the request's status index is at or past the step's threshold. No per-step conditionals.
-- **Edit-by-role** is the workflow permission matrix — the same one the status-transition gate uses. The form for a step renders editable for the roles that own that step and read-only for everyone else.
+- **Edit-by-role** is the workflow permission matrix, the same one the status-transition gate uses. The form for a step renders editable for the roles that own that step and read-only for everyone else.
 
 Keeping those two as derived values (computed during render from status + role) rather than stored flags means there's no stale state to keep in sync, and the rules read straight off the same constants the rest of the app uses. The read-only renderer and the editable form are two branches off one permission check, not two divergent components.
 
 ## shadcn without the theme tokens
 
-I pulled in a couple of [shadcn/ui](https://ui.shadcn.com/) components for the genuinely-hard-to-build primitives (a Dialog, mainly). shadcn pastes the source into your repo, which is the selling point — you own it and can edit it.
+I pulled in a couple of [shadcn/ui](https://ui.shadcn.com/) components for the genuinely-hard-to-build primitives (a Dialog, mainly). shadcn pastes the source into your repo, which is the selling point: you own it and can edit it.
 
-The catch: the pasted components assume shadcn's semantic color tokens (`bg-background`, `text-muted-foreground`, `ring-ring`) that map to CSS variables its `init` normally installs. This project styles with explicit Tailwind utilities, not that token system, so those classes resolved to nothing — an invisible dialog. Because the component source lives in the repo, the fix is just editing it: swap the semantic tokens for the explicit colors the rest of the app uses, and drop the icon-library dependency it pulled in for a single glyph. Owning the file means "owning the file," including reconciling it with your conventions.
+The catch: the pasted components assume shadcn's semantic color tokens (`bg-background`, `text-muted-foreground`, `ring-ring`) that map to CSS variables its `init` normally installs. This project styles with explicit Tailwind utilities, not that token system, so those classes resolved to nothing, an invisible dialog. Because the component source lives in the repo, the fix is just editing it: swap the semantic tokens for the explicit colors the rest of the app uses, and drop the icon-library dependency it pulled in for a single glyph. Owning the file means "owning the file," including reconciling it with your conventions.
 
 ## The gantt and the one inline-style exception
 
 The schedule view is a gantt: lanes grouped by two dimensions (think channel × audience), bars positioned by release date across a two-week window, with half-day AM/PM columns and row-packing so overlapping bars stack instead of collide.
 
-The project bans inline styles — except for "genuinely dynamic values that can't be expressed as a utility class." A gantt bar's `left` and `width` are computed pixel offsets that depend on runtime data; there is no Tailwind class for "37% of the way across, 84px wide." This is exactly the carve-out. So the geometry (position, size) uses inline `style`, and everything else (colors, borders, typography) stays in utility classes. Naming the exception in the conventions up front meant the agent applied it correctly instead of either fighting it or abandoning the rule wholesale.
+The project bans inline styles, except for "genuinely dynamic values that can't be expressed as a utility class." A gantt bar's `left` and `width` are computed pixel offsets that depend on runtime data; there is no Tailwind class for "37% of the way across, 84px wide." This is exactly the carve-out. So the geometry (position, size) uses inline `style`, and everything else (colors, borders, typography) stays in utility classes. Naming the exception in the conventions up front meant the agent applied it correctly instead of either fighting it or abandoning the rule wholesale.
 
-The date math is its own small source of bugs — comparing "is this bar visible in this window" across timezones. Operating on date-only keys (`YYYY-MM-DD`) parsed at UTC midnight, rather than `Date` objects in local time, removed a class of off-by-one-day errors.
+The date math is its own small source of bugs, comparing "is this bar visible in this window" across timezones. Operating on date-only keys (`YYYY-MM-DD`) parsed at UTC midnight, rather than `Date` objects in local time, removed a class of off-by-one-day errors.
 
 ## Wrapping Up
 
-None of these were architectural — they were the friction of a current framework version meeting habits formed on older ones, plus a couple of type-system sharp edges. Writing them down is the cheapest way to not pay for them twice.
+None of these were architectural. They were the friction of a current framework version meeting habits formed on older ones, plus a couple of type-system sharp edges. Writing them down is the cheapest way to not pay for them twice.
 
 Key takeaways:
 
-1. **Intercepting + parallel routes are the right modal pattern**, and the file conventions (`@slot`, `(.)segment`, `default.tsx`) are not guessable — read the current docs.
+1. **Intercepting + parallel routes are the right modal pattern**, and the file conventions (`@slot`, `(.)segment`, `default.tsx`) are not guessable. Read the current docs.
 2. **A Zod schema with `.default()` has distinct input and output types.** Give `useForm` all three generics (`<input, unknown, output>`) or fight an unreadable resolver error.
 3. **Derive unlock-by-status and edit-by-role; don't store them.** Compute from the same status list and permission matrix the rest of the app uses.
-4. **Owning shadcn source means reconciling it with your conventions** — including ripping out token assumptions and stray dependencies.
+4. **Owning shadcn source means reconciling it with your conventions**, including ripping out token assumptions and stray dependencies.
 5. **Name your inline-style exception explicitly.** Computed pixel geometry is the legitimate case; saying so in the conventions keeps the rule enforceable everywhere else.
 
 Next up: shipping it. Slack SSO, gating the deployment to office IPs, and a container deploy to Cloud Run with keyless CI/CD.

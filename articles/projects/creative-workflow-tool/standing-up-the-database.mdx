@@ -1,0 +1,157 @@
+---
+title: 'Standing Up the Database, Part 1: From In-Memory Mock to Local Postgres'
+description: 'Replacing an in-memory mock with local Postgres: Docker, a Drizzle schema and first migration, seeding, swapping the data layer, and designing for private-network cloud access.'
+topics: ['Postgres', 'Drizzle', 'Docker', 'Database']
+category: 'backend'
+published: true
+date: '2026-06-23'
+---
+
+## Intro
+
+The [previous article](/projects/creative-workflow-tool/building-against-a-moving-spec) ended by judging the schema "stable enough" to commit to a database.
+
+Until now "the database" was a JavaScript object in memory that vanished on restart. The goal of this phase is to replace it with real PostgreSQL without rewriting the app, because the [mock-first build](/projects/creative-workflow-tool/building-ui-first-on-mocks) was designed around a single data-access seam exactly so this swap would be cheap.
+
+This first milestone: get Postgres running, define the schema, and generate the first migration. (Seeding and the actual data-layer swap come next.)
+
+## The mental model I needed first
+
+Four pieces, and naming them upfront made the rest click:
+
+1. **PostgreSQL**: the database _server_. A separate process that stores data on disk and speaks SQL. Not part of the app.
+2. **An ORM (Drizzle)**: a TypeScript layer so I write `db.select().from(requests)` instead of raw SQL, and get typed results back. It's the bridge between app and server.
+3. **A schema**: TypeScript files describing the tables. The source of truth for the DB's shape.
+4. **Migrations**: versioned SQL files that evolve the DB from one shape to the next. You don't hand-write them; you edit the schema and a tool generates the diff.
+
+The plan is **local-first**: run Postgres locally, build and migrate and seed against it, swap the app over, and only _then_ provision the managed cloud database. Everything until that last step is free, local, and disposable, which is the right environment to learn in, because you can throw it away and redo it without consequence.
+
+## Step 1: Postgres in a container
+
+Rather than install Postgres on the machine, I ran it in Docker: one command, disposable, no system-wide footprint:
+
+```bash
+docker run --name app-pg \
+  -e POSTGRES_PASSWORD=localpass \
+  -e POSTGRES_DB=appdb \
+  -p 5432:5432 \
+  -d postgres:17
+```
+
+The anatomy is worth knowing, because it _is_ the anatomy of "a running database":
+
+- `-e POSTGRES_PASSWORD` / `-e POSTGRES_DB`: the superuser password and an auto-created database.
+- `-p 5432:5432`: forward the host's port 5432 to the container, so the app reaches it at `localhost:5432`.
+- `-d postgres:17`: detached, official image pinned to a major version.
+
+Those values _are_ the **connection string** the rest of the stack uses: `postgresql://postgres:localpass@localhost:5432/appdb` (`protocol://user:password@host:port/database`). That one string is the only thing the ORM needs to find the database, and it lives in `.env.local` (gitignored).
+
+### The gotcha: everything hung
+
+First real snag, and a good lesson in how Docker actually works: every `docker` command hung, including `run`, `ps`, even `rm`. The tell was that `docker version` printed the **Client** section but hung on **Server**.
+
+That split is the whole explanation. The `docker` you type is a thin _client_; it does no work itself, it sends every request to the **daemon** (on a Mac, a small Linux VM that Docker Desktop manages). If the daemon isn't answering, _every_ command blocks waiting for it. In my case Docker Desktop had entered **Resource Saver** mode (it pauses the engine when no containers are running) and the resume was wedging. Turning Resource Saver off (or restarting the engine) fixed it instantly. "All commands hang" almost always means "the daemon isn't up," not "the command is wrong."
+
+## Step 2: the schema in Drizzle
+
+With Postgres answering, the schema. A Drizzle schema is just TypeScript describing tables; the tooling turns it into SQL. The vocabulary I had to learn:
+
+- `pgTable('name', { ... })` → one `CREATE TABLE`; each key is a column.
+- Column builders → SQL types: `uuid()`, `text()`, `integer()`, `boolean()`, `timestamp()`, `date()`, `jsonb()`, chained with `.notNull()`, `.default()`, `.primaryKey()`.
+- `pgEnum('name', [...])` → a Postgres `ENUM` type.
+- `.references(() => other.col, { onDelete })` → a foreign key.
+- `text('x', { enum: KEYS }).array()` → a `text[]` column.
+
+The decision I cared about most: **enum values stay single-sourced.** The app already had the status / role / etc. value lists as `as const` arrays (the validation source of truth). The Drizzle enums import those same arrays rather than re-typing them:
+
+```ts
+import { STATUS_KEYS } from '../lib/schemas/status'
+export const statusEnum = pgEnum('status', STATUS_KEYS)
+```
+
+Now there's exactly one place a status value is defined; the Zod validator and the Postgres `ENUM` can't drift. (One quirk: inside the schema file I import those arrays with _relative_ paths, because the migration tool's loader doesn't resolve the project's `@/` path alias the way the app build does.)
+
+A couple of type choices that save pain later: `timestamptz` columns in **string mode** (the app already passes ISO strings everywhere, so the ORM hands back strings rather than `Date` objects), and `onDelete: 'cascade'` on the child tables (sub-forms, audit rows) so deleting a parent cleans them up, while leaving `no action` on user references so you can't delete a user that history points at.
+
+## Step 3: generate, then apply
+
+This is the part that made the ORM click. You don't write SQL. You run a generate command, and it diffs the schema against the recorded migration history and writes the SQL for you:
+
+```bash
+npm run db:generate   # drizzle-kit: schema → a new .sql migration file (no DB connection)
+npm run db:migrate    # apply pending migrations to the live DB (in a transaction)
+```
+
+Those `npm run db:*` commands aren't anything special; they're just aliases I added to `package.json` so I don't have to memorize each tool's flags:
+
+```json
+"scripts": {
+  "db:generate": "drizzle-kit generate",
+  "db:migrate": "drizzle-kit migrate",
+  "db:seed": "tsx db/seed.ts",
+  "db:studio": "drizzle-kit studio"
+}
+```
+
+`drizzle-kit` is the schema-and-migration CLI that ships with the ORM, so `db:generate` and `db:migrate` are thin wrappers around it. `tsx` is a TypeScript runner that executes a `.ts` file directly, with no separate compile step, which is how the seed script runs (`db:seed`, next section). `db:studio` opens a browser UI for poking at the tables. None of them are magic; they're shorthand for commands I'd otherwise type by hand.
+
+`generate` is pure file generation (it doesn't even touch the database), so the output is reviewable before anything runs. Reading the generated migration was the moment it felt real: eight `CREATE TYPE … AS ENUM` (my value arrays, now enforced by the database itself), ten `CREATE TABLE`, and the foreign keys added last as `ALTER TABLE … ADD CONSTRAINT` (tables first, relationships after, so creation order doesn't matter).
+
+`migrate` connects and applies it inside a transaction, recording it in a bookkeeping table so it never runs twice. A `\dt` in `psql` afterward: ten tables where there had been none. The schema I'd written in TypeScript was now a real database.
+
+## Step 4: seeding from the mock data
+
+Empty tables aren't much of a demo. The app had been running against a fixture (a JSON file plus a few typed arrays), so the seed script just loads that same fixture into the real tables. Writing it taught me two things that are obvious in hindsight and weren't beforehand.
+
+**Insert order follows the foreign keys.** A request row points at a user (its owner) and a department, so those parents must exist before the child can reference them. Children, the sub-forms and the audit rows, come last. The whole thing runs in one transaction that _clears_ the tables first (in the exact reverse order, children before parents), so re-running the seed always lands in the same state instead of erroring on duplicates or leaving things half-written.
+
+**The object graph has to be normalized on the way in.** In the in-memory fixture, a sub-form carried its related items inline as an array. In a relational schema that array is a separate join table, one row per pair. So the seed strips that field off the parent row and fans it out into join rows. That's _the_ structural difference between an object you hold in memory and a normalized database, and the seed is where you first feel it.
+
+(One CommonJS speed bump: my first version used a top-level `await` to load environment variables before the DB client initialized. The script compiler targets CommonJS, which doesn't allow top-level `await`. The fix was to move the env-loading into a tiny side-effect module imported _first_; in CommonJS, imports run top to bottom in source order, so "imported first" means "runs first.")
+
+## Step 5: swapping the data layer without touching a caller
+
+This was the whole point of the mock-first build, and the moment it paid off. Every read and write in the app already went through one thin module, a data-access layer with functions like `fetchRequests` and `submitProductionRequest`. Pages and form actions called _those_, never the store directly. So the swap was: keep every function signature byte-for-byte identical, replace only the bodies, moving from poking an in-memory object to running Drizzle queries. Not one caller changed.
+
+Three things I had to get right in the bodies:
+
+**Assemble the view; don't store it.** The fixture held one rich object per request. The database holds ten flat tables. So the read path fetches each piece (reference data, each sub-form, the audit trail) in a _fixed_ number of queries and stitches them together in memory. The temptation is one query per request to load its relations; that's the N+1 problem, and it's death by a thousand round-trips. A handful of batched queries keyed by the request IDs does the same job in constant query count.
+
+**Make the writes transactional for real.** Submitting a sub-form does three things: upsert the sub-row, advance the request's status, and append an audit entry. In memory those were three mutations that couldn't half-fail. In Postgres they have to be wrapped in one `db.transaction(...)` so they still can't: all three commit or all three roll back. The invariant didn't change; it just became enforced by the database instead of hoped-for.
+
+**The timestamp boundary.** This was the subtle one. The app speaks ISO-8601 strings with a fixed timezone offset everywhere: the fixtures, the form output, the display formatters that parse them with a `T`-separated regex. Postgres stores `timestamptz` as an absolute UTC instant and hands it back in its own format. Convert in twenty call sites and you'll miss one. Instead I wrote a custom column type whose only job is the boundary: format to the app's ISO string on the way out, accept it on the way in. The timezone correctness lives in one place, the database keeps storing real instants, and not a line of app code had to learn that the storage layer changed. Bonus: the generated DDL was byte-identical, so the migration tool reported no schema change at all.
+
+## Step 6: the user who doesn't exist yet
+
+The swap worked against seeded data, until I signed in for real and the first save threw a `500`. The error: an email address where a UUID belonged. With single-sign-on there's no signup step. An authenticated user just _appears_, vouched for by the identity provider, with no row in the `users` table, so the foreign key on "who did this" had nothing to point at.
+
+The fix is **just-in-time provisioning**: on the first authenticated request, insert a row keyed by the user's stable identity claim, and on every later visit refresh their profile and last-login time. One `INSERT … ON CONFLICT … DO UPDATE` (an upsert), so it's safe to run on every request. Two wrinkles worth recording:
+
+- **It can't live in the auth callbacks.** Those also run in the edge middleware that gates routes, and the Postgres driver doesn't run on the edge. So provisioning lives in the server-only "who is the current user" helper, and the auth callbacks just pass the identity claim through the token.
+- **Run it once per request.** That helper gets called many times while rendering a page. Wrapping it in the framework's per-request cache collapses all of them into a single upsert.
+
+## Step 7: a build that needed the database to _not_ exist yet
+
+With the app working locally, I started prepping for deployment, and tripped on something I didn't see coming. The data client read its connection string at import and threw if it was missing. Fine on my machine, where the string is always set. But the production container build deliberately strips environment files out of the image for safety, so during the build there _was_ no connection string, and the build itself failed at the stage where the framework loads each route to analyze it. Nothing had tried to query anything; just importing the module was enough to blow up.
+
+The fix is a one-liner in spirit: **don't connect at import.** Read config and open the connection pool lazily, on the first actual query, not when the module loads. Building a container image shouldn't require production secrets, and a module that connects (or throws) at import makes that impossible. As a bonus, the lazy initializer became the natural place to branch between the two connection modes I now needed: a plain connection string locally, and a managed, authenticated tunnel in the cloud.
+
+## Designing for the cloud: private networking, by request
+
+A database reachable from the open internet is a liability, so the cloud connection was built for **private networking** from the start: the app talks to the database over an internal network, never a public address. That's the right default anywhere, and most serious organizations require it outright.
+
+Private networking has an organizational consequence that's easy to miss until you're in it. In a company of any real size the private network is _centralized_: one shared, managed network, with its address space carved up deliberately so that hundreds of projects don't collide. You don't spin up your own; you join the shared one. And that inverts the model from local development. On my laptop I _create_ infrastructure by typing a command; here I _request_ it. You ask the platform team to allocate an address range (a slice of the shared network reserved for your service) and you submit the network change itself as code, to a central repository, where that team reviews it before anything happens. A project can't even mint its own subnet on a whim; policy pins it to the ranges that were formally allocated to it. (Write access to the infrastructure repo is gated too, which, rather than an obstacle, is exactly the mechanism: these changes are meant to be reviewed.)
+
+So the order of operations is deliberate: get everything in the code ready _first_ (the dual-mode connection client, the migration that runs through the same secure tunnel the app uses, the infrastructure-as-code change modeled faithfully on an existing service so it's easy to approve), and _then_ send a short, specific request to the network team. The most clarifying part of the whole phase had almost nothing to do with code: **the cloud half moves at the speed of someone else's approval, so the job is to make that "yes" mechanical**, leaving the wait as the only thing left to do.
+
+## What I'd tell myself starting out
+
+- **Local-first, in a container.** Disposable Postgres you can blow away removes all the fear from "what if I get the schema wrong": you just redo it.
+- **"All docker commands hang" = the daemon, not your command.** Client/daemon split; check the engine's actually up.
+- **Single-source your enums.** Importing the existing value arrays into the schema means the validator and the database literally can't disagree.
+- **Generate, don't hand-write.** Edit the schema, let the tool diff and emit SQL, read it, apply it. The migration files become a versioned history of the DB's shape.
+- **One data-access seam is worth the discipline.** Funnelling every query through one module is mildly annoying while you're mocking. It's what made replacing the entire storage layer a body-only edit with zero caller changes.
+- **Quarantine the impedance mismatches.** Timezone formatting, normalized-vs-nested shape, who-is-the-user: each wanted to leak into a dozen call sites. A custom column type, a seed transform, a single provisioning helper kept each one in exactly one place.
+- **Don't connect at import.** A client that opens a pool (or throws on a missing variable) at module load can't be built into an image without production secrets. Initialize lazily, on first use.
+
+_That's Part 1: the app now runs entirely on a real Postgres locally (reads, writes, transactions, seeded data), and everything needed to take it to the cloud is staged behind one pending approval. **Part 2** picks up when the network range is granted: provisioning the managed database on the private network, wiring the app's egress to reach it, running the migration through the tunnel, and finally pointing the deployed app at the real thing._

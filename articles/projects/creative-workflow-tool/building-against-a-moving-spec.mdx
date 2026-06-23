@@ -9,7 +9,7 @@ date: '2026-06-22'
 
 ## Intro
 
-By the time the app was [deployed behind SSO](/projects/creative-workflow-tool/shipping-to-cloud-run), the requirements had moved. A new design draft landed with features the first one didn't have, and a separate requirements list assigned each one a priority. That's normal for an internal tool — the spec firms up as people see a running version.
+By the time the app was [deployed behind SSO](/projects/creative-workflow-tool/shipping-to-cloud-run), the requirements had moved. A new design draft landed with features the first one didn't have, and a separate requirements list assigned each one a priority. That's normal for an internal tool: the spec firms up as people see a running version.
 
 The interesting part isn't the features. It's how to absorb a moving spec without either thrashing (rebuilding on every new draft) or freezing (refusing to build until everything's final). This article is the triage discipline that kept the build moving, and the call on when to finally commit to a database.
 
@@ -19,9 +19,9 @@ The new draft added several things: extra fields, a redesigned scheduling view s
 
 Each requirement carried a temperature: **must-have**, **nice-to-have**, or **phase 2**. Cross-referencing the shiny new features against that list flipped the plan:
 
-- The headline additions in the new draft — the fields and the redesigned scheduler — were tied to an **external system integration** that was explicitly marked _phase 2_ and _"needed only after a separate rollout."_ The flashiest work was the **lowest** priority.
+- The headline additions in the new draft (the fields and the redesigned scheduler) were tied to an **external system integration** that was explicitly marked _phase 2_ and _"needed only after a separate rollout."_ The flashiest work was the **lowest** priority.
 - The one genuinely actionable new feature was the unglamorous **bulk import** (nice-to-have, but self-contained and unblocked).
-- The single must-have was "cover all the fields the existing spreadsheet tracks" — which the build already largely did.
+- The single must-have was "cover all the fields the existing spreadsheet tracks," which the build already largely did.
 
 Building the headline features would have meant investing most in the work most likely to change (it depends on an external API spec that doesn't exist yet). **Priority labels are a filter on enthusiasm.** The right move was to skip the exciting-but-deferred work and ship the boring-but-ready piece.
 
@@ -29,15 +29,15 @@ Building the headline features would have meant investing most in the work most 
 
 There's a subtlety in deferring integration-heavy features: separate the **integration** from the **data shape** it implies.
 
-A couple of fields from the deferred integration turned out to be reclassified, on a closer read of the requirements, as **fields the team already tracks manually** (must-have) rather than parts of the integration (phase 2). The integration — syncing with the external system — stays deferred. But the _columns_ are cheap to add now and are genuinely required. So they go into the schema; the sync logic doesn't.
+A couple of fields from the deferred integration turned out to be reclassified, on a closer read of the requirements, as **fields the team already tracks manually** (must-have) rather than parts of the integration (phase 2). The integration (syncing with the external system) stays deferred. But the _columns_ are cheap to add now and are genuinely required. So they go into the schema; the sync logic doesn't.
 
-The reverse also happened: a feature marked "done" in the new draft was, on inspection, still under active review for its exact shape. That one I modeled as a _future additive table_ — noted in the plan, not built — so it wouldn't block the core schema and wouldn't get built twice.
+The reverse also happened: a feature marked "done" in the new draft was, on inspection, still under active review for its exact shape. That one I modeled as a _future additive table_ (noted in the plan, not built) so it wouldn't block the core schema and wouldn't get built twice.
 
 The general rule: **defer the behavior, but let settled data shapes land early if they're cheap and additive.** Columns are easy to add now and easy to add later; the cost of guessing wrong is low. Integrations are expensive and depend on external unknowns; defer those hard.
 
 ## The plan doc absorbs the churn
 
-When the spec moves, _something_ has to be the record of "what we decided and why," or the next session (human or agent) re-litigates it. For this project that's the plan doc — read on demand, not auto-loaded.
+When the spec moves, _something_ has to be the record of "what we decided and why," or the next session (human or agent) re-litigates it. For this project that's the plan doc, read on demand, not auto-loaded.
 
 Every triage decision went in: the requirements table with each item's priority and disposition (done / deferred / phase 2), the rationale for deferring the integration work, the reclassified fields, the future-additive-table note. So when an agent picks the project back up, "why isn't the fancy scheduler built?" has a one-line answer in the doc instead of a re-derivation from the drafts.
 
@@ -47,22 +47,22 @@ This is the same division of labor from [earlier in the series](/projects/creati
 
 The whole point of [building UI-first on mocks](/projects/creative-workflow-tool/building-ui-first-on-mocks) was to defer the database until the schema stopped moving. So: had it stopped?
 
-The honest test isn't "is the spec final" — it never is. It's **"are the things still in flux the kind that would force a painful migration, or the kind that's cheap to add later?"**
+The honest test isn't "is the spec final." It never is. It's **"are the things still in flux the kind that would force a painful migration, or the kind that's cheap to add later?"**
 
 Going down the open items:
 
-- The **core entities** (requests, their sub-forms, reference data, audit, users/roles) — unchanged across both drafts. Stable.
-- The **role model** — just confirmed by stakeholders. Stable.
-- The **deferred integration** — doesn't touch the core schema; it's a later additive concern.
-- The **one unsettled feature** — modeled as a future additive table, not a change to existing tables.
+- The **core entities** (requests, their sub-forms, reference data, audit, users/roles): unchanged across both drafts. Stable.
+- The **role model**: just confirmed by stakeholders. Stable.
+- The **deferred integration**: doesn't touch the core schema; it's a later additive concern.
+- The **one unsettled feature**: modeled as a future additive table, not a change to existing tables.
 
-Everything still moving was _additive_ (new columns, new tables) rather than _structural_ (reshaping or relating existing tables). And — the part that makes this easy — **there's no real data yet.** Pre-launch, with migrations generated by the ORM, adding a column or table is a one-liner and a reset; the scary part of schema change (migrating and back-filling live data) doesn't exist.
+Everything still moving was _additive_ (new columns, new tables) rather than _structural_ (reshaping or relating existing tables). And (the part that makes this easy) **there's no real data yet.** Pre-launch, with migrations generated by the ORM, adding a column or table is a one-liner and a reset; the scary part of schema change (migrating and back-filling live data) doesn't exist.
 
-So: stable enough. Not because the spec is frozen, but because the remaining unknowns are the cheap-to-change kind, and the expensive-to-change parts have settled. That's the bar — not finality, just "the risky stuff is settled and the unsettled stuff is cheap."
+So: stable enough. Not because the spec is frozen, but because the remaining unknowns are the cheap-to-change kind, and the expensive-to-change parts have settled. That's the bar: not finality, just "the risky stuff is settled and the unsettled stuff is cheap."
 
 ## Track phases as issues
 
-One small process habit that paid off as the plan grew: each phase gets a tracking issue, opened as a sub-issue of the project epic, with the phase scope as a checklist. It sounds bureaucratic for a solo-ish build, but it does two things. It gives the agent an explicit, linkable unit of work to check off as steps land. And it makes the project legible to anyone glancing at the issue tracker — done phases closed, the current phase open with its checklist visible. I even backfilled issues for the already-finished phases, so the epic reads as a clean progression rather than starting mid-stream. I added an instruction to the plan doc to open one at the start of every new phase, so it doesn't depend on me remembering.
+One small process habit that paid off as the plan grew: each phase gets a tracking issue, opened as a sub-issue of the project epic, with the phase scope as a checklist. It sounds bureaucratic for a solo-ish build, but it does two things. It gives the agent an explicit, linkable unit of work to check off as steps land. And it makes the project legible to anyone glancing at the issue tracker: done phases closed, the current phase open with its checklist visible. I even backfilled issues for the already-finished phases, so the epic reads as a clean progression rather than starting mid-stream. I added an instruction to the plan doc to open one at the start of every new phase, so it doesn't depend on me remembering.
 
 ## Wrapping Up
 
@@ -70,10 +70,10 @@ A moving spec is the default condition for an internal tool, not an exception to
 
 Key takeaways:
 
-1. **Triage new requirements against their stated priority before building.** The flashiest additions are often the lowest priority — and the ones most likely to change.
+1. **Triage new requirements against their stated priority before building.** The flashiest additions are often the lowest priority, and the ones most likely to change.
 2. **Separate the integration from the data shape it implies.** Defer the external-system behavior; let settled, cheap, additive fields land now.
 3. **Let the plan doc absorb the churn.** Record each triage decision and its rationale so the next session doesn't re-litigate it.
 4. **"Stable enough for the DB" ≠ "spec is final."** It's "the expensive-to-change parts have settled, and what's left is cheap and additive." Pre-launch with ORM migrations, that bar is low.
 5. **Track phases as issues.** A checklist per phase, backfilled for history, makes the work legible and gives an agent a unit to close.
 
-That's the series so far: stack and infra planning, the AI workflow, the mock-first UI build, the Next.js implementation, the gated deployment, and now absorbing a moving spec. Next in reality is the database itself — turning the mock store into Postgres on Cloud SQL, which is finally derisked enough to be worth doing.
+That's the series so far: stack and infra planning, the AI workflow, the mock-first UI build, the Next.js implementation, the gated deployment, and now absorbing a moving spec. Next in reality is the database itself: turning the mock store into Postgres on Cloud SQL, which is finally derisked enough to be worth doing.

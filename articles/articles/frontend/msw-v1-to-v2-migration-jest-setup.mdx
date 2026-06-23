@@ -10,7 +10,7 @@ published: true
 
 The [MSW v2 migration guide](https://mswjs.io/docs/migrations/1.x-to-2.x/) is well-written. It walks you through the API changes: `rest` becomes `http`, `res(ctx.json(data))` becomes `HttpResponse.json(data)`, types get renamed. Straightforward stuff. I read through it, thought "this won't take long," and started updating handler files.
 
-The handler changes were indeed mechanical. But when I ran `npm test`, everything fell apart. Not because of the API changes — because of what MSW v2 now expects from the environment it runs in.
+The handler changes were indeed mechanical. But when I ran `npm test`, everything fell apart. Not because of the API changes, but because of what MSW v2 now expects from the environment it runs in.
 
 ## The Handler Changes (The Easy Part)
 
@@ -59,7 +59,7 @@ If this was all there was to it, the migration would take an hour. But it wasn't
 
 ## The Real Problem: jsdom Doesn't Have Web APIs
 
-MSW v2 is built on web standards. It uses `TextEncoder`, `TextDecoder`, `ReadableStream`, `WritableStream`, `TransformStream`, and `BroadcastChannel` internally. These are all available in modern browsers and Node.js — but not in jsdom.
+MSW v2 is built on web standards. It uses `TextEncoder`, `TextDecoder`, `ReadableStream`, `WritableStream`, `TransformStream`, and `BroadcastChannel` internally. These are all available in modern browsers and Node.js, but not in jsdom.
 
 Jest with jsdom is the standard setup for testing React components. jsdom simulates a browser environment, but it doesn't implement every Web API. MSW v1 worked around this by using Node.js-specific polyfills internally. MSW v2 dropped that approach and expects these APIs to exist globally.
 
@@ -98,7 +98,7 @@ if (typeof globalThis.BroadcastChannel === 'undefined') {
 }
 ```
 
-The `typeof` checks aren't strictly necessary in jsdom (they'll always be undefined), but they make the setup defensive — if a future jsdom version adds support, you won't get conflicts.
+The `typeof` checks aren't strictly necessary in jsdom (they'll always be undefined), but they make the setup defensive. If a future jsdom version adds support, you won't get conflicts.
 
 The order matters here. These polyfills must come before `@testing-library/jest-dom` or any other import that might trigger MSW initialization.
 
@@ -113,7 +113,7 @@ if (typeof window !== 'undefined') {
 }
 ```
 
-This worked fine with MSW v1, but MSW v2's `HttpResponse.error()` creates a `Response` with status `0` — a network error response. `whatwg-fetch`'s `Response` implementation doesn't handle this correctly and throws.
+This worked fine with MSW v1, but MSW v2's `HttpResponse.error()` creates a `Response` with status `0` (a network error response). `whatwg-fetch`'s `Response` implementation doesn't handle this correctly and throws.
 
 The fix is to use `undici`, which is the HTTP client that Node.js uses internally for its native `fetch`. Since it's the same implementation, it handles all edge cases correctly:
 
@@ -234,7 +234,7 @@ parameters: {
 }
 ```
 
-Don't forget to regenerate `mockServiceWorker.js` with `npx msw init public/` — the service worker file changed significantly between v1 and v2.
+Don't forget to regenerate `mockServiceWorker.js` with `npx msw init public/`. The service worker file changed significantly between v1 and v2.
 
 ## The Full Checklist
 
@@ -254,7 +254,7 @@ If you're doing this migration in a Next.js + Jest project, here's everything in
 
 ## What I'd Do Differently
 
-If I could redo this, I'd start with the Jest setup changes (steps 2-6) before touching any handler code. The handler changes are mechanical and easy to verify — but if your test environment isn't set up correctly, every test fails and you can't tell if your handler changes are correct.
+If I could redo this, I'd start with the Jest setup changes (steps 2-6) before touching any handler code. The handler changes are mechanical and easy to verify, but if your test environment isn't set up correctly, every test fails and you can't tell if your handler changes are correct.
 
 I spent time debugging handler code that was actually fine. The tests were failing because of missing polyfills, not because of incorrect handler syntax.
 

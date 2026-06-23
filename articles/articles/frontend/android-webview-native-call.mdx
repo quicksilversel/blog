@@ -8,7 +8,7 @@ date: '2025-01-14'
 
 ## So Apparently This Works?
 
-Ever been in a situation where your web app runs _inside_ a native Android app and somehow… you can call native Java code? I wasn’t expecting it to work either — but here we are.
+Ever been in a situation where your web app runs _inside_ a native Android app and somehow… you can call native Java code? I wasn’t expecting it to work either, but here we are.
 
 This is how I invoked an Android function right from the browser via WebView, with zero knowledge of the app's internals.
 
@@ -95,7 +95,7 @@ So if the app side did:
 webView.addJavascriptInterface(new ContentSharingInterface(), "ContentSharingInterface");
 ```
 
-Then boom 💥 — your webpage suddenly has a new global object.
+Then boom 💥. Your webpage suddenly has a new global object.
 
 Of course, security concerns exist (this is why it's not allowed in file:// URLs), but for app-internal WebViews, it’s super handy.
 
@@ -104,4 +104,4 @@ Of course, security concerns exist (this is why it's not allowed in file:// URLs
 - Native WebView bridges let your web app talk to Android code.
 - Ask your app dev to expose the interface properly with separate params.
 - Use TypeScript type guards and fallback alerts to stay safe.
-- And no, you’re not hallucinating — this is actually supported Android behavior.
+- And no, you’re not hallucinating, this is actually supported Android behavior.

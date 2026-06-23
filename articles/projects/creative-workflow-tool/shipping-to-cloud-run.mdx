@@ -1,6 +1,6 @@
 ---
 title: 'Shipping to Cloud Run: Slack SSO, an IP Allowlist, and Keyless CI/CD'
-description: 'Deploying the still-mock-backed app to Cloud Run gated two ways — Slack SSO at the app layer and an office-IP allowlist — with a standalone container and keyless GitHub Actions via Workload Identity Federation. Plus the cost call between an app-layer IP check and Cloud Armor, and the auth gate that forced collapsing an internal self-fetch.'
+description: 'Deploying the still-mock-backed app to Cloud Run gated two ways (Slack SSO at the app layer and an office-IP allowlist) with a standalone container and keyless GitHub Actions via Workload Identity Federation. Plus the cost call between an app-layer IP check and Cloud Armor, and the auth gate that forced collapsing an internal self-fetch.'
 topics: ['GCP', 'Cloud Run', 'Auth.js', 'CI/CD']
 category: 'infrastructure'
 published: true
@@ -9,9 +9,9 @@ date: '2026-06-13'
 
 ## Intro
 
-At this point the app was fully built but entirely mock-backed — no database yet. The ask was to get it deployed anyway, so stakeholders could reach a live URL, with the database following later. That's a fine thing to do if access is locked down, since there's no real data to leak.
+At this point the app was fully built but entirely mock-backed, no database yet. The ask was to get it deployed anyway, so stakeholders could reach a live URL, with the database following later. That's a fine thing to do if access is locked down, since there's no real data to leak.
 
-So this phase was: a deployable container, Slack SSO so the page isn't public, an IP allowlist on top, and a keyless CI/CD pipeline — all before the DB. This article is the decisions and the sharp edges.
+So this phase was: a deployable container, Slack SSO so the page isn't public, an IP allowlist on top, and a keyless CI/CD pipeline, all before the DB. This article is the decisions and the sharp edges.
 
 ## Slack SSO with Auth.js v5
 
@@ -23,33 +23,33 @@ The user base lives in one Slack org, so "Sign in with Slack" (OIDC) is the natu
 
 Two framework-version notes:
 
-- The "enable Sign in with Slack" step in the Slack app config isn't a toggle anymore — you enable it implicitly by adding the OIDC scopes (`openid`, `email`, `profile`) and a redirect URL. Easy to hunt for a button that doesn't exist.
-- During local testing the OAuth redirect came back to `https://null/...` — the library couldn't infer its own base URL when sign-in is triggered from a server action under the current framework version. Setting the canonical URL explicitly via env (`AUTH_URL`) fixed it deterministically. Worth setting in production too rather than trusting host inference behind a proxy.
+- The "enable Sign in with Slack" step in the Slack app config isn't a toggle anymore. You enable it implicitly by adding the OIDC scopes (`openid`, `email`, `profile`) and a redirect URL. Easy to hunt for a button that doesn't exist.
+- During local testing the OAuth redirect came back to `https://null/...`, because the library couldn't infer its own base URL when sign-in is triggered from a server action under the current framework version. Setting the canonical URL explicitly via env (`AUTH_URL`) fixed it deterministically. Worth setting in production too rather than trusting host inference behind a proxy.
 
 ### Org-tier identity: it's not a single workspace
 
 The `signIn` callback was meant to check the workspace ID. But the org is on **Slack Enterprise Grid**, where accounts live under an org-level identifier (an enterprise id) spanning many workspaces, not a single workspace ID. The ID visible in the client URL was the **enterprise/org id**, not a workspace id. Restricting by a single workspace would have locked out most of the company.
 
-The fix was to gate on the org-level claim instead (covering every workspace under the org), and to write the check so it accepts _either_ an org id or a single-workspace id depending on which is configured. Generic lesson: when an SSO tenant is on an enterprise/grid tier, "which workspace" is the wrong question — "which org" is usually what you mean.
+The fix was to gate on the org-level claim instead (covering every workspace under the org), and to write the check so it accepts _either_ an org id or a single-workspace id depending on which is configured. Generic lesson: when an SSO tenant is on an enterprise/grid tier, "which workspace" is the wrong question. "Which org" is usually what you mean.
 
 ### Roles without a database
 
-No DB yet, so roles can't be persisted per user. The interim: **email allowlists in env** — one list per privileged role, with a sensible default for everyone else. The sign-in path resolves an email to a role by checking the lists in precedence order. It's not glamorous, and edits mean a redeploy, but it's persistent across restarts (unlike an in-memory store would be) and it's a five-minute swap for a real `users` table once the DB lands. An in-app admin screen to edit roles was explicitly deferred to the DB phase for exactly that reason: without persistence, in-app edits would evaporate on the next deploy.
+No DB yet, so roles can't be persisted per user. The interim: **email allowlists in env**, one list per privileged role, with a sensible default for everyone else. The sign-in path resolves an email to a role by checking the lists in precedence order. It's not glamorous, and edits mean a redeploy, but it's persistent across restarts (unlike an in-memory store would be) and it's a five-minute swap for a real `users` table once the DB lands. An in-app admin screen to edit roles was explicitly deferred to the DB phase for exactly that reason: without persistence, in-app edits would evaporate on the next deploy.
 
 ## The gate: Next 16's `proxy`
 
 Route protection in Next.js 16 lives in `proxy.ts` (the renamed `middleware.ts`). It runs before routes and is where both gates live:
 
-1. **IP allowlist** — reject requests whose client IP isn't in the office/VPN egress set.
-2. **Auth** — bounce unauthenticated requests to the sign-in page.
+1. **IP allowlist**: reject requests whose client IP isn't in the office/VPN egress set.
+2. **Auth**: bounce unauthenticated requests to the sign-in page.
 
-Both are no-ops unless their env flag is set, so local development stays unrestricted and the same code runs everywhere. The whole thing auto-enables only when the relevant env is present — auth turns on when the SSO client is configured, IP filtering when its flag is set.
+Both are no-ops unless their env flag is set, so local development stays unrestricted and the same code runs everywhere. The whole thing auto-enables only when the relevant env is present: auth turns on when the SSO client is configured, IP filtering when its flag is set.
 
 A nice side effect of building it env-gated: I could smoke-test the _enabled_ path locally with dummy credentials (protected routes → redirect to sign-in, sign-in page renders) without standing up real SSO, then flip it on in the deployed environment.
 
 ## App-layer IP allowlist vs. Cloud Armor: a cost call
 
-The existing internal tooling restricted access to office and VPN egress IPs at the edge (a WAF allowlist). The equivalent on this platform would be **Cloud Armor on an external HTTPS load balancer** in front of the service. I priced it against the simpler option — checking the client IP in the app's `proxy`:
+The existing internal tooling restricted access to office and VPN egress IPs at the edge (a WAF allowlist). The equivalent on this platform would be **Cloud Armor on an external HTTPS load balancer** in front of the service. I priced it against the simpler option, checking the client IP in the app's `proxy`:
 
 |                 | App-layer check                    | Cloud Armor + load balancer                           |
 | --------------- | ---------------------------------- | ----------------------------------------------------- |
@@ -60,7 +60,7 @@ The existing internal tooling restricted access to office and VPN egress IPs at 
 
 For a **dev deployment serving mock data behind SSO**, the marginal security of unspoofable edge enforcement didn't justify ~$30/mo, ~10 resources, and a domain dependency. The primary gate is SSO (org-restricted); the IP check is defense-in-depth. So I took the app-layer allowlist now, and noted Cloud Armor + a custom domain as the right upgrade once there's real data or a compliance reason.
 
-Objectively naming the tradeoff in a table — and writing down _when_ the heavier option wins — was more useful than just picking one. The cheap option is correct _for this stage_, and the doc says when that stops being true.
+Objectively naming the tradeoff in a table (and writing down _when_ the heavier option wins) was more useful than just picking one. The cheap option is correct _for this stage_, and the doc says when that stops being true.
 
 ## The container: standalone output
 
@@ -73,23 +73,23 @@ Here's where the [mock layer](/projects/creative-workflow-tool/building-ui-first
 - the internal self-fetch originates from the _server's own_ egress IP, not an office IP → the IP allowlist blocks it;
 - and it carries no session cookie → the auth gate redirects it to sign-in.
 
-The internal request the app makes to itself gets caught by the very gate meant for users. The clean fix was the one the architecture had been set up for all along: **collapse the seam to direct, in-process calls.** The data-access module stopped doing HTTP and called the store directly. Signatures didn't change, so no caller was touched, and the mock-runtime dependency dropped out of production entirely. The "one seam, swap once" discipline from the mock phase paid for itself here — what looked like a deploy problem was a one-module change.
+The internal request the app makes to itself gets caught by the very gate meant for users. The clean fix was the one the architecture had been set up for all along: **collapse the seam to direct, in-process calls.** The data-access module stopped doing HTTP and called the store directly. Signatures didn't change, so no caller was touched, and the mock-runtime dependency dropped out of production entirely. The "one seam, swap once" discipline from the mock phase paid for itself here: what looked like a deploy problem was a one-module change.
 
 ## Keyless CI/CD with Workload Identity Federation
 
 The deploy pipeline is GitHub Actions → container registry → Cloud Run, authenticating with **Workload Identity Federation** rather than a long-lived service-account key. WIF lets the CI job mint short-lived credentials by presenting its OIDC token; no JSON key to store, rotate, or leak.
 
-The setup that's easy to get wrong: the federation _provider_ allowed the whole org's repos, but a deploy service account only trusts the specific repos bound to it. Authorizing a new repo wasn't a provider change — it was adding the repo's principal to the service account's IAM bindings (impersonation + token creation). Until that binding exists, the CI job authenticates as "nobody." Three repo-level secrets (project id, the provider resource name, the service-account email) and that binding were the whole dance.
+The setup that's easy to get wrong: the federation _provider_ allowed the whole org's repos, but a deploy service account only trusts the specific repos bound to it. Authorizing a new repo wasn't a provider change. It was adding the repo's principal to the service account's IAM bindings (impersonation + token creation). Until that binding exists, the CI job authenticates as "nobody." Three repo-level secrets (project id, the provider resource name, the service-account email) and that binding were the whole dance.
 
-The deploy step itself is one `gcloud run deploy` with the container image, the env vars, and the secrets wired from Secret Manager. The service stays publicly reachable at the infrastructure layer **on purpose** — the app enforces auth, and the SSO callback has to be reachable for the login round-trip to work. "Not public" is done in the app, not by making the URL unreachable.
+The deploy step itself is one `gcloud run deploy` with the container image, the env vars, and the secrets wired from Secret Manager. The service stays publicly reachable at the infrastructure layer **on purpose**: the app enforces auth, and the SSO callback has to be reachable for the login round-trip to work. "Not public" is done in the app, not by making the URL unreachable.
 
 ### Hide what the login page reveals
 
-One small thing that's easy to forget: the sign-in page is the _only_ thing an unauthenticated visitor can see. By default it showed the product name and a description — i.e., it leaked exactly what the tool is to anyone who hits the URL. I stripped it to just the sign-in button, set a generic page title, and added `robots: noindex`. If the gate is the point, the gate shouldn't announce what it's guarding.
+One small thing that's easy to forget: the sign-in page is the _only_ thing an unauthenticated visitor can see. By default it showed the product name and a description, i.e., it leaked exactly what the tool is to anyone who hits the URL. I stripped it to just the sign-in button, set a generic page title, and added `robots: noindex`. If the gate is the point, the gate shouldn't announce what it's guarding.
 
 ## Wrapping Up
 
-The theme of this phase: ship behind strong gates before the data exists, and let the cheap-but-sufficient option win where the expensive one isn't earned yet — while writing down when that flips.
+The theme of this phase: ship behind strong gates before the data exists, and let the cheap-but-sufficient option win where the expensive one isn't earned yet, while writing down when that flips.
 
 Key takeaways:
 
@@ -100,4 +100,4 @@ Key takeaways:
 5. **Prefer keyless CI/CD (WIF).** And remember authorizing a new repo is an IAM binding on the deploy account, not a provider change.
 6. **The login page is a public surface.** Strip identifying text, set a generic title, `noindex`.
 
-Next up: the spec kept moving while all this shipped. The last article in the series is on building against a moving target — deferring integrations, triaging requirements, and knowing when the schema is finally stable enough to commit to the database.
+Next up: the spec kept moving while all this shipped. The last article in the series is on building against a moving target: deferring integrations, triaging requirements, and knowing when the schema is finally stable enough to commit to the database.

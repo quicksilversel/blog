@@ -243,7 +243,7 @@ gcloud pubsub subscriptions create gcs-memory-reload \
   --project=your-project
 ```
 
-The default `ackDeadlineSeconds` is 10, which can be tight if your reload fetches a lot of data from GCS (e.g. loading hundreds of LP archive entries). If Pub/Sub doesn't get an ACK in time, it retries — harmless since reload is idempotent, but noisy. Bump it to 30 seconds:
+The default `ackDeadlineSeconds` is 10, which can be tight if your reload fetches a lot of data from GCS (e.g. loading hundreds of LP archive entries). If Pub/Sub doesn't get an ACK in time, it retries, harmless since reload is idempotent, but noisy. Bump it to 30 seconds:
 
 ```bash
 gcloud pubsub subscriptions update gcs-memory-reload \

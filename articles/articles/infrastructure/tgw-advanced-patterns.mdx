@@ -8,7 +8,7 @@ date: '2025-09-17'
 
 ## The Reality of Transit Gateway at Scale
 
-Everyone knows Transit Gateway is AWS's answer to the "VPC peering mesh from hell" problem. But after managing TGW across multiple accounts, dealing with cross-account resource sharing drama, and debugging route propagation issues at 2 AM, I've learned that the real complexity isn't in setting it up — it's in operating it at scale.
+Everyone knows Transit Gateway is AWS's answer to the "VPC peering mesh from hell" problem. But after managing TGW across multiple accounts, dealing with cross-account resource sharing drama, and debugging route propagation issues at 2 AM, I've learned that the real complexity isn't in setting it up, it's in operating it at scale.
 
 This isn't your typical "here's how to create a TGW" tutorial. This is about the patterns, pitfalls, and production lessons that only come from actually running this thing in anger.
 
@@ -27,10 +27,10 @@ Remember the old days? You'd have:
 
 Transit Gateway replaces this mess with a single hub that:
 
-- **Acts as a cloud router** — Connect VPCs, VPNs, Direct Connect, and other TGWs through one central point
-- **Enables transitive routing** — Traffic can flow through the TGW to reach any connected network
-- **Scales horizontally** — Handles up to 5 Gbps per VPC attachment, 50 Gbps aggregate
-- **Supports multiple route tables** — Segment traffic based on security requirements
+- **Acts as a cloud router**: Connect VPCs, VPNs, Direct Connect, and other TGWs through one central point
+- **Enables transitive routing**: Traffic can flow through the TGW to reach any connected network
+- **Scales horizontally**: Handles up to 5 Gbps per VPC attachment, 50 Gbps aggregate
+- **Supports multiple route tables**: Segment traffic based on security requirements
 
 ### Core Components at a Glance
 
@@ -51,13 +51,13 @@ Components:
     Propagation: 'Attachments can propagate routes to multiple tables'
 ```
 
-Now that we're on the same page about what TGW is and what it does, let's talk about what happens when you actually run this in production across multiple accounts, regions, and teams — because that's where things get interesting (and occasionally terrifying).
+Now that we're on the same page about what TGW is and what it does, let's talk about what happens when you actually run this in production across multiple accounts, regions, and teams, because that's where things get interesting (and occasionally terrifying).
 
 ## Advanced Architecture Patterns
 
 ### The Multi-Account Transit Hub Pattern
 
-Forget the basic hub-and-spoke. In real enterprises, you're dealing with multiple AWS accounts, each with their own networking requirements, compliance boundaries, and — let's be honest — political territories.
+Forget the basic hub-and-spoke. In real enterprises, you're dealing with multiple AWS accounts, each with their own networking requirements, compliance boundaries, and (let's be honest) political territories.
 
 Here's the pattern that actually works:
 
@@ -85,7 +85,7 @@ The key insight: **Disable default route table association and propagation**. Yo
 
 ### Segmented Route Tables for Security Zones
 
-Production networks aren't flat. You've got prod, dev, DMZ, shared services — each with different security postures. Here's how to segment properly:
+Production networks aren't flat. You've got prod, dev, DMZ, shared services, each with different security postures. Here's how to segment properly:
 
 ```yaml
 Parameters:
@@ -171,7 +171,7 @@ This is where things get messy. Each spoke account needs to:
 2. Create the attachment
 3. Configure route tables
 
-But here's the killer pattern — use parameters to pass the shared TGW ID:
+But here's the killer pattern, use parameters to pass the shared TGW ID:
 
 ```yaml
 # In the spoke account template
@@ -419,7 +419,7 @@ The key: **Always review change sets before execution**. A misconfigured route t
 
 ## The Politics of Network Architecture
 
-Let's be real — the technical challenges are only half the battle. Here's how to navigate the organizational aspects:
+Let's be real, the technical challenges are only half the battle. Here's how to navigate the organizational aspects:
 
 ### Cost Attribution
 
@@ -489,16 +489,16 @@ Give teams autonomy while maintaining guardrails.
 
 If you take away nothing else:
 
-1. **Disable default route propagation** — Be explicit about routing
-2. **Test asymmetric routing** — It will happen, be ready
-3. **Monitor route table size** — You'll hit limits before you expect
-4. **Use RAM carefully** — Cross-account sharing is powerful but complex
-5. **Tag everything** — Future you will thank present you
-6. **Automate with change sets** — But always human-review route changes
-7. **Plan for BGP** — Even if you don't need it today
-8. **Document security zones** — Network segmentation as code
+1. **Disable default route propagation**: Be explicit about routing
+2. **Test asymmetric routing**: It will happen, be ready
+3. **Monitor route table size**: You'll hit limits before you expect
+4. **Use RAM carefully**: Cross-account sharing is powerful but complex
+5. **Tag everything**: Future you will thank present you
+6. **Automate with change sets**: But always human-review route changes
+7. **Plan for BGP**: Even if you don't need it today
+8. **Document security zones**: Network segmentation as code
 
-Transit Gateway isn't just a network hub — it's the backbone of your multi-account strategy. Treat it with the respect (and automation) it deserves.
+Transit Gateway isn't just a network hub, it's the backbone of your multi-account strategy. Treat it with the respect (and automation) it deserves.
 
 ## Further Reading
 
@@ -506,4 +506,4 @@ Transit Gateway isn't just a network hub — it's the backbone of your multi-acc
 - [TGW Network Manager](https://aws.amazon.com/transit-gateway/network-manager/) - Visualization at scale
 - [Cross-region peering patterns](https://aws.amazon.com/blogs/networking-and-content-delivery/building-a-global-network-using-aws-transit-gateway-inter-region-peering/) - When one region isn't enough
 
-Remember: In networking, as in life, it's not about avoiding all problems — it's about failing fast, debugging faster, and documenting everything for the next poor soul who has to maintain this.
+Remember: In networking, as in life, it's not about avoiding all problems, it's about failing fast, debugging faster, and documenting everything for the next poor soul who has to maintain this.

@@ -8,7 +8,7 @@ published: true
 
 ## The Symptom
 
-After upgrading Swiper from v8 to v11 alongside a React 19 / Next.js 15 migration, certain pages started violently scrolling back and forth. Not a subtle jank — the page was jumping 1,000+ pixels per frame, making it completely unusable.
+After upgrading Swiper from v8 to v11 alongside a React 19 / Next.js 15 migration, certain pages started violently scrolling back and forth. Not a subtle jank. The page was jumping 1,000+ pixels per frame, making it completely unusable.
 
 The browser console was flooded with this warning:
 
@@ -22,7 +22,7 @@ Firing infinitely. From `resizeHandler`.
 
 ## Finding the Root Cause
 
-The affected carousels had a common pattern: `loop: true` with few slides. One carousel had 2 items, another had 4. They all used `slidesPerView: 'auto'` with `centeredSlides: true` — a standard config for centered carousels where adjacent slides peek from the edges.
+The affected carousels had a common pattern: `loop: true` with few slides. One carousel had 2 items, another had 4. They all used `slidesPerView: 'auto'` with `centeredSlides: true`, a standard config for centered carousels where adjacent slides peek from the edges.
 
 In Swiper v8, this worked perfectly. In v11, it caused an infinite resize loop.
 
@@ -34,7 +34,7 @@ In v8, loop worked by **cloning DOM nodes**. Swiper would duplicate your slides 
 
 Starting in v9, loop works by **rearranging the actual slides** using CSS transforms. No more DOM cloning. Swiper physically moves slides from one end to the other to create the illusion of infinite scroll.
 
-This was a good architectural change — the old clone-based approach had real problems:
+This was a good architectural change. The old clone-based approach had real problems:
 
 - Cloned slides didn't sync with React state updates
 - Virtual Translate was incompatible with loop mode
@@ -95,7 +95,7 @@ Before finding the real fix, I went through a few approaches that didn't work.
 
 ### `loopAddBlankSlides: true`
 
-This sounded perfect — Swiper v11 has a parameter that adds blank slides when there aren't enough. It even defaults to `true`. Surely this solves the problem?
+This sounded perfect. Swiper v11 has a parameter that adds blank slides when there aren't enough. It even defaults to `true`. Surely this solves the problem?
 
 It doesn't. Looking at the source:
 
@@ -113,7 +113,7 @@ The loop warning comes from a completely separate check in `loopFix()` that runs
 
 ### `loopAdditionalSlides`
 
-This increases `loopedSlides` in the formula above. But `loopedSlides` is part of the **requirement**, not the **supply**. Setting `loopAdditionalSlides: 3` doesn't add 3 slides — it increases the minimum needed by 3. It makes the problem worse.
+This increases `loopedSlides` in the formula above. But `loopedSlides` is part of the **requirement**, not the **supply**. Setting `loopAdditionalSlides: 3` doesn't add 3 slides, it increases the minimum needed by 3. It makes the problem worse.
 
 ### `cssMode: true`
 
@@ -121,7 +121,7 @@ Uses native CSS `scroll-snap` instead of JavaScript transforms. The loop still t
 
 ### `rewind: true` Instead of `loop: true`
 
-This actually works — `rewind` makes the carousel animate back to the first slide when you reach the end. No minimum slide requirement. But there's a problem:
+This actually works. `rewind` makes the carousel animate back to the first slide when you reach the end. No minimum slide requirement. But there's a problem:
 
 For carousels with `centeredSlides: true` that show adjacent slides with lower opacity (a common design pattern), `rewind` doesn't show the previous slide to the left of the first slide. With `loop`, slide 3 wraps around to appear on the left. With `rewind`, there's just empty space. This broke the design on many pages.
 
@@ -222,17 +222,17 @@ The threshold of 6 covers the worst case in our codebase: 3 slides visible with 
 
 A few takeaways from this:
 
-**Read the migration guide, but also read the source.** The Swiper v11 migration guide mentions loop changes in one line. The actual behavioral change — from DOM cloning to slide rearrangement — is buried in the v9 changelog. The minimum slide requirement isn't documented anywhere I could find; I had to read `swiper-core.mjs` to understand the formula.
+**Read the migration guide, but also read the source.** The Swiper v11 migration guide mentions loop changes in one line. The actual behavioral change (from DOM cloning to slide rearrangement) is buried in the v9 changelog. The minimum slide requirement isn't documented anywhere I could find; I had to read `swiper-core.mjs` to understand the formula.
 
 **`loopAddBlankSlides` is misleading.** The name suggests it adds blank slides when loop doesn't have enough. It doesn't. It pads slide groups for pagination alignment. The parameter name is reasonable in context, but if you're searching for "how to fix loop with few slides," it's a trap.
 
-**Wrapper components are underrated.** Instead of patching every carousel call site, wrapping the exported `Swiper` component in one place fixed the entire codebase. The wrapper is transparent — carousels with enough slides get the original component with zero overhead.
+**Wrapper components are underrated.** Instead of patching every carousel call site, wrapping the exported `Swiper` component in one place fixed the entire codebase. The wrapper is transparent. Carousels with enough slides get the original component with zero overhead.
 
-**Sometimes the old approach was right.** Swiper v9 removed DOM cloning for good reasons (state sync, Virtual Translate compatibility). But for carousels with few slides, cloning was the correct solution. The fix is literally "do what v8 did" — just in React-land instead of Swiper-land.
+**Sometimes the old approach was right.** Swiper v9 removed DOM cloning for good reasons (state sync, Virtual Translate compatibility). But for carousels with few slides, cloning was the correct solution. The fix is literally "do what v8 did", just in React-land instead of Swiper-land.
 
 ## References
 
 - [Swiper v11 Migration Guide](https://swiperjs.com/migration-guide-v11)
-- [Swiper v9 Migration Guide](https://swiperjs.com/migration-guide-v9) — where loop mode was rewritten
+- [Swiper v9 Migration Guide](https://swiperjs.com/migration-guide-v9): where loop mode was rewritten
 - [Swiper v11 Blog Post](https://swiperjs.com/blog/swiper-v11-back-to-basics)
-- [GitHub Issue #7254](https://github.com/nolimits4web/swiper/issues/7254) — discussion on loop behavior with few slides
+- [GitHub Issue #7254](https://github.com/nolimits4web/swiper/issues/7254): discussion on loop behavior with few slides

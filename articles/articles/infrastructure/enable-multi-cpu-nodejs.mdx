@@ -14,13 +14,13 @@ The other core? Just sitting there, sipping tea or whatever idle cores do.
 
 Turns out, Node.js doesn’t automatically use multiple cores, so even though more resources were available, the app hit its limit and gave up.
 
-Here’s how I scaled my app across multiple cores using the built-in cluster module, plus a quick dive into why this approach isn’t true multithreading—and why that’s perfectly fine.
+Here’s how I scaled my app across multiple cores using the built-in cluster module, plus a quick dive into why this approach isn’t true multithreading, and why that’s perfectly fine.
 
 ## 🔧 The setup
 
 ### App Side
 
-Use the `cluster` module to spin up multiple Node.js processes — each one gets its own core.
+Use the `cluster` module to spin up multiple Node.js processes, each one gets its own core.
 
 ```ts
 import cluster from 'cluster'
@@ -68,15 +68,15 @@ Still, for web apps with lots of I/O, this kind of parallelism works really well
 ## 💭 Why JS is single-threaded
 
 > “JavaScript was designed to be single-threaded so that developers could write code without worrying about race conditions and thread safety.”
-> — [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/EventLoop)
+> Source: [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/JavaScript/EventLoop)
 
 Since JS was originally made for the browser, the single-thread model kept things simple.
 If it were multi-threaded, the DOM would be a nightmare to manage with concurrent updates.
-Instead, async behavior is handled via the event loop — which is why `async/await` and `setTimeout` feel so natural.
+Instead, async behavior is handled via the event loop, which is why `async/await` and `setTimeout` feel so natural.
 
 ## ✅ wrap-up
 
 - `cluster.fork()` = multiple Node.js processes
-- But not real threads — memory isn’t shared
+- But not real threads (memory isn’t shared)
 - Update CPU limits in Kubernetes to match how many processes I wanna run
 - JS is single-threaded by design, and I’m cool with that

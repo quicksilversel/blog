@@ -1,6 +1,6 @@
 ---
 title: 'Virtualizing a MUI Autocomplete with react-window'
-description: 'How I fixed a sluggish MUI Autocomplete dropdown with thousands of options by wiring up react-window virtualization — including the non-obvious trick that makes it actually work.'
+description: 'How I fixed a sluggish MUI Autocomplete dropdown with thousands of options by wiring up react-window virtualization, including the non-obvious trick that makes it actually work.'
 date: 2026-03-31
 topics: ['React', 'MUI', 'react-window']
 published: true
@@ -8,19 +8,19 @@ published: true
 
 ## The Problem
 
-I have an internal tool with an Autocomplete dropdown that loads a large dataset at build time — thousands of entries, grouped alphabetically. Opening the dropdown felt noticeably heavy. Scrolling was janky. The browser was rendering every single list item at once, even the ones you couldn't see.
+I have an internal tool with an Autocomplete dropdown that loads a large dataset at build time, thousands of entries, grouped alphabetically. Opening the dropdown felt noticeably heavy. Scrolling was janky. The browser was rendering every single list item at once, even the ones you couldn't see.
 
 The fix is virtualization: only render the rows that are actually visible in the viewport, and swap them in and out as you scroll.
 
 ## Why react-window
 
-[react-window](https://github.com/bvaughn/react-window) is the standard library for this. It's small, well-maintained, and has a `VariableSizeList` that handles items of different heights — which matters here because group headers are taller than regular options.
+[react-window](https://github.com/bvaughn/react-window) is the standard library for this. It's small, well-maintained, and has a `VariableSizeList` that handles items of different heights, which matters here because group headers are taller than regular options.
 
 MUI's Autocomplete has a `ListboxComponent` prop specifically for this use case. You swap out the default `<ul>` with your own component, and that's where react-window lives.
 
 ## The Non-Obvious Trick
 
-The naive approach — wrapping MUI's rendered `<li>` elements in a `VariableSizeList` — doesn't work well. By the time those elements reach `ListboxComponent` as children, they're already rendered React nodes, making it hard to know which are group headers vs options and what height to assign them.
+The naive approach (wrapping MUI's rendered `<li>` elements in a `VariableSizeList`) doesn't work well. By the time those elements reach `ListboxComponent` as children, they're already rendered React nodes, making it hard to know which are group headers vs options and what height to assign them.
 
 MUI's docs show a cleaner pattern: make `renderOption` and `renderGroup` return **raw data** instead of React elements, and let `ListboxComponent` handle all the rendering itself.
 
@@ -88,7 +88,7 @@ export function createVirtualizedListbox<T>(renderOption: OptionRenderer<T>) {
 }
 ```
 
-The `Row` function is defined inside the factory but outside any React component, so it's created once per factory call and stays stable as a `VariableSizeList` child. The `renderOption` argument is captured in the closure — no context needed.
+The `Row` function is defined inside the factory but outside any React component, so it's created once per factory call and stays stable as a `VariableSizeList` child. The `renderOption` argument is captured in the closure, no context needed.
 
 ## Using It
 

@@ -71,7 +71,7 @@ https://zoelog.vercel.app/articles/infrastructure/enable-multi-cpu-nodejs
 
 ## 3. SSR VS CSR chaos testing scenarios
 
-SSR and CSR behave very differently during failures — which means you need to **test both paths**.
+SSR and CSR behave very differently during failures, which means you need to **test both paths**.
 
 - **SSR**: if an API fails, the page likely returns HTTP 5xx
 - **CSR**: even if there's an error, the page might return 200 and silently fail (e.g. empty widget)
@@ -88,7 +88,7 @@ Here’s a test matrix I use:
 
 ## 4. Cache design (CDN x SSR)
 
-Placing a CDN in front of your SSR app can drastically reduce load — but you need a clear **caching strategy**.
+Placing a CDN in front of your SSR app can drastically reduce load, but you need a clear **caching strategy**.
 
 - **Static assets** (`/_next/static/*`, images, fonts):
   Use `Cache-Control: public, max-age=31536000, immutable`

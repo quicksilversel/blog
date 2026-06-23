@@ -54,7 +54,7 @@ We generate:
 <path d="M10.2 0L12.4 8.2L20.8 8.2L14.1 13.2..." fill="#000000" />
 ```
 
-The text becomes a series of bezier curves. No font reference needed. The SVG looks identical everywhere because there's nothing to interpret—it's just geometry.
+The text becomes a series of bezier curves. No font reference needed. The SVG looks identical everywhere because there's nothing to interpret, it's just geometry.
 
 ## Implementation
 
@@ -205,7 +205,7 @@ Converting text to paths has consequences:
 - File size increases. Path data is verbose compared to text
 - Accessibility is lost. Screen readers can't parse path data as text
 
-For my use case—generating charts for presentations—these trade-offs were acceptable. The charts are final output, not templates for further editing. File size increase was minimal for the short labels in charts.
+For my use case (generating charts for presentations), these trade-offs were acceptable. The charts are final output, not templates for further editing. File size increase was minimal for the short labels in charts.
 
 ## Conclusion
 

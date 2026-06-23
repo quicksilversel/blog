@@ -212,7 +212,7 @@ export const lambdaHandler = async (
 
 Akamai uses EdgeGrid for API authentication. The `akamai-edgegrid` npm package handles the signature generation, but it requires a `.edgerc` config file.
 
-Since Lambda doesn't have persistent storage, we use [Lambda's ephemeral storage](https://docs.aws.amazon.com/lambda/latest/dg/configuration-ephemeral-storage.html) (`/tmp` directory) to write the config file. The exact lifespan of ephemeral storage isn't guaranteed—it persists across warm invocations but gets cleared when the execution environment is recycled. To avoid unnecessary writes, we check if the file exists before creating it:
+Since Lambda doesn't have persistent storage, we use [Lambda's ephemeral storage](https://docs.aws.amazon.com/lambda/latest/dg/configuration-ephemeral-storage.html) (`/tmp` directory) to write the config file. The exact lifespan of ephemeral storage isn't guaranteed. It persists across warm invocations but gets cleared when the execution environment is recycled. To avoid unnecessary writes, we check if the file exists before creating it:
 
 ```typescript
 import fs from 'fs/promises'

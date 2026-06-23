@@ -8,7 +8,7 @@ date: '2025-03-27'
 
 ## 🤝 Intro : GHA + AWS Without Leaking Your Secrets
 
-I wanted to migrate away from using AWS secrets in GitHub Actions — not because it wasn’t working, but because storing long-lived credentials in CI just felt… sketchy. Like, “I really shouldn’t be doing this but I am anyway” kind of sketchy.
+I wanted to migrate away from using AWS secrets in GitHub Actions, not because it wasn’t working, but because storing long-lived credentials in CI just felt… sketchy. Like, “I really shouldn’t be doing this but I am anyway” kind of sketchy.
 
 But now with [OIDC](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html), I can securely assume AWS IAM roles in GitHub Actions without needing to store any AWS secrets in my repo. It’s like giving GitHub a VIP pass to AWS, but only for the right actions and repos.
 
@@ -38,7 +38,7 @@ Resources:
 _a.k.a. Give GitHub the Keys, but Only a Copy_
 
 In CloudFormation, Define a role that GitHub Actions can assume via OIDC.
-The idea is: let GitHub knock on the AWS door, show its identity token, and get in — but only if it’s the right repo, branch, and vibes.
+The idea is: let GitHub knock on the AWS door, show its identity token, and get in, but only if it’s the right repo, branch, and vibes.
 
 ```yaml
 Type: AWS::IAM::Role
@@ -102,13 +102,13 @@ jobs:
           aws-region: ap-northeast-1
 ```
 
-Once the role is assumed, all subsequent `aws` CLI or SDK commands in the job are authenticated with this role — no secrets required 🎉
+Once the role is assumed, all subsequent `aws` CLI or SDK commands in the job are authenticated with this role, no secrets required 🎉
 
 ## 🧠 Gotchas to Watch Out For
 
 - Make sure GitHub’s OIDC provider is [added to IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
 - Be super specific with `Condition` blocks to avoid privilege creep
-- OIDC tokens expire quickly — assume the role once per job
+- OIDC tokens expire quickly, assume the role once per job
 
 ## ✅ Wrap Up
 
