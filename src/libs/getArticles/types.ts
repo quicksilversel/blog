@@ -4,6 +4,7 @@ export type Article = {
   topics?: string[]
   published?: boolean
   date: string
+  updated?: string
   slug: string
   fileName: string
   fullPath: string

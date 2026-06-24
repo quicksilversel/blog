@@ -1,158 +1,91 @@
-import type { Article } from '@/libs/getArticles/types'
-
-export interface SearchableArticle extends Article {
+export type SearchDocument = {
+  title: string
+  description?: string
+  topics?: string[]
+  date: string
+  slug: string
+  fileName: string
+  category: string
+  readingTime?: string
+  type: 'article' | 'snippet'
+  project?: string
   content?: string
-  type?: 'article' | 'snippet'
 }
 
-export interface SearchResult {
-  article: SearchableArticle
-  score: number
-  highlights: {
-    title?: string
-    description?: string
-    content?: string[]
-  }
+export type SearchResultItem = Omit<SearchDocument, 'content'>
+
+const FIELD_WEIGHTS = {
+  title: 3,
+  description: 2,
+  topics: 2,
+  content: 1,
+} as const
+
+type WeightedField = keyof typeof FIELD_WEIGHTS
+
+const SEARCH_FIELDS: WeightedField[] = [
+  'title',
+  'description',
+  'topics',
+  'content',
+]
+
+function normalize(text: string): string {
+  return text.toLowerCase().trim()
 }
 
 export class ArticleSearchIndex {
-  private articles: SearchableArticle[]
+  private documents: SearchDocument[]
 
-  constructor(articles: SearchableArticle[]) {
-    this.articles = articles
+  constructor(documents: SearchDocument[]) {
+    this.documents = documents
   }
 
-  private normalizeText(text: string): string {
-    return text.toLowerCase().trim()
+  private fieldText(doc: SearchDocument, field: WeightedField): string {
+    if (field === 'topics') return doc.topics?.join(' ') ?? ''
+    const value = doc[field]
+    return typeof value === 'string' ? value : ''
   }
 
-  private calculateScore(
-    article: SearchableArticle,
+  private scoreField(
+    doc: SearchDocument,
     query: string,
-    field: string,
+    field: WeightedField,
   ): number {
-    const normalizedQuery = this.normalizeText(query)
-    const fieldValue = String(article[field as keyof SearchableArticle] || '')
-    const normalizedField = this.normalizeText(fieldValue)
+    const haystack = normalize(this.fieldText(doc, field))
+    if (!haystack) return 0
 
-    if (!normalizedField.includes(normalizedQuery)) return 0
+    const needle = normalize(query)
+    if (!haystack.includes(needle)) return 0
 
-    const fieldWeights: Record<string, number> = {
-      title: 3,
-      description: 2,
-      topics: 2,
-      content: 1,
-    }
+    const base = FIELD_WEIGHTS[field]
+    const exactMatchBoost = haystack === needle ? 2 : 1
+    const prefixBoost = haystack.startsWith(needle) ? 1.5 : 1
 
-    const baseScore = fieldWeights[field] || 1
-
-    const exactMatchBoost = normalizedField === normalizedQuery ? 2 : 1
-
-    const positionBoost = normalizedField.startsWith(normalizedQuery) ? 1.5 : 1
-
-    return baseScore * exactMatchBoost * positionBoost
+    return base * exactMatchBoost * prefixBoost
   }
 
-  private highlightText(text: string, query: string): string {
-    const normalizedQuery = this.normalizeText(query)
-    const regex = new RegExp(`(${normalizedQuery})`, 'gi')
-    return text.replace(regex, '<mark>$1</mark>')
-  }
+  search(query: string, limit: number = 10): SearchResultItem[] {
+    const trimmed = query.trim()
+    if (!trimmed) return []
 
-  private extractSnippets(
-    content: string,
-    query: string,
-    maxSnippets: number = 3,
-  ): string[] {
-    const normalizedQuery = this.normalizeText(query)
-    const sentences = content.split(/[.!?]+/)
-    const snippets: string[] = []
+    const scored: { item: SearchResultItem; score: number }[] = []
 
-    for (const sentence of sentences) {
-      if (snippets.length >= maxSnippets) break
-      if (this.normalizeText(sentence).includes(normalizedQuery)) {
-        const highlighted = this.highlightText(sentence.trim(), query)
-        snippets.push(highlighted + '.')
+    for (const doc of this.documents) {
+      let score = 0
+      for (const field of SEARCH_FIELDS) {
+        score += this.scoreField(doc, trimmed, field)
+      }
+
+      if (score > 0) {
+        const { content: _content, ...item } = doc
+        scored.push({ item, score })
       }
     }
 
-    return snippets
-  }
-
-  search(query: string, limit: number = 10): SearchResult[] {
-    if (!query || query.trim().length === 0) return []
-
-    const results: SearchResult[] = []
-
-    for (const article of this.articles) {
-      let totalScore = 0
-      const highlights: SearchResult['highlights'] = {}
-
-      const titleScore = this.calculateScore(article, query, 'title')
-      if (titleScore > 0) {
-        totalScore += titleScore
-        highlights.title = this.highlightText(article.title, query)
-      }
-
-      if (article.description) {
-        const descScore = this.calculateScore(article, query, 'description')
-        if (descScore > 0) {
-          totalScore += descScore
-          highlights.description = this.highlightText(
-            article.description,
-            query,
-          )
-        }
-      }
-
-      if (article.content) {
-        const contentScore = this.calculateScore(article, query, 'content')
-        if (contentScore > 0) {
-          totalScore += contentScore
-          highlights.content = this.extractSnippets(article.content, query)
-        }
-      }
-
-      if (article.topics) {
-        const topicsText = article.topics.join(' ')
-        const topicsScore = this.calculateScore(
-          { ...article, topics: topicsText } as any,
-          query,
-          'topics',
-        )
-        totalScore += topicsScore
-      }
-
-      if (totalScore > 0) {
-        results.push({
-          article,
-          score: totalScore,
-          highlights,
-        })
-      }
-    }
-
-    return results.sort((a, b) => b.score - a.score).slice(0, limit)
-  }
-
-  getSuggestions(query: string, limit: number = 5): string[] {
-    const normalizedQuery = this.normalizeText(query)
-    const suggestions = new Set<string>()
-
-    for (const article of this.articles) {
-      if (this.normalizeText(article.title).includes(normalizedQuery)) {
-        suggestions.add(article.title)
-      }
-
-      if (article.topics) {
-        for (const topic of article.topics) {
-          if (this.normalizeText(topic).includes(normalizedQuery)) {
-            suggestions.add(topic)
-          }
-        }
-      }
-    }
-
-    return Array.from(suggestions).slice(0, limit)
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((entry) => entry.item)
   }
 }

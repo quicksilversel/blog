@@ -19,14 +19,31 @@ type Props = {
 export function ProjectNavigation({ articles, currentSlug, title }: Props) {
   const [isExpanded, setIsExpanded] = useState(true)
 
+  const currentIndex = articles.findIndex(
+    (article) => article.slug === currentSlug,
+  )
+  const currentPart = currentIndex >= 0 ? currentIndex + 1 : 0
+  const progress =
+    articles.length > 0 ? (currentPart / articles.length) * 100 : 0
+
   return (
     <>
       <H2>Project Navigation</H2>
       <Container>
         <Header onClick={() => setIsExpanded(!isExpanded)}>
-          <Title>Series: {title}</Title>
+          <TitleGroup>
+            <Title>Series: {title}</Title>
+            {currentPart > 0 && (
+              <Progress>
+                Part {currentPart} of {articles.length}
+              </Progress>
+            )}
+          </TitleGroup>
           <ToggleIcon isExpanded={isExpanded} />
         </Header>
+        <ProgressTrack>
+          <ProgressBar progress={progress} />
+        </ProgressTrack>
         {isExpanded && (
           <ArticleList>
             {articles.map((article, index) => {
@@ -74,12 +91,39 @@ const Header = styled.button`
   }
 `
 
+const TitleGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: left;
+`
+
 const Title = styled.h3`
   margin: 0;
   font-size: ${({ theme }) => theme.fontSize.small};
   font-weight: 600;
   color: ${({ theme }) => theme.colors.text};
   text-transform: capitalize;
+`
+
+const Progress = styled.span`
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
+  color: ${({ theme }) => theme.colors.mutedText};
+`
+
+const ProgressTrack = styled.div`
+  width: 100%;
+  height: 3px;
+  background-color: ${({ theme }) => theme.colors.muted};
+`
+
+const ProgressBar = styled('div', {
+  shouldForwardProp: (prop) => prop !== 'progress',
+})<{ progress: number }>`
+  width: ${({ progress }) => progress}%;
+  height: 100%;
+  background-color: ${({ theme }) => theme.colors.primary};
+  transition: width 0.3s ease;
 `
 
 const ToggleIcon = styled(ChevronDown, {

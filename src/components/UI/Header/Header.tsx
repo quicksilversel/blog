@@ -28,6 +28,7 @@ export const Header = () => {
     { href: '/about', label: 'About' },
     { href: '/archive', label: 'Archive' },
     { href: '/snippets', label: 'Snippets' },
+    { href: '/topics', label: 'Topics' },
   ]
 
   return (

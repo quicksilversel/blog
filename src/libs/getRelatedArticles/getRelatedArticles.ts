@@ -4,13 +4,13 @@ import { sortByDateDesc } from '@/libs/utils'
 
 import { getArticles } from '../getArticles/getArticles'
 
-interface ArticleIdentifier {
+export interface ArticleIdentifier {
   slug: string
   topics?: string[]
   category: string
 }
 
-function calculateTopicIDF(articles: Article[]): Map<string, number> {
+export function calculateTopicIDF(articles: Article[]): Map<string, number> {
   const topicCounts = new Map<string, number>()
 
   for (const article of articles) {
@@ -31,7 +31,7 @@ function calculateTopicIDF(articles: Article[]): Map<string, number> {
   return idfWeights
 }
 
-function calculateSimilarity(
+export function calculateSimilarity(
   current: ArticleIdentifier,
   other: Article,
   topicIDF: Map<string, number>,
