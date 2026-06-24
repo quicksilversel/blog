@@ -7,11 +7,16 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "tsx scripts/generate-rss.ts && next build",
+    "build": "tsx scripts/generate-rss.ts && tsx scripts/generate-search-index.ts && next build",
     "generate-rss": "tsx scripts/generate-rss.ts",
+    "generate-search-index": "tsx scripts/generate-search-index.ts",
     "start": "next start",
-    "lint": "run-p lint:eslint lint:stylelint prettier",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "run-p lint:eslint lint:stylelint lint:content prettier",
     "lint:fix": "run-p lint:eslint:fix lint:stylelint:fix prettier:fix",
+    "lint:content": "tsx scripts/lint-content.ts",
     "lint:eslint": "eslint \"./src/**/*.{ts,tsx}\"",
     "lint:eslint:fix": "eslint --fix \"./src/**/*.{ts,tsx}\"",
     "lint:stylelint": "stylelint \"src/**/*.{ts,tsx,js,jsx}\" 2>&1 | grep -v 'Unknown rule' || true",
@@ -45,6 +50,7 @@
     "@types/react-dom": "^19",
     "@typescript-eslint/eslint-plugin": "^8.43.0",
     "@typescript-eslint/parser": "^8.43.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "eslint-config-prettier": "10.1.8",
@@ -58,6 +64,7 @@
     "stylelint-no-unsupported-browser-features": "^8.1.1",
     "stylelint-order": "^8.1.1",
     "tsx": "^4.21.0",
-    "typescript": "^6"
+    "typescript": "^6",
+    "vitest": "^4.1.9"
   }
 }

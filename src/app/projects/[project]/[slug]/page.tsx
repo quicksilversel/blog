@@ -111,6 +111,7 @@ export default async function ProjectArticlePage({ params }: Props) {
       frontmatter={{
         title: String(frontmatter.title),
         date: frontmatter.date ? String(frontmatter.date) : undefined,
+        updated: frontmatter.updated ? String(frontmatter.updated) : undefined,
         topics: frontmatter.topics as string[] | undefined,
       }}
       rawContent={rawSource}

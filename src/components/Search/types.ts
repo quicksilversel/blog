@@ -1,5 +1,1 @@
-import type { Article } from '@/libs/getArticles/types'
-
-export interface SearchResult extends Article {
-  type: 'article' | 'snippet'
-}
+export type { SearchResultItem as SearchResult } from '@/libs/search/searchIndex'

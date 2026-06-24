@@ -20,6 +20,7 @@ import { ProjectNavigation } from '../../Project/ProjectNavigation'
 export type ArticleFrontmatter = {
   title: string
   date?: string
+  updated?: string
   topics?: string[]
 }
 
@@ -64,6 +65,7 @@ export const ArticleDetail = ({
         <ArticleHeader
           title={frontmatter.title}
           date={frontmatter.date}
+          updated={frontmatter.updated}
           topics={frontmatter.topics}
           readingTime={readingTime}
         />

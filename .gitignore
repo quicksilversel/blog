@@ -38,3 +38,9 @@ next-env.d.ts
 # generated feeds
 /public/rss.xml
 /public/atom.xml
+
+# generated search index
+/public/search-index.json
+
+# local-only confidential-terms denylist for the content linter 
+/.confidential-words

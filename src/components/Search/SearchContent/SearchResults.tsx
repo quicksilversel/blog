@@ -1,15 +1,11 @@
 import styled from '@emotion/styled'
 import Link from 'next/link'
 
-import type { Article } from '@/libs/getArticles/types'
+import type { SearchResult } from '../types'
 
 interface SearchModalProps {
   results: SearchResult[]
   onClose: () => void
-}
-
-interface SearchResult extends Article {
-  type: 'article' | 'snippet'
 }
 
 export const SearchResults = ({ results, onClose }: SearchModalProps) => {

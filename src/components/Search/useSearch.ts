@@ -2,10 +2,24 @@ import { useEffect, useRef, useState, useTransition } from 'react'
 
 import { usePathname, useRouter } from 'next/navigation'
 
-import type { Article } from '@/libs/getArticles/types'
+import type { SearchResult } from './types'
+import type { SearchDocument } from '@/libs/search/searchIndex'
 
-interface SearchResult extends Article {
-  type: 'article' | 'snippet'
+import { ArticleSearchIndex } from '@/libs/search/searchIndex'
+
+let indexPromise: Promise<ArticleSearchIndex> | null = null
+
+function loadIndex(): Promise<ArticleSearchIndex> {
+  if (!indexPromise) {
+    indexPromise = fetch('/search-index.json')
+      .then((response) => response.json())
+      .then((documents: SearchDocument[]) => new ArticleSearchIndex(documents))
+      .catch((error) => {
+        indexPromise = null // allow a retry on the next query
+        throw error
+      })
+  }
+  return indexPromise
 }
 
 export function useSearch(isOpen: boolean, onClose: () => void) {
@@ -26,11 +40,8 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
     const debounceTimer = setTimeout(() => {
       startTransition(async () => {
         try {
-          const response = await fetch(
-            `/api/search?q=${encodeURIComponent(query)}`,
-          )
-          const data = await response.json()
-          setResults(data.results || [])
+          const index = await loadIndex()
+          setResults(index.search(query))
           setSelectedIndex(0)
         } catch (error) {
           console.warn('Search error:', error)

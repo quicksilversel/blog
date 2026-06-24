@@ -1,21 +1,27 @@
 import styled from '@emotion/styled'
 import Image from 'next/image'
+import Link from 'next/link'
+
+import { slugifyTopic } from '@/libs/getTopics/slugify'
+import { formatDate } from '@/libs/utils'
 
 type Props = {
   title: string
   date?: string
+  updated?: string
   topics?: string[]
   readingTime?: string
 }
 
-export const ArticleHeader = ({ title, date, topics, readingTime }: Props) => {
-  const formattedDate = date
-    ? new globalThis.Date(date).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    : null
+export const ArticleHeader = ({
+  title,
+  date,
+  updated,
+  topics,
+  readingTime,
+}: Props) => {
+  const formattedDate = date ? formatDate(date) : null
+  const showUpdated = updated && updated !== date
 
   return (
     <Container>
@@ -33,11 +39,14 @@ export const ArticleHeader = ({ title, date, topics, readingTime }: Props) => {
       <Title>{title}</Title>
       <MetaInfo>
         {formattedDate && <Date>{formattedDate}</Date>}
+        {showUpdated && <Updated>Updated {formatDate(updated)}</Updated>}
         {readingTime && <ReadingTime>☕ {readingTime}</ReadingTime>}
         {topics && topics.length > 0 && (
           <Topics>
             {topics.map((topic) => (
-              <Topic key={topic}>{topic}</Topic>
+              <Topic key={topic} href={`/topics/${slugifyTopic(topic)}`}>
+                {topic}
+              </Topic>
             ))}
           </Topics>
         )}
@@ -78,6 +87,12 @@ const Date = styled.time`
   color: ${({ theme }) => theme.colors.text};
 `
 
+const Updated = styled.time`
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
+  color: ${({ theme }) => theme.colors.text};
+  opacity: 0.8;
+`
+
 const ReadingTime = styled.span`
   font-size: ${({ theme }) => theme.fontSize.extraSmall};
   color: ${({ theme }) => theme.colors.text};
@@ -90,11 +105,16 @@ const Topics = styled.div`
   gap: 0.5rem;
 `
 
-const Topic = styled.span`
+const Topic = styled(Link)`
   padding: 0.25rem 0.75rem;
   font-size: ${({ theme }) => theme.fontSize.extraSmall};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.text};
   background: ${({ theme }) => theme.colors.primary};
   border-radius: 1rem;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
 `
