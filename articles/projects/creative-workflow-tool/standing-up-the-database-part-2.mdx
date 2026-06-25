@@ -1,0 +1,160 @@
+---
+title: 'Standing Up the Database, Part 2: Cloud SQL on a Private Network, Step by Step'
+description: 'The cloud half of the DB: enabling GCP APIs, choosing the cheapest Cloud SQL tier and why, Private Service Connect with no public IP, serverless VPC egress, and migrating a database you cannot reach from your laptop.'
+topics: ['Postgres', 'GCP', 'Cloud SQL', 'Networking']
+category: 'infrastructure'
+published: true
+date: '2026-06-25'
+---
+
+## Intro
+
+[Part 1](/projects/creative-workflow-tool/standing-up-the-database) ended with the app running on a local Postgres and every cloud-facing line already written, waiting on one thing: a slice of the company's private network. This part is the cloud half, done on Google Cloud, and I'm writing it as a step-by-step with the reasoning behind each command, because the reasoning is the part I'd have wanted when I started.
+
+The database was always going to be **private**: no public IP, reachable only from inside the network. That premise shapes almost every step below, because the real work here isn't creating a database, it's giving a serverless app a route to one that has no address on the internet.
+
+## Step 1: Turn on the APIs
+
+```bash
+gcloud services enable sqladmin.googleapis.com compute.googleapis.com \
+  --project=<project>
+```
+
+On GCP, a "project" is the unit of billing and isolation, and **every API is off by default in a new project**. You don't get Cloud SQL or networking until you explicitly enable them; the first time you call one you get a blunt `API [...] has not been used in project [...] before or it is disabled` error. So the literal first step is opting in to the services you're about to use:
+
+- **`sqladmin`** (the Cloud SQL Admin API) is what creates and manages database instances. It's also what the managed connectors talk to at runtime, so it's not just a setup-time dependency.
+- **`compute`** (the Compute Engine API) owns all the networking primitives: subnets, addresses, forwarding rules. Even though I'm running serverless and never touch a VM, the network plumbing lives under Compute.
+
+Enabling an API is free; you only pay for what you then create. But it's a real gate, and "nothing works until it's on" is worth internalizing as the GCP default rather than a bug.
+
+## Step 2: Create the database, and the tier decision that drives the cost
+
+This is the step with the most to say, because the flags encode a pile of decisions.
+
+```bash
+gcloud sql instances create <instance> \
+  --project=<project> --region=<region> \
+  --database-version=POSTGRES_17 \
+  --edition=ENTERPRISE \
+  --tier=db-f1-micro \
+  --no-assign-ip \
+  --enable-private-service-connect \
+  --allowed-psc-projects=<project> \
+  --availability-type=zonal \
+  --storage-size=10GB --storage-auto-increase \
+  --backup-start-time=18:00
+```
+
+**The machine: `db-f1-micro`, and why it's the cheapest thing that runs.** Cloud SQL bills you for four things: the instance (its vCPU + memory, charged per hour it exists, not per query), storage, backups, and egress. The instance is the dominant cost, and it's set by the **tier**. Tiers come in two families: _shared-core_ (`db-f1-micro`, `db-g1-small`), which run on a shared, burstable vCPU with a fraction of a gig of RAM, and _dedicated_ (`db-custom-*`, `db-perf-optimized-*`), which reserve whole vCPUs and start several times more expensive. `db-f1-micro` is the smallest shared-core tier: roughly 0.6 GB of RAM on a shared CPU. It is, quite literally, the floor of Cloud SQL pricing. For an internal request-tracking tool with a handful of concurrent users and tiny tables, that floor is plenty, and I can bump the tier later by editing the instance with no migration and no data loss. So the cheapest option isn't a compromise here; it's correctly sized.
+
+**The edition: `ENTERPRISE` (not Enterprise Plus), and it's not optional.** Cloud SQL splits into two editions, and the shared-core tiers only exist under **Enterprise**. My project defaulted to Enterprise Plus, and `--tier=db-f1-micro` was rejected outright (`Invalid Tier (db-f1-micro) for (ENTERPRISE_PLUS) Edition`) because Enterprise Plus only offers the pricier dedicated `db-perf-optimized` machines. Enterprise is also the cheaper edition in general, so for a small internal tool it's the right pick on both counts. Setting `--edition=ENTERPRISE` is what unlocks the cheap tier.
+
+**`--availability-type=zonal`: single zone, no standby.** The alternative, `regional`, keeps a hot standby in a second zone and fails over automatically, and it roughly doubles the instance cost because you're paying for two. For a dev/internal tool, one zone is fine; I'd rather spend that money when there's a reason to. This is another "scale up later" lever, not a permanent decision.
+
+**`--no-assign-ip`: no public IP.** The design assumes a private database, so the instance gets no public address at all; it's reachable only through the private endpoint set up in the next steps.
+
+**`--enable-private-service-connect` + `--allowed-psc-projects`: how the app will reach it.** With no public IP, the instance instead publishes a private doorway (more on this in Step 3). `--allowed-psc-projects` whitelists which projects are even allowed to connect to that doorway. More on this next.
+
+**`--storage-size=10GB --storage-auto-increase`: start small, never run out.** 10 GB is the SSD minimum; storage is cheap, and auto-increase means the disk grows on its own as data accumulates, so I never get paged for a full volume. It only ever grows, never shrinks, which is the safe default.
+
+**`--backup-start-time=18:00`: automated daily backups, off-peak.** Backups are a small line item and obviously worth it. 18:00 UTC is early-morning JST, when nobody's using the tool.
+
+## Step 3: The service attachment (what "private doorway" actually means)
+
+```bash
+gcloud sql instances describe <instance> --project=<project> \
+  --format="value(pscServiceAttachmentLink)"
+```
+
+Because I enabled Private Service Connect (PSC), the instance now exposes a **service attachment**: a managed, private entry point that lives on Google's side, not on any of my subnets. PSC's model is producer/consumer. The database is the _producer_ and publishes this attachment; my project is the _consumer_ and will create an endpoint that connects to it. Nothing here is reachable from the public internet; the attachment is only meaningful to the projects I whitelisted in Step 2.
+
+I chose PSC over the older Private Service Access (a VPC-peering approach) because PSC gives each consumer its own endpoint and IP inside its own subnet, which is the pattern the platform team's newest setup uses. This `describe` call just prints the attachment's identifier, which the next step needs.
+
+## Step 4: Reserve a private IP for the endpoint
+
+```bash
+gcloud compute addresses create <instance>-psc-ip \
+  --project=<project> --region=<region> \
+  --subnet=projects/<host-project>/regions/<region>/subnetworks/<datasource-subnet>
+```
+
+My project has two subnets the platform team carved out of the address range they allocated: one for the app, and a small "datasource" subnet for exactly this. Here I reserve a static internal IP inside that datasource subnet. Reserving it (rather than letting one be picked ephemerally) means the address is stable: it won't change under me, so I can safely bake it into config. This IP is what the endpoint in the next step will answer on.
+
+## Step 5: Create the endpoint (a forwarding rule pointing at the attachment)
+
+```bash
+gcloud compute forwarding-rules create <instance>-psc-ep \
+  --project=<project> --region=<region> \
+  --network=projects/<host-project>/global/networks/<vpc> \
+  --address=<instance>-psc-ip \
+  --target-service-attachment=<service-attachment>
+```
+
+This is the consumer side of PSC: a forwarding rule that binds my reserved IP to the database's service attachment. After this, traffic sent to that private IP inside the VPC is tunnelled to the managed instance. This is the actual "doorway into my own network" that all the earlier steps were setting up. Note it references a subnet and network I don't own: they belong to the platform team's Terraform (the "you request infrastructure, you don't create it" point from Part 1), and I'm only allowed to attach to them because that Terraform granted my service account permission.
+
+## Step 6: Read back the address the app will dial
+
+```bash
+gcloud compute addresses describe <instance>-psc-ip \
+  --project=<project> --region=<region> --format="value(address)"
+```
+
+A one-liner, but it's the payoff: this private IP is the entire "where is the database" answer the app needs. It goes into the app's config as `DB_HOST`. There is no public hostname, no connection string you could paste from anywhere; just this address, reachable only from inside the network.
+
+## Step 7: A database, an app user, and a secret for the password
+
+```bash
+gcloud sql databases create <db> --instance=<instance> --project=<project>
+gcloud sql users create <app-user> --instance=<instance> --project=<project> \
+  --password='paste_secret_here'
+printf '%s' 'paste_secret_here' | gcloud secrets create <db-pass-secret> \
+  --project=<project> --data-file=-
+```
+
+The instance is a server; it still needs an actual database and a login. I create a dedicated application user rather than reusing the superuser, and the password goes straight into Secret Manager, never into code, a config file, or an environment variable checked into a repo. At deploy time the runtime reads it from the secret. (One small nicety: users created through the Admin API are granted enough privilege to create tables, so the on-boot migration in a later step can build the schema without extra grants.)
+
+## Connecting from the app: dropping the managed connector
+
+GCP offers a connector library that opens an authenticated, encrypted tunnel to Cloud SQL for you, and I'd originally wired the app around it. Once the private endpoint existed, I reconsidered. The connector's headline feature is identity-based (IAM) auth, and I'd already chosen password auth; the endpoint was already private; and keeping the connector would have meant extra DNS setup to resolve the instance name. So it was carrying a dependency for a capability I wasn't using.
+
+I dropped it and connected the plain way: a normal Postgres client pointed at the private IP from Step 6, over TLS. One fewer library, less to configure, and the security story is unchanged because the network itself is the boundary.
+
+## Letting a serverless app onto the private network
+
+The app runs on Cloud Run, which by default has no presence on any VPC. To let it reach the private IP I enabled **direct VPC egress** into the app subnet, set to **private ranges only**:
+
+```bash
+gcloud run deploy <service> \
+  --project=<project> --region=<region> --image <image> \
+  --network=projects/<host-project>/global/networks/<vpc> \
+  --subnet=projects/<host-project>/regions/<region>/subnetworks/<app-subnet> \
+  --vpc-egress=private-ranges-only \
+  --set-env-vars "DB_HOST=<psc-ip>,DB_NAME=<db>,DB_USER=<app-user>" \
+  --set-secrets "DB_PASS=<db-pass-secret>:latest"
+```
+
+`private-ranges-only` is the detail that matters: only traffic to internal addresses is routed through the VPC (so the app can reach the database), while everything else (the identity provider during sign-in, any outbound API call) exits the normal way. That means no NAT gateway to run or pay for. The narrower the egress, the less surface there is to reason about.
+
+## Migrations, when you can't reach the database
+
+Here's the wrinkle that quietly reorganized the plan. The endpoint is private, reachable only from inside the VPC, and my laptop is not inside the VPC. The `migrate` command that worked all through Part 1 now has no route to the host. There is deliberately no `gcloud sql connect` in any step above for the same reason.
+
+So I flipped where migrations run. The app already lives inside the network, so the one place that can reach the database is the app itself, at startup. A small, runtime-guarded hook applies any pending migrations before the server begins serving, behind an environment flag so local dev and the build skip it. The only catch worth noting: the migration SQL files aren't traced into the compiled server bundle, so they're copied into the runtime image explicitly. The tidy property you get for free: the schema can never lag the deployed code, because applying it is part of booting.
+
+## Seeding data you also can't reach
+
+Reference data (the departments, the placement specs the forms need) has the same problem: I can't run the seed script against a private instance from my laptop. The pragmatic answer is Cloud SQL Studio, the in-console SQL editor, which connects from Google's side rather than over my network and so works against a private instance. I generated the reference rows as idempotent `INSERT`s (everything `ON CONFLICT DO NOTHING`) from the same fixtures the local seed uses and pasted them in once. Sample request data stays out; the app provisions the signed-in user on first request and the rest is entered through the UI.
+
+## Deploy
+
+The deploy is anticlimactic, which is the goal. Merge to main; CI builds the image and ships it with the egress and database settings attached; on first boot the migration runs and the tables appear in the private instance. The app is now reading and writing a real, managed Postgres over a network with no public door, and from the outside nothing looks different from the mock it replaced. That sameness is the whole payoff of the [mock-first approach](/projects/creative-workflow-tool/building-ui-first-on-mocks).
+
+## What I'd tell myself starting out
+
+- **Size the instance for the workload, not the future.** The cheapest shared-core, zonal tier is correct for an internal tool, and tier and availability are both editable later without a migration.
+- **The edition gates the tier.** The cheap shared-core machines only exist under Enterprise; Enterprise Plus forces the pricey dedicated ones.
+- **A private database has no public address, and that shapes everything:** app egress, the endpoint, migrations, and seeding all have to assume "reachable only from inside the network."
+- **Don't carry the managed connector if you aren't using its auth.** Password plus a private endpoint is simpler than a half-used tunnel.
+- **"Inside the VPC only" breaks laptop-run migrations.** Move them to boot, or to a job that runs inside the network, and seed private infra from the provider's own console.
+
+_With that, the database phase is done: local Postgres for development, a private managed Cloud SQL in the cloud, the same data-access seam serving both. Next up is the part the tool exists for but has been faking all along: notifications, and wiring real outbound messages into the workflow._
