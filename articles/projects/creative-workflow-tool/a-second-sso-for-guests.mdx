@@ -1,0 +1,110 @@
+---
+title: 'A Second SSO: A Google Fallback for Guests Locked Out of Slack'
+description: 'When Slack SSO works for staff but not guest accounts: adding Google sign-in as a gated fallback, re-keying users on email, preserving Slack mentions for users who never sign in with Slack, and enforcing who may use which door.'
+topics: ['Auth.js', 'Slack', 'Google', 'SSO']
+category: 'fullstack'
+published: true
+date: '2026-06-30'
+---
+
+## Intro
+
+The app signs people in with Slack: one button, "Sign in with Slack," plus the [just-in-time provisioning](/projects/creative-workflow-tool/standing-up-the-database) that creates a user row on first visit. It worked for staff. Then external collaborators (contractors who help on the design side) tried it and hit a wall: an error telling them they didn't have permission to install the app to the workspace.
+
+Not a wrong-workspace problem, not a redirect mismatch, but a permissions wall that only guest accounts hit. This is the story of giving those users a second door without making a mess of identity.
+
+## Why guests get stuck
+
+"Sign in with Slack" looks like pure authentication, but the first time anyone uses an app in a workspace that requires app approval, Slack runs an _install/authorize_ step. Full members can clear it (or an admin pre-approves the app for them). **Guest accounts can't.** In most workspaces guests aren't allowed to authorize or install apps at all, and that restriction rides along into the sign-in flow. So the same app that staff log into fine is, for a guest, an install they're not allowed to perform.
+
+Upgrading guests to full members would solve it instantly and was off the table (licensing/policy). Asking an admin to approve the app for guests is worth trying first, but if org policy forbids guests from using apps at all, no approval helps. So the durable fix had to be app-side: **a different login method for the people Slack won't let in.**
+
+These collaborators all have company Google accounts, so Google SSO is the natural second door.
+
+## The constraint that nearly killed it
+
+Here's the part that made me stop and think. The app doesn't just authenticate with Slack; it _stores the Slack user ID_, because the whole point of the tool is to **@-mention** people in Slack notifications later. A Slack mention needs the stable `slack_user_id` (`<@U…>`), and we capture it from the Slack login's identity claim.
+
+If a guest logs in with **Google**, there's no Slack login, so no `slack_user_id`. And these are exactly the people who need to be mentionable. It felt like a contradiction: the workaround for "can't log in with Slack" seemed to throw away the very thing we needed from Slack.
+
+The unlock was realizing those are two different questions:
+
+> **How someone logs in** doesn't have to be **how we learn their Slack ID.**
+
+Guests still have real Slack accounts (that's _why_ they're guests). Their `slack_user_id` exists; we just can't get it from a login they can't complete. But Slack's Web API has `users.lookupByEmail`: give it an email, get back the member (guests included). So: **log in with Google, resolve the Slack ID by email afterward.** Mentions keep working; the login method becomes irrelevant. (The lookup needs a bot token, which belongs to a later notifications phase, so until then a Google-only user simply isn't mentionable yet: a graceful gap, not a broken feature.)
+
+## Email becomes the natural key
+
+That reframing forced a schema decision. Until now a user row was keyed on `slack_user_id`: it was `NOT NULL UNIQUE`, and provisioning upserted on it. A Google user has no Slack ID at sign-in, so that key can't hold anymore.
+
+The fix: **email is the natural key.** A person is one human with one company email, however they authenticate.
+
+```ts
+// before: slack_user_id NOT NULL UNIQUE, the key
+// after:  slack_user_id nullable; email unique, the key
+slackUserId: text('slack_user_id').unique(), // nullable now
+email: text('email').unique(),
+```
+
+A migration drops the `NOT NULL` and adds the email uniqueness. Provisioning then upserts on email, and one detail matters a lot:
+
+```ts
+.onConflictDoUpdate({
+  target: t.users.email,
+  set: {
+    displayName, avatarUrl, role, lastLoginAt: now,
+    // only write the Slack id when we actually have one; never overwrite
+    // an existing id with null when the same person signs in via Google
+    ...(slackUserId ? { slackUserId } : {}),
+  },
+})
+```
+
+Without that conditional, a staff member who once logged in with Slack and later (somehow) came through Google would have their `slack_user_id` **nulled out** by the upsert. Guarding the write makes the two login paths converge on one row safely: whoever has a Slack ID keeps it, and a Google login only ever _adds_ profile freshness.
+
+## A casing gotcha that would've bitten later
+
+Postgres unique constraints on `text` are case-sensitive. If Slack ever returned `Jane.Doe@corp.com` and Google returned `jane.doe@corp.com`, the email upsert wouldn't match, and you'd get **two rows for one person**. Identity providers usually lowercase emails, but "usually" isn't a constraint. One line closes it:
+
+```ts
+email: identity.email.toLowerCase(),
+```
+
+Normalize on the way in, and the natural key is actually natural.
+
+## Gating who may use which door
+
+A second login method is also a second attack surface on _intent_: the Google button must not become a way for regular staff to sidestep Slack. So Google sign-in is gated server-side to external collaborators only. Two signals identify them: the company domain, plus either a known prefix that contractor accounts share (call it `ext-`) or a small explicit allowlist for the handful who don't match the prefix.
+
+I pulled that rule into a pure function so it could be unit-tested without booting the whole auth stack:
+
+```ts
+export const isExternalEmail = (
+  email: string | null | undefined,
+  allowlist: ReadonlySet<string>,
+): boolean => {
+  const e = email?.toLowerCase()
+  if (!e || !e.endsWith(`@${COMPANY_DOMAIN}`)) return false
+  const local = e.slice(0, e.indexOf('@'))
+  return local.startsWith('ext-') || allowlist.has(e)
+}
+```
+
+The auth `signIn` callback branches by provider: the Slack path keeps its existing workspace check; the Google path returns `isExternalEmail(...)`, so a staff member who reaches the Google flow is simply rejected. Two more belts to go with the braces: the OAuth consent screen is set to **Internal**, so only the company's Google tenant can authorize at all, and the provider passes `hd=<company domain>` to scope the account chooser. The gate is enforced where it matters (the server), not in the UI.
+
+## The sign-in page: nudge, don't offer equally
+
+Even with a hard server gate, the UI shouldn't _invite_ staff down the wrong path. So the page keeps "Sign in with Slack" as the one prominent button, and the Google route is a small, de-emphasized link beneath it ("external collaborators, sign in here") that expands into a confirm step and a line of copy reminding staff to use Slack. By the time you see the Google button you've passed a tiny bit of friction that a normal employee has no reason to push through. The link only renders when Google is actually configured (an env flag), so non-configured environments show nothing.
+
+This is the cheap, durable pattern for "two doors, one preferred": make the right door obvious and the other door deliberately quieter, and back it with a real gate so quietness isn't your only defense.
+
+## What I'd tell myself starting out
+
+- **Separate "how they log in" from "what you need to know about them."** The whole problem dissolved once authentication and Slack-ID capture stopped being the same step. Resolve the ID out-of-band (by email) and the login method is free to vary.
+- **Pick the key that matches the human, not the provider.** Keying on `slack_user_id` was fine until a second provider existed. Email is the thing that's stable across login methods; make it the key and let provider IDs be nullable attributes.
+- **Guard upserts against null-clobbering.** When two paths converge on one row, a blind `SET` can erase what the other path populated. Only write fields you actually have.
+- **Normalize the key.** Case-sensitive uniqueness on email is a duplicate-row trap; lowercase on the way in.
+- **A second auth method is a policy decision, not just a button.** Gate it server-side, make the rule a pure testable function, and use the UI only to nudge, never as the enforcement.
+- **Try the org/admin fix before writing code.** Sometimes "approve the app for guests" is a setting someone else can flip. Reach for the code path when policy genuinely rules that out.
+
+_The fallback ships behind a config flag: where Google is configured, locked-out collaborators get in, and they're re-keyed on email so a future notifications phase can backfill their Slack ID by email and make them mentionable, without any of them ever signing in with Slack._
