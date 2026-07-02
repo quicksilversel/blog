@@ -1,0 +1,226 @@
+---
+title: 'Scheduled Reminders: Cloud Scheduler → Cloud Tasks Without Locking Out My Users'
+description: 'Adding deadline reminders to a workflow tool: a Cloud Scheduler → Cloud Tasks → worker pipeline, why IAM run.invoker was the wrong lock for a public SSO-gated Cloud Run app, verifying OIDC tokens in-app instead, making retries idempotent, computing Japanese business days without hardcoding holidays, and a Next.js standalone build trap with Google client libraries.'
+topics: ['GCP', 'Cloud Tasks', 'Cloud Scheduler', 'OIDC']
+category: 'fullstack'
+published: true
+date: '2026-07-02'
+---
+
+## Intro
+
+The tool tracks creative production requests, and each one has a release date. Left alone, the failure mode is boring and expensive: a request quietly sits un-submitted until it's suddenly late. The fix is a nag: two Slack reminders that fire on their own, one when the release is **ten business days out**, and a weekly one after that until the work is actually delivered.
+
+"Fires on its own" means something outside a user request has to run on a clock. That's the first time this app needed background work, and it turned into a small tour of GCP's scheduling primitives, plus one genuinely surprising dead end around authentication.
+
+## Why two hops instead of one
+
+The obvious design is: a scheduler pings an endpoint once a day, the endpoint finds the due requests and posts to Slack. One moving part. Why did I end up with a scheduler _and_ a task queue _and_ a worker?
+
+Because "posts to Slack" hides an unbounded loop. On a busy day the scan might find a dozen due requests, each needing a Slack call that can be slow or fail. If the scheduler's single HTTP call has to wait for all dozen sends, one flaky send stalls the batch, a timeout kills the rest, and a retry re-sends the ones that already went out. The scheduler is a trigger, not a work queue; it shouldn't be holding the bag for N side effects.
+
+So I split it into a **planner** and a **worker**, with a queue between them:
+
+```
+Cloud Scheduler  ──daily 09:00──▶  /api/tasks/scan-reminders   (planner)
+                                        │ find due requests
+                                        │ enqueue one task each
+                                        ▼
+Cloud Tasks queue ──one call each──▶  /api/tasks/send-reminder  (worker)
+                                        │
+                                        ▼  one Slack message
+```
+
+The planner does cheap, bounded work (a query and some enqueues), then returns in milliseconds. Cloud Tasks owns the fan-out: it retries a failed send on its own with backoff, rate-limits so a burst can't hammer Slack, and isolates each send so one failure doesn't touch the others. That division of labor is the whole reason the middle piece exists. Reach for it whenever "trigger" and "do the work" have different reliability needs.
+
+## The authentication trap
+
+Now the endpoints. `/api/tasks/scan-reminders` and `/api/tasks/send-reminder` must be callable by Google's infrastructure but by nobody else. My first instinct was the textbook GCP answer: make the Cloud Run service require authentication and grant the caller the **Cloud Run Invoker** role. Google-signed tokens in, everything else out.
+
+That instinct was wrong for this app, and it took a minute to see why.
+
+The service is already public (`--allow-unauthenticated`), but not _open_: every request is gated inside the app by SSO and an IP allowlist. Real users reach it through a browser with a session. Cloud Run's IAM invoker check, though, is enforced at the **ingress, for the entire service**: it's all-or-nothing. There's no "require a Google token only on `/api/tasks/*`." So flipping the service to require IAM auth would demand a Google-signed bearer token on _every_ request... including the browser users, who have no such token. I'd lock out exactly the people the app exists for.
+
+The realization: IAM invoker guards a _service_, but I needed to guard two _paths_. Wrong granularity.
+
+The way out is to keep the service public and **verify the token in the application** instead of at the ingress. Scheduler and Tasks can still attach a real Google OIDC token; because the service doesn't enforce auth, Cloud Run passes that `Authorization` header straight through to my code, and I check it myself:
+
+```ts
+const client = new OAuth2Client()
+
+export const verifyTaskRequest = async (req: Request): Promise<boolean> => {
+  if (devBypass) return true // local has no GCP identity
+  if (!INVOKER_SA || !AUDIENCE) return false // prod misconfig → fail closed
+
+  const token = bearer(req.headers.get('authorization'))
+  if (!token) return false
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: AUDIENCE,
+    })
+    return ticket.getPayload()?.email === INVOKER_SA
+  } catch {
+    return false
+  }
+}
+```
+
+This is still OIDC (cryptographically verified, scoped to one service account and one audience, auto-rotating), just checked one layer up from where I first reached for it. A shared secret would have been simpler, but it's a static string that leaks as a reusable credential; verifying the token buys real identity for the price of one library and ten lines. The two task routes are excluded from the app's SSO/IP gate (they authenticate themselves), and every other route stays behind it.
+
+The lesson I'll keep: **match the lock to the thing you're locking.** A platform feature that guards the whole service is the wrong tool when your trust boundary runs _through_ the service.
+
+## Making retries safe
+
+The instant you put a queue in front of a side effect, you've signed up for **at-least-once** delivery. Cloud Tasks will happily deliver the same task twice (a slow response, a network blip, a retry), and "posts to Slack" is not something you want to happen twice. So the worker has to be idempotent, and it needs two guards, not one.
+
+The first is a duplicate check: before sending, has a reminder already gone out for this request _today_? I record every send as an audit-log row, so the check is just "does a `reminder_sent` row exist for this request since midnight." The second guard is easy to forget: the request might have been **delivered in the gap** between the planner scanning and the worker running. So the worker re-reads the request and bails if it's no longer pending.
+
+```ts
+const view = await fetchRequest(requestId)
+if (!isPending(view)) return 'skipped_delivered' // advanced since scan
+if (await reminderSentToday(id)) return 'skipped_duplicate' // retry / double-deliver
+await notifyReminder(view, kind)
+await recordReminderSent(id)
+```
+
+Both "skips" return **200**, not an error: a duplicate isn't a failure, and returning an error would just make Cloud Tasks retry the thing I'm trying not to repeat. Errors are reserved for genuinely bad or unauthorized calls, and for the case that matters most, a Slack post that actually failed, which returns non-2xx so the queue _does_ retry. Getting the status codes right is part of the idempotency, not separate from it.
+
+## Business days without hardcoding holidays
+
+The reminder rule is stated in _business days_ ("ten business days before release"), and the weekly nag lands on Monday, unless that Monday is a public holiday, in which case it slides to the next working day. So I needed a calendar that knows weekends and national holidays.
+
+Weekends are arithmetic. Holidays are not: they move year to year, some are set by government decree only a year or two ahead, and my country's equinox holidays literally depend on astronomy. My first draft hardcoded a table of dates. I threw it out about ten minutes later. A hardcoded table is a landmine that silently goes stale every January, and I'd never remember to refresh it.
+
+The better answer is a maintained source. There's a small community API that publishes the holiday list and updates itself when the government announces changes, so there's nothing for me to maintain. I fetch it, cache it in-process for a day, and fall back gracefully if it's unreachable (worst case a reminder is a day off, a nudge, not a billing run):
+
+```ts
+export const fetchHolidays = async (): Promise<ReadonlySet<string>> => {
+  if (cache && Date.now() - cache.at < DAY) return cache.set
+  try {
+    const res = await fetch(API_URL, { signal: AbortSignal.timeout(5000) })
+    const data = (await res.json()) as Record<string, string>
+    cache = { at: Date.now(), set: new Set(Object.keys(data)) }
+    return cache.set
+  } catch {
+    return cache?.set ?? new Set() // last good, else weekends-only
+  }
+}
+```
+
+The part I'm happiest with is what I _didn't_ do: I didn't let that `fetch` leak into the date math. The business-day functions are pure: they take the holiday set as an argument:
+
+```ts
+export const reminderDueOn = (
+  today: string,
+  release: string,
+  holidays: ReadonlySet<string>,
+): 'first' | 'second' | null => {
+  /* … */
+}
+```
+
+The impure, networked bit lives in exactly one function; everything downstream is a pure transformation I can unit-test with a hand-built set of dates and no network at all. **Push the I/O to the edge and inject the result**, the same move that makes the auth rule and the recipient rules testable elsewhere in this app. It never gets old.
+
+## A build trap with Google's client libraries
+
+One last surprise, at the finish line. The build compiled fine and then died collecting page data:
+
+```
+Error: Cannot find module as expression is too dynamic
+```
+
+Google's client libraries load their protobuf definitions with dynamic `require()` calls that a bundler can't follow statically. Two fixes stacked: first, tell the framework not to bundle those packages at all and leave them as plain runtime dependencies. That got the build green, but it would have failed _in production_, because the app ships as a minimal standalone bundle, and the dependency tracer copies the `.js` files it can see while missing the `protos.json` the library reads at runtime. So the second fix is to force those data files into the output explicitly:
+
+```ts
+serverExternalPackages: ['@google-cloud/tasks', 'google-auth-library'],
+outputFileTracingIncludes: {
+  '/api/tasks/scan-reminders': ['./node_modules/@google-cloud/tasks/build/protos/**'],
+},
+```
+
+I only caught the second half because I diffed the file list in the standalone output against the real package and saw `protos.json` was missing. A green build is not the same as a working container, especially once native or dynamic-loading libraries are in the mix.
+
+## Standing it up in GCP
+
+The code is only half of it; the pipeline is four resources plus some IAM. Everything below is `gcloud`, parameterized so you can drop in your own values:
+
+```bash
+PROJECT=my-project
+PROJECT_NUMBER=123456789012
+REGION=asia-northeast1
+QUEUE=reminders
+INVOKER_SA=reminder-invoker@$PROJECT.iam.gserviceaccount.com
+RUNTIME_SA=my-run-sa@$PROJECT.iam.gserviceaccount.com # the Cloud Run service account
+SERVICE_URL=https://my-service-xxxx.$REGION.run.app
+```
+
+**1. Enable the APIs.** This also provisions the Scheduler/Tasks _service agents_ you grant below:
+
+```bash
+gcloud services enable \
+  cloudtasks.googleapis.com cloudscheduler.googleapis.com iamcredentials.googleapis.com \
+  --project=$PROJECT
+```
+
+**2. Create the invoker identity**, the service account whose OIDC token both Scheduler and Tasks present and whose email the app checks. It needs no `run.invoker`; the app verifies the token itself:
+
+```bash
+gcloud iam service-accounts create reminder-invoker \
+  --display-name="Reminder invoker (Scheduler + Tasks OIDC)" --project=$PROJECT
+```
+
+**3. Create the queue**, the buffer that rate-limits Slack and retries failed sends:
+
+```bash
+gcloud tasks queues create $QUEUE --location=$REGION --project=$PROJECT \
+  --max-dispatches-per-second=5 --max-concurrent-dispatches=5 \
+  --max-attempts=5 --min-backoff=10s --max-backoff=300s
+```
+
+**4. IAM: four grants**, forming the chain from _who may enqueue_, to _who may stamp a task with the invoker identity_, to _who may mint the signed token at delivery_:
+
+```bash
+# runtime SA may enqueue tasks
+gcloud projects add-iam-policy-binding $PROJECT \
+  --member="serviceAccount:$RUNTIME_SA" --role="roles/cloudtasks.enqueuer"
+
+# runtime SA may act as the invoker SA when attaching the OIDC token
+gcloud iam service-accounts add-iam-policy-binding $INVOKER_SA \
+  --member="serviceAccount:$RUNTIME_SA" \
+  --role="roles/iam.serviceAccountUser" --project=$PROJECT
+
+# Cloud Tasks service agent may mint OIDC tokens as the invoker SA (at delivery)
+gcloud iam service-accounts add-iam-policy-binding $INVOKER_SA \
+  --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-cloudtasks.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator" --project=$PROJECT
+
+# Cloud Scheduler service agent, likewise
+gcloud iam service-accounts add-iam-policy-binding $INVOKER_SA \
+  --member="serviceAccount:service-$PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator" --project=$PROJECT
+```
+
+**5. Create the daily scheduler job** (09:00 JST), POSTing to the planner with an OIDC token:
+
+```bash
+gcloud scheduler jobs create http reminders-daily \
+  --location=$REGION --project=$PROJECT \
+  --schedule="0 9 * * *" --time-zone="Asia/Tokyo" \
+  --uri="$SERVICE_URL/api/tasks/scan-reminders" --http-method=POST \
+  --oidc-service-account-email="$INVOKER_SA" \
+  --oidc-token-audience="$SERVICE_URL"
+```
+
+The one detail that trips people up: `--oidc-token-audience` must be the exact string the app checks (I use the bare service URL), and the Tasks worker uses that same audience, so a single check covers both hops.
+
+## What I'd tell myself starting out
+
+- **A scheduler is a trigger, not a worker.** The moment "fire on a clock" meets "do N fallible things," put a queue between them and let it own the retries, rate-limiting, and isolation.
+- **Match the lock to what you're locking.** Service-wide IAM was the wrong granularity for path-level protection on a service real users also hit. Verifying the token in-app kept both doors open to the right callers.
+- **At-least-once means idempotent, and idempotent means two guards.** Dedupe the repeat _and_ re-check the world, because state can change between planning and doing. Return success for "already done," or your retries fight you.
+- **Don't hardcode the calendar.** Anything that changes yearly by decree belongs behind a maintained source with a cache and a graceful fallback, not in a table you'll forget to update.
+- **Keep I/O at the edge of the logic.** One networked function, pure everything-else; the core stays unit-testable with no clock and no network.
+- **A green build isn't a running container.** With libraries that load files dynamically, verify the deploy artifact actually contains what runtime needs.
+
+_The reminders now fire on their own: a daily planner finds what's due, a queue fans the work out with retries, and a worker drops a nudge into each request's Slack thread, authenticated end to end without ever asking a browser user for a token they don't have._
