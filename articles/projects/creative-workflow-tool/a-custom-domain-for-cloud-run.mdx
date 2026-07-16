@@ -1,0 +1,139 @@
+---
+title: 'A Custom Domain for Cloud Run: Domain Mappings, a Managed Cert, and a 502 Red Herring'
+description: 'Moving the app off its default *.run.app URL onto a company subdomain with Cloud Run domain mappings: the domain-verification step the runbooks skip, why a zone apex takes A/AAAA records instead of a CNAME, why the cutover order matters when an OIDC audience is involved, and a 502 that looked like a broken deploy but was a TLS cert still propagating.'
+topics: ['GCP', 'Cloud Run', 'DNS', 'TLS']
+category: 'infrastructure'
+published: true
+date: '2026-07-16'
+---
+
+## Intro
+
+Since [the first deploy](/projects/creative-workflow-tool/shipping-to-cloud-run), the app had lived on its default Cloud Run URL, the auto-generated `https://<service>-<hash>.<region>.run.app` kind. That's fine for a dev phase and increasingly wrong for production: the URL is unmemorable, it announces your cloud setup to anyone who sees it in a Slack message, and every deep link the app sends carries it around.
+
+The ask for this phase: serve the app at a proper subdomain of a company-owned domain. The interesting parts weren't the happy path. They were a verification step none of the checklists mentioned, a cutover with an ordering constraint, and one genuinely misleading error at the end.
+
+A cost note up front, because it shaped the design: a subdomain of an existing company domain is **free** (no registrar), the Google-managed TLS cert is **free**, and a Cloud DNS zone is about **$0.20/mo**. The expensive alternative, a load balancer in front of the service, stayed unnecessary, which keeps [the earlier cost call](/projects/creative-workflow-tool/shipping-to-cloud-run) intact. Also worth saying: security guidelines generally prefer a subdomain of an existing domain over registering a new one (a retired domain must be held forever to prevent takeover, so every new registration is a permanent liability). The cheap option and the compliant option were the same option.
+
+## The setup: a zone we control, no load balancer
+
+The starting point for this article: the subdomain lives in a **public Cloud DNS zone in our own project**, so every record under it is a self-serve `gcloud` command rather than a request to another team. That property gets used twice below, once for domain verification and once for the records the mapping needs.
+
+Pointing the domain at the service is Cloud Run's **domain mappings** feature. It's DNS plus a free Google-managed cert, no load balancer, and it's the reason the ~$25/mo LB stayed out of the bill. (Check region availability first; domain mappings aren't offered everywhere, and the fallback _is_ the load balancer.)
+
+## The step the checklists skip: prove you own the domain
+
+Except the mapping command rejects you unless your Google account is a **verified owner** of the domain in Search Console. This makes sense once you think about what a domain mapping is: you're telling Google's shared serving infrastructure "route this hostname to my container, and mint a cert for it." Without an ownership check, anyone could map a domain they don't control and intercept its traffic the moment DNS misconfigures. The check is anti-squatting for multi-tenant infrastructure.
+
+None of the runbooks I cribbed from mentioned it, probably because whoever wrote them was already verified from some earlier project. `gcloud domains list-user-verified` returning empty is the tell.
+
+The nice part: **because the zone is ours, verification is self-serve.** Google's proof of ownership is a TXT record:
+
+```bash
+# Opens Search Console; choose the TXT method, copy the token
+gcloud domains verify tool.company.example
+
+# Add the token to our own zone (note the quoting: TXT data needs inner quotes)
+gcloud dns record-sets create tool.company.example. \
+  --zone=tool --type=TXT --ttl=300 \
+  --rrdatas='"google-site-verification=<token>"'
+
+# Wait for it to be publicly visible, then click Verify in Search Console
+dig TXT tool.company.example +short
+```
+
+Two durable facts about that token, learned by asking the questions afterward: it's **not a secret** (it's world-readable DNS; its only meaning is "this Google account controls this zone"), and the TXT record should **stay in the zone permanently**, because Google re-checks ownership periodically and the mapping depends on the domain staying verified. Also note verification is **per-person**: I'm the verified owner, and a teammate who needs to touch the mapping someday either self-verifies with their own token (five minutes, same flow) or gets added as an owner in Search Console ahead of time. Bus factor lives in surprising places.
+
+## The mapping, and why the apex can't be a CNAME
+
+The mapping itself is one command, with the caveat that the fully-managed variant lives on the beta surface (the GA `gcloud run domain-mappings` turns out to be for the Anthos flavor only, which cost a confused minute):
+
+```bash
+gcloud beta run domain-mappings create \
+  --service=workflow-tool \
+  --domain=tool.company.example \
+  --region=asia-northeast1
+```
+
+The output hands back the DNS records to create, and here's a detail that's easy to get wrong. Guides usually say "CNAME your domain to `ghs.googlehosted.com`," but that only works for a name _below_ the zone. Our hostname is the **apex of its zone**, the same name that holds the zone's own SOA and NS records, and the DNS spec forbids a CNAME from coexisting with other records at a name. So the apex takes **A and AAAA records** pointing at Google's anycast front-end IPs, which the mapping output provides:
+
+```bash
+gcloud dns record-sets create tool.company.example. \
+  --zone=tool --type=A --ttl=300 \
+  --rrdatas="<ip1>,<ip2>,<ip3>,<ip4>"   # one record set with 4 values,
+                                          # not 4 record sets
+# repeat with --type=AAAA for the IPv6 set
+```
+
+These are stable, provider-assigned anycast addresses: the one situation where pinning IPs in DNS is fine, because the fixed IP _is_ the product's interface, not a server that will churn.
+
+Once the records were in, the managed cert provisioned itself in about fifteen minutes. Which brings us to the fun part.
+
+## The 502 that wasn't ours
+
+First smoke test from the office network:
+
+```bash
+curl -sI https://tool.company.example | head -3
+# HTTP/1.1 502 Bad Gateway
+```
+
+Meanwhile the mapping reported perfect health (`Ready: True`, `CertificateProvisioned: True`), and the old `.run.app` URL responded normally. A 502 with a healthy backend is a contradiction, so the next question was: _who is actually answering this request?_
+
+```bash
+curl -sv https://tool.company.example -o /dev/null 2>&1 | grep issuer
+#  issuer: CN=<the corporate proxy's CA>, O=<the company>...
+```
+
+The TLS certificate wasn't Google's. It was issued by the **corporate secure-web-gateway's CA**. Like most companies now, all egress from managed devices flows through a TLS-inspecting proxy; the browser (and curl) never talks to Google directly. And the proxy's 502 error page, once actually read, said precisely what was wrong:
+
+```
+rip='<google-ip>', sni='tool.company.example',
+Peer closed connection in middle of handshake
+```
+
+The proxy reached the correct Google IP, offered our hostname via SNI, and **Google's front end aborted the TLS handshake**. That's the signature of a certificate that has been _issued_ but not yet _propagated_: "provisioned" means the cert exists, and it then takes anywhere from minutes to an hour to be distributed to every Google front end worldwide. Until the front end near the proxy's egress had it, that front end couldn't complete a handshake for the SNI and simply closed the connection, which the proxy dutifully wrapped in a 502.
+
+Thirty minutes later the same curl returned the app's usual `307` to the sign-in page. Nothing was ever misconfigured.
+
+Two lessons worth the detour. First, **a control-plane "Ready" is a statement about configuration, not about global data-plane convergence**. Certs, DNS, and CDN configs all have propagation tails that no status field covers. Second, when a corporate proxy sits between you and everything, **check the cert issuer before debugging the backend**: it tells you in one line whose error page you're reading. The initial theory ("we probably haven't deployed to the new domain yet") was natural and completely wrong, because a domain mapping serves the _currently running_ service instantly; there is no per-domain deploy.
+
+## The cutover: ordering around an OIDC audience
+
+The app was built with every self-referencing URL driven by env: the SSO base URL, the task worker's target URL, and the OIDC audience [the reminder pipeline verifies](/projects/creative-workflow-tool/scheduled-reminders-without-locking-out-users). So the code diff for the entire migration was three values on one line of the deploy workflow. The interesting part was _sequencing_, because the pieces fail differently if flipped in the wrong order:
+
+1. **OAuth consoles first** (Google client redirect URIs, Slack app redirect URLs): these are **additive** (a second redirect URI doesn't affect the first), so they can go in any time before the switch, with zero risk. Do the risk-free steps early.
+2. **Then the deploy** that flips the env vars. This is the actual cutover: the moment it's live, sign-in round-trips happen on the new domain.
+3. **Then, promptly, the scheduler**: the daily reminder job attaches an OIDC token whose `audience` claim must match what the app verifies. The new revision expects the new audience; the scheduler was still sending the old one. That's a guaranteed 401, bounded and harmless _only because_ the job runs once a day and the patch landed before the next tick. The general rule: when a token's audience changes, the issuer and the verifier have to move together, and whichever you can't deploy atomically, you patch inside the failure window you've actually measured.
+
+```bash
+gcloud scheduler jobs update http reminders-daily \
+  --location=asia-northeast1 \
+  --uri=https://tool.company.example/api/tasks/scan-reminders \
+  --oidc-service-account-email=<invoker-sa> \
+  --oidc-token-audience=https://tool.company.example
+```
+
+(Two paper cuts baked into that command: the job's real name didn't match what the planning doc said it was, so `describe` the live resource rather than trusting your own notes, and gcloud refuses to update the audience unless the service-account email is restated alongside it.)
+
+Two aftereffects worth knowing in advance. **Everyone re-authenticates once**: the session cookie uses the `__Host-` prefix, which by spec binds it to exactly one host, so cookies minted on the old domain are invisible on the new one. That's the cookie doing its security job, not a bug, but it's worth a heads-up message to users so the surprise sign-out isn't reported as an outage. And **the old `.run.app` URL never goes away**: a domain mapping is an alias, not a replacement. That's a feature (a permanent fallback if DNS or the cert ever misbehaves), and it isn't a security hole here because every gate lives in the app and applies to both hostnames equally. Old bookmarks even funnel users to the new domain on their own, since the SSO flow redirects through the configured canonical URL.
+
+## Verifying end-to-end, including the part on a timer
+
+Most of the verification is immediate: DNS resolves, the cert is Google's (from outside the proxy) and valid, both SSO providers round-trip, and a freshly sent Slack notification deep-links to the new domain.
+
+The scheduled path can't be verified by waiting, so it got a manufactured test: create a throwaway request whose release date is **exactly ten business days out** (counting a national holiday in between, since the reminder engine skips holidays and the naive count is off by one), force-run the scheduler job, and watch the reminder arrive with the audit trail attached. Running the job a second time and seeing _nothing_ was equally part of the test, because the per-day idempotency guard is behavior you want proof of, not hope for. Then archive the test request so it never fires again.
+
+## Wrapping Up
+
+The app now lives on a real domain, and nothing about the migration touched application code. The earlier discipline of env-driving every self-URL paid out in full.
+
+Key takeaways:
+
+1. **Keep the app's DNS records in a zone your team can write to.** Every DNS step here (the verification TXT, the apex A/AAAA) was a one-line command instead of a ticket to someone else's queue.
+2. **Budget for domain verification.** Cloud Run domain mappings require the creator to be a verified owner (it's anti-squatting on shared infra). It's self-serve if you control the zone: TXT record, five minutes. Leave the TXT in place forever; ownership is re-checked. And it's per-person, so mind the bus factor.
+3. **A zone apex can't be a CNAME.** The apex hostname holds the zone's own SOA/NS records, so the mapping gets A/AAAA records to Google's fixed anycast IPs instead.
+4. **"Provisioned" is not "propagated."** A fresh managed cert can take up to an hour to reach every front end; until then, handshakes fail _somewhere_ while the status reads Ready everywhere.
+5. **Behind a TLS-inspecting corporate proxy, read the cert issuer first.** It instantly tells you whose error you're looking at, and the proxy's error body named the real failure (`peer closed connection in middle of handshake`) more precisely than any cloud status page.
+6. **Sequence a cutover by failure mode**: additive console changes first, the atomic env flip second, and the OIDC-audience-coupled scheduler patch immediately after, inside a failure window you've checked is empty.
+7. **Host-bound cookies mean a one-time mass sign-out.** Announce it, or the cookie's security feature becomes your incident channel's morning.
