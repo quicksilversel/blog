@@ -1,0 +1,167 @@
+---
+title: '[CI/CD] Cutting CI From 20 to 6 Minutes by Pulling Lint and Type Checks Out of next build'
+description: 'How I sped up CI and release pipelines for a large Next.js app: disabling inline ESLint and type checking in next build, running them as parallel jobs, linting only changed files, and fixing broken caches.'
+topics: ['GHA', 'Next.js', 'CI/CD', 'TypeScript', 'Caching']
+published: true
+date: '2026-07-30'
+---
+
+## The Problem
+
+At work, CI on a large Next.js app took about 20 minutes per PR. Releases to our dev environment took about 40 minutes. Push a one-line fix, wait 40 minutes to see it deployed. Painful.
+
+So I profiled the workflows, and most of the time wasn't going where I expected.
+
+## Where the Time Actually Went
+
+Three culprits:
+
+1. **`next build` was doing too much.** By default, `next build` runs ESLint and the TypeScript type check inline, as part of the build. On a codebase this size, that's minutes of work sitting on the critical path of every build.
+2. **And we were building more than once.** CI had a build job, and the release workflow built a Docker image (which runs `next build` inside it). So lint and type checking ran inline in every one of those builds, in serial, every time.
+3. **The caches were quietly broken.** More on this below.
+
+The fix wasn't one trick. It was pulling the checks off the critical path, parallelizing everything, and repairing the caches.
+
+## Fix 1: Get Lint and Type Checks Out of `next build`
+
+Two changes. In `package.json`:
+
+```json
+"build:next": "next build --no-lint"
+```
+
+And in `next.config.js`:
+
+```js
+typescript: {
+  ignoreBuildErrors: true,
+},
+```
+
+Yes, these flags look scary. `ignoreBuildErrors: true` reads like "ship broken code to production". But what they actually disable is the _duplicate inline execution_ inside the build. Type errors and lint errors are still caught, just by dedicated jobs that run in parallel with the build instead of inside it (next two sections).
+
+The build itself doesn't need type checking to succeed. SWC strips types without checking them. So the check is a quality gate, not a build dependency, and quality gates can run in parallel.
+
+## Fix 2: A Dedicated Type-Check Job
+
+CI got a new `type-check` job that runs `tsc` alongside the build instead of inside it, with `tsconfig.tsbuildinfo` cached for incremental checking:
+
+```yaml
+type-check:
+  needs: changes
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v6
+    - uses: ./.github/actions/install-dependencies
+    - name: Cache tsbuildinfo
+      uses: actions/cache@v5
+      with:
+        path: tsconfig.tsbuildinfo
+        key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-tsbuildinfo-
+    - name: Run type check
+      run: npm run compile:ts
+```
+
+With a warm `tsbuildinfo` cache, `tsc` only re-checks what changed. This job usually finishes before the build does.
+
+## Fix 3: Lint Only Changed Files
+
+The old lint job ran ESLint and Stylelint over the entire `src/` tree on every PR. But a PR only touches a handful of files, and `main` is already lint-clean, so re-linting the other 99% is wasted work.
+
+The workflow already had a `changes` job that listed the PR's changed files to decide whether to run at all. I made it output the actual file list:
+
+```yaml
+- name: Detect code changes
+  id: filter
+  run: |
+    {
+      echo 'files<<__CHANGED_EOF__'
+      echo "$CHANGED"
+      echo '__CHANGED_EOF__'
+    } >> "$GITHUB_OUTPUT"
+```
+
+Then the lint job feeds only those files to each tool:
+
+```bash
+changed=$(echo "$CHANGED_FILES" | while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$f" ] && printf '%s\n' "$f"
+done)
+
+eslint_files=$(echo "$changed" | grep -E '^src/.*\.(ts|tsx)$' || true)
+
+echo "$changed" | xargs -r npx prettier --check --ignore-unknown --cache
+echo "$eslint_files" | xargs -r npx eslint --cache
+```
+
+Two details that matter:
+
+- The `[ -f "$f" ]` check filters out deleted files, which would otherwise make the linters error on paths that no longer exist.
+- Prettier gets `--ignore-unknown` so you can throw the whole changed-file list at it (including `.yml`, `.md`, whatever) and it skips what it doesn't understand.
+
+## Fix 4: The Caches Were Lying
+
+Two cache bugs had been sitting there for who knows how long.
+
+**The npm cache was restored twice.** Our shared install action used `setup-node` with `cache: 'npm'`, which already caches `~/.npm`. But a later `actions/cache` step in the same action _also_ included `~/.npm` in its path list. Result: about 443MB downloaded and unpacked twice on every job, in every workflow using that action. Deleting one line fixed installs across three workflows.
+
+**The Next.js cache key hashed everything.** The `.next/cache` key looked like this:
+
+```yaml
+key: ...-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+```
+
+`**` includes `node_modules`. So GitHub Actions was hashing tens of thousands of dependency files just to compute the key (slow), and the key changed whenever dependencies did anything (unstable restores). Scoping it to source files fixed both:
+
+```yaml
+key: ...-${{ hashFiles('src/**/*.ts', 'src/**/*.tsx') }}
+```
+
+## Fix 5: The Dev Release Needed a Quality Gate
+
+Here's the catch with Fix 1. Our dev environment deploys directly from a push to `release/dev*` branches, without going through a PR. No PR means no CI. Which means the inline lint and type check inside `next build` was, accidentally, the _only_ quality gate for dev deploys. Remove it and broken code sails straight into the cluster.
+
+So the release workflow got restructured:
+
+- **`type-check` and `lint` jobs** run in parallel, only for dev releases (staging releases go through reviewed release PRs, so they're already verified).
+- **`build-image`** only builds the Docker image and saves it as a workflow artifact with `docker save`. No push, no S3 upload, no deploy. It runs in parallel with the gate jobs and has zero side effects.
+- **`publish-and-deploy`** loads the artifact and does the scan, push, S3 upload, and deploy, but only if everything before it succeeded:
+
+```yaml
+publish-and-deploy:
+  needs: [build-image, type-check, lint]
+  if: >-
+    always()
+    && !contains(needs.*.result, 'failure')
+    && !contains(needs.*.result, 'cancelled')
+```
+
+The `always()` is needed because `type-check` and `lint` are _skipped_ (not passed) for staging releases, and by default a skipped dependency skips the dependent job too. This condition says: run as long as nothing failed or got cancelled, skipped is fine.
+
+If the gate fails, `publish-and-deploy` never runs, so nothing touches the registry, S3, or Kubernetes. A separate `notify-failure` job with `if: failure()` sends exactly one Slack alert no matter which job broke.
+
+## Results
+
+CI on pull requests:
+
+|          | Before  | After (cold cache) | After (warm cache) |
+| -------- | ------- | ------------------ | ------------------ |
+| Duration | ~20 min | ~14 min            | **~6 min**         |
+
+Dev releases:
+
+|          | Before  | After (cold cache) | After (warm cache) |
+| -------- | ------- | ------------------ | ------------------ |
+| Duration | ~40 min | ~34 min            | **~21 min**        |
+
+The cold-cache improvement is pure parallelization and deduplication. The warm-cache numbers add the repaired caches on top.
+
+## TL;DR
+
+- `next build` runs ESLint and type checking inline by default. On a big codebase, that's minutes on the critical path of every build, multiplied by every place that builds.
+- Move them to dedicated parallel jobs with `--no-lint` and `typescript.ignoreBuildErrors: true`. Same checks, zero critical-path cost.
+- Lint only the files the PR changed. `main` is already clean.
+- Audit your caches. Ours was restoring 443MB twice per job, and a `**` glob in a cache key was hashing all of `node_modules`.
+- Before removing an inline check, find out what it was silently guarding. Ours was the only gate on direct-push dev deploys, so it needed a replacement gate before it could go.

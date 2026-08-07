@@ -1,0 +1,147 @@
+---
+title: 'Calendar Invites from a Bot, Without Domain-Wide Delegation'
+description: "Making a Slack bot invite meeting participants to a Google Calendar event. Service accounts cannot add attendees without domain-wide delegation, so the bot authenticates as a real user via an OAuth refresh token and patches the event on that user's calendar copy, with a fallback that never blocks the submission."
+topics: ['Python', 'Slack', 'GCP', 'Google Calendar']
+published: true
+date: '2026-08-05'
+---
+
+## Intro
+
+The proposal intake automation had one manual step left. After processing a submission, the bot would post: "Please add @alice and @bob to the review meeting on {date}." A human then opened Google Calendar and clicked through the invite flow. Every single time.
+
+This automation closes that loop: the bot resolves the mentioned users to email addresses, finds the review meeting on the calendar, and sends real Google Calendar invites itself.
+
+Sounds like a ten-line change on top of the [calendar event creation](/projects/slack-workflow-automations/slack-form-to-spreadsheet-and-calendar) from earlier in this series. It wasn't, because of one Calendar API rule.
+
+## The Wall: Service Accounts Cannot Invite People
+
+The bot already creates calendar events with a service account, so my first attempt was to reuse it and patch the event's attendee list. The API refused:
+
+```
+Service accounts cannot invite attendees without Domain-Wide Delegation of Authority.
+```
+
+This is a deliberate restriction. Inviting attendees sends emails on someone's behalf, and Google only allows a service account to do that if it has [domain-wide delegation](https://developers.google.com/workspace/guides/create-credentials#optional_set_up_domain-wide_delegation_for_a_service_account): workspace-admin-granted permission to impersonate any user in the domain.
+
+For an internal bot that needs to touch exactly one recurring meeting, that's a comically oversized hammer. Delegation is granted per scope, not per calendar, so approving it would let the bot act as _anyone_ on _any_ calendar. I didn't want to own that, and the workspace admins wouldn't want to grant it.
+
+## Acting as a Real User Instead
+
+The workaround: don't be a service account. Authenticate as an actual user with an OAuth refresh token, and patch the event on **that user's calendar copy**.
+
+The subtle part is that the token user doesn't need to own the meeting. An invited guest can add other guests through the API, as long as the event's "Guests can invite others" setting is on (which is the Calendar default). So any attendee of the recurring meeting can be the token user.
+
+Building credentials from a stored refresh token is short:
+
+```python
+from google.oauth2.credentials import Credentials as UserCredentials
+
+def _load_user_calendar_credentials() -> Optional[UserCredentials]:
+    raw = os.environ.get(CALENDAR_OAUTH_ENV)
+    if not raw:
+        return None
+    parsed = json.loads(raw)
+    return UserCredentials(
+        token=None,
+        refresh_token=parsed["refresh_token"],
+        client_id=parsed["client_id"],
+        client_secret=parsed["client_secret"],
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=CALENDAR_SCOPES,
+    )
+```
+
+The refresh token is minted once, locally, with a small helper script that runs the installed-app OAuth flow in a browser and prints the resulting JSON (`client_id`, `client_secret`, `refresh_token`). That JSON goes into Secret Manager, and Cloud Run mounts it as an env var. Returning `None` when the env var is absent doubles as the feature flag: no secret, no behavior change.
+
+## Finding the Right Event
+
+The submission form carries the planned meeting date, so the obvious query is "events on that day whose title contains the meeting keyword." That worked until the first holiday week, when the meeting moved from Tuesday to Wednesday while the form submissions kept the planned Tuesday date.
+
+So the search uses the whole Monday-to-Sunday week around the requested date and takes the instance closest to it:
+
+```python
+week_start = day - timedelta(days=day.weekday())
+time_min = datetime.combine(week_start, time(0), tzinfo=jst)
+
+response = calendar.events().list(
+    calendarId=MTG_CALENDAR_ID,
+    timeMin=time_min.isoformat(),
+    timeMax=(time_min + timedelta(days=7)).isoformat(),
+    q=MTG_EVENT_KEYWORD,
+    singleEvents=True,
+    orderBy="startTime",
+).execute()
+
+candidates = [
+    item for item in response.get("items", [])
+    if MTG_EVENT_KEYWORD in (item.get("summary") or "")
+]
+event = min(candidates, key=lambda item: _distance_from(item, day))
+```
+
+Two details: `singleEvents=True` expands the recurring meeting into concrete instances (you patch an instance, not the series), and the keyword is re-checked against the summary because `q=` does free-text matching over more fields than the title.
+
+## Sending the Invites
+
+Slack mentions become emails via `users_info` (the profile's `email` field), then the attendee lists are merged with a case-insensitive dedup and patched in one call:
+
+```python
+attendees = list(event.get("attendees") or [])
+existing = {(a.get("email") or "").lower() for a in attendees}
+new_attendees = [
+    {"email": e} for e in emails if e.lower() not in existing
+]
+
+calendar.events().patch(
+    calendarId=MTG_CALENDAR_ID,
+    eventId=event["id"],
+    body={"attendees": attendees + new_attendees},
+    sendUpdates="all",
+).execute()
+```
+
+`sendUpdates="all"` is what turns a silent attendee-list edit into actual invitation emails. Without it the new attendees appear on the event but never hear about it.
+
+## Every Failure Falls Back, Nothing Blocks
+
+The invite is a nice-to-have bolted onto a critical path (the submission itself), so the whole thing is wrapped in a single try/except that returns a boolean:
+
+```python
+def _try_invite_mtg_participants(data, client, logger) -> bool:
+    if not data.mtg_date or not data.mtg_participants:
+        return False
+    try:
+        mentioned = set(_USER_MENTION_PATTERN.findall(data.mtg_participants))
+        emails = resolve_user_emails(data.mtg_participants, client)
+        if not emails or len(emails) < len(mentioned):
+            return False
+        return get_proposal_service().invite_to_mtg(data.mtg_date, emails)
+    except Exception as e:
+        logger.warning(f"MTG invite failed; falling back to the manual ask: {e}")
+        return False
+```
+
+`True` means the processing message says "invited ✅". `False`, for any reason (missing secret, unparsable date, event not found, API error, unresolvable users), means the message stays the old manual ask. The submission is never blocked, and the worst case is exactly what happened before this feature existed.
+
+The `len(emails) < len(mentioned)` guard exists because the success message claims _everyone_ was invited. If three people were mentioned and only two resolved to emails, saying "invited ✅" would silently strand the third. Partial success is treated as failure, and a human handles it.
+
+## Gotchas
+
+### 1. The Slack scope that fails silently
+
+Reading a user's email from `users_info` requires the **`users:read.email`** bot scope. Without it the API call succeeds, `ok` is true, and the profile simply has no `email` key. Thanks to the fallback design nothing breaks, but every invite quietly downgrades to the manual ask, which took me a while to notice. If invites "never work," check the scope before the code.
+
+### 2. Create the secret before merging the deploy change
+
+The deploy workflow mounts the new Secret Manager secret into Cloud Run, and Cloud Run fails the whole deployment if a referenced secret doesn't exist. So the secret has to exist before the workflow change lands, even though the feature is designed to no-op without it. Ask me how I know.
+
+### 3. The refresh token is a person
+
+The token user is a real account. If that person leaves or their token is revoked in a security sweep, invites fall back to the manual ask (gracefully, but silently). Worth a note in the runbook about whose token it is and how to re-mint it.
+
+## Wrapping Up
+
+The Calendar API's service-account restriction looks like a dead end, but "an invited guest may add guests" turns out to be all the permission an internal bot needs. One user's refresh token, scoped to one calendar's worth of trust, replaces domain-wide impersonation rights.
+
+And because the invite path returns a boolean instead of throwing, shipping it was low-stakes: the feature flag is the existence of a secret, and every failure mode lands on the exact behavior the team already had.

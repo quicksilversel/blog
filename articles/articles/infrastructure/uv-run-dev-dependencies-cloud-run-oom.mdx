@@ -1,0 +1,64 @@
+---
+title: '[uv] My Container OOMed Because of Dev Dependencies I Thought I Had Excluded'
+description: 'A Cloud Run service kept hitting its memory limit at startup. The cause: uv run re-syncs the environment by default, reinstalling the dev dependency group at runtime even though the image was built with --no-dev. The fix is --no-sync (and --no-install-project for better layer caching).'
+topics: ['Python', 'Docker', 'GCP']
+published: true
+date: '2026-07-22'
+---
+
+## The Problem
+
+A small Python bot I run on Cloud Run started getting killed at startup: memory limit exceeded. The service is a Flask app behind gunicorn, nothing heavy. The Dockerfile installed dependencies with [uv](https://docs.astral.sh/uv/) and explicitly excluded dev dependencies:
+
+```dockerfile
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY app/ ./app/
+
+CMD ["sh", "-c", "uv run gunicorn --workers 1 --threads 8 --bind :${PORT} app.web:app"]
+```
+
+`--no-dev` on the sync, lean image, done. Or so I thought. The container OOMed anyway, and the memory spike happened _before_ the app served a single request.
+
+## The Revelation: uv run Is Not "Run in the venv"
+
+Here's the thing I had wrong. I read `uv run gunicorn` as "run gunicorn using the environment in this image." It isn't. `uv run` means "**make the environment match the lockfile, then run**." It performs a sync first, every time.
+
+And that implicit sync has two properties that combined into my OOM:
+
+1. **It includes the dev group.** In uv, `dev` is a default dependency group. Unless you pass `--no-dev`, a sync installs it. My `--no-dev` was on the _build-time_ `uv sync` line. The _runtime_ `uv run` had no such flag, so at every container start, uv looked at the environment, noticed the dev group was missing, and helpfully installed it. pytest, mypy, black, flake8, all of it, downloaded and unpacked at startup.
+2. **On Cloud Run, that install eats your memory limit.** Cloud Run's writable filesystem is in-memory. Files written at runtime count against the container's memory allocation. So "install a few hundred MB of dev tooling on boot" translates directly into "a few hundred MB of the memory limit gone before gunicorn even starts."
+
+The image was built lean. The runtime undid it, into RAM.
+
+## The Fix: --no-sync
+
+One flag tells `uv run` to trust the environment as-is:
+
+```dockerfile
+CMD ["sh", "-c", "uv run --no-sync gunicorn --workers 1 --threads 8 --bind :${PORT} app.web:app"]
+```
+
+No sync at startup, no dev dependencies, no memory spike, faster cold starts. In a container, where the environment was built exactly once and should never drift, this is what you always want. (There's also a `UV_NO_SYNC=1` env var if you'd rather set it once for the whole image.)
+
+## Bonus Fix: --no-install-project for Layer Caching
+
+While I was in the Dockerfile, I fixed the layer structure too. The original `uv sync` ran right after copying only the lockfiles, but a plain sync also tries to install _the project itself_, whose source hasn't been copied yet at that layer. Splitting it makes each layer honest:
+
+```dockerfile
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
+
+COPY app/ ./app/
+RUN uv sync --frozen --no-dev
+```
+
+The first sync installs only third-party dependencies, so its layer caches on the lockfile alone and survives app-code changes. The second sync, after the source is in place, installs just the project. Edit application code and rebuild: the expensive dependency layer is a cache hit, and only the cheap project install reruns.
+
+## TL;DR
+
+- `uv run` syncs the environment before running your command, and the sync includes the `dev` group by default. A build-time `--no-dev` does not protect you from a runtime `uv run` without one.
+- In containers, always start the app with `uv run --no-sync` (or `UV_NO_SYNC=1`). The environment was built at image build time; nothing at runtime should be installing packages.
+- On Cloud Run this bug is amplified: the writable filesystem is in-memory, so runtime installs count straight against your memory limit. My "OOM" was pip-shaped, not app-shaped.
+- Use `--no-install-project` on the lockfile-only sync so your dependency layer caches independently of app code.

@@ -1,0 +1,130 @@
+---
+title: '[Sentry] Upgrading @sentry/nextjs From v8 to v10: Dead Config, Ghost Options, and a Duplicate SDK'
+description: 'Migrating a custom-server Next.js app from Sentry v8 to v10: a server config that was never loaded, source map options that had been silently ignored since v8, a shared library shipping a second SDK copy, and the sendDefaultPii change.'
+topics: ['Sentry', 'Next.js']
+published: true
+date: '2026-07-27'
+---
+
+## The Upgrade
+
+Our Next.js app was on `@sentry/nextjs` 8.x, two majors behind. Time to move to v10 (10.66.0). The version bump itself was the easy part. What made this upgrade interesting was everything the migration research dug up: config that had been dead or silently ignored for years, and a dependency trap that would have swallowed errors without a single warning.
+
+## Rule Zero: Every @sentry/\* Package Must Be the Same Version
+
+We depend on both `@sentry/nextjs` (app) and `@sentry/node` (custom server). These cannot drift: `@sentry/nextjs@10` depends internally on `@sentry/node@10`, and all `@sentry/*` packages share state through `@sentry/core`. Mixing a v10 `@sentry/nextjs` with a v9 `@sentry/node` means two incompatible SDK instances in one process, each with its own idea of the current scope.
+
+So both went to exactly `10.66.0`, pinned, no `^`.
+
+## Pre-Existing Bug 1: The Server Config That Was Never Loaded
+
+While reading the v9 migration guide I hit this requirement: `sentry.server.config.ts` is only loaded through `instrumentation.ts`. Our repo didn't have an `instrumentation.ts`.
+
+Which meant our `sentry.server.config.ts`, and the server-side `Sentry.init` inside it, had likely been dead code for a long time. Server errors were only reaching Sentry because our custom server did its own separate `SentryNode.init`. The environment tag we expected from the Next.js server init never appeared in events; nobody noticed because the custom-server client was catching things anyway.
+
+The fix is the file Next.js has wanted all along:
+
+```ts
+// src/instrumentation.ts
+import { captureRequestError } from '@sentry/nextjs'
+
+export const register = async () => {
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    await import('../sentry.server.config')
+  }
+}
+
+export const onRequestError = captureRequestError
+```
+
+With that in place, the duplicate `SentryNode.init` in the custom server came out. One process, one init, one SDK instance. `onRequestError` is a v9+ addition that captures errors from React Server Components and route handlers, which we were previously missing entirely.
+
+## Pre-Existing Bug 2: The Options That Did Nothing
+
+Our `next.config.js` wrapped the config in `withSentryConfig` **twice**: once for normal web builds, and a second time with `urlPrefix: 'app:///_next'` and `include: '.next/static'` to upload source maps a second time for errors reported from the native app's WebView, which sees different URLs.
+
+Except `urlPrefix` and `include` are v7-era options. They don't exist in v8's `SentryBuildOptions`. TypeScript didn't complain because the config is a `.js` file, and the SDK doesn't warn on unknown keys. So for the entire v8 era, the "second upload" had been uploading the exact same default-prefixed maps a second time. A no-op that cost us upload time on every production build.
+
+The double-wrap collapsed to a single call:
+
+```js
+module.exports = ({ defaultConfig }) => {
+  // ...
+  if (isLocal) return buildConfig
+  return withSentryConfig(buildConfig, sentryBuildOptions)
+}
+```
+
+The lesson that stuck with me: a plain-JS config file plus an options object that ignores unknown keys is a place where removed APIs die silently. If an option matters, verify its effect (in this case, whether WebView events actually unminify), not just its presence in the config.
+
+## Source Map Behavior Changed Under You
+
+Two v9 changes landed directly on our source map setup:
+
+- **`hideSourceMaps` is gone.** Hidden source maps (no `sourceMappingURL` comment pointing browsers at your maps) became the default, so the option was deleted. We removed it from the config.
+- **Sentry now deletes source maps after uploading, by default.** That's a sensible default (don't ship maps publicly), but we already delete maps in a post-build script in the Docker build, which also strips the `sourceMappingURL` comments. Letting Sentry delete them mid-build would race with that script, so we opted out explicitly:
+
+```js
+sourcemaps: {
+  disable: sourcemapsDisable,
+  deleteSourcemapsAfterUpload: false,
+},
+```
+
+If you have any custom post-build step that touches `.map` files, check this default before upgrading. Your files may vanish earlier in the pipeline than your script expects.
+
+## The Duplicate SDK Trap
+
+This was the riskiest finding, and it wasn't in our code at all.
+
+An internal shared UI library we depend on pins `@sentry/nextjs@8.x` as a **regular dependency** (not a peer dependency). Its distributed code calls `captureException` through its own import. If we upgraded only our app, npm would install both versions, and the client bundle would contain v8 _and_ v10 side by side. The library's error reporting would route to the v8 SDK copy, which nothing ever initializes, so every error it caught would silently evaporate.
+
+No build error, no runtime warning. Just missing events.
+
+The fix is npm `overrides`, forcing the library to resolve our version, same as we already do for `react` and `react-dom`:
+
+```json
+"overrides": {
+  "@myorg/ui-library": {
+    "react": "$react",
+    "react-dom": "$react-dom",
+    "@sentry/nextjs": "$@sentry/nextjs",
+    "@sentry/node": "$@sentry/node"
+  }
+}
+```
+
+This is only safe after checking which SDK APIs the library actually uses (`init`, `captureException`, `ignoreErrors`, all stable across v8 to v10). An override doesn't make incompatible code compatible; it just picks the winner.
+
+## sendDefaultPii: The Quiet Data Change
+
+Since v9, Sentry no longer infers the user's IP address from the request unless you opt in:
+
+```ts
+Sentry.init({
+  dsn,
+  environment,
+  sendDefaultPii: true,
+})
+```
+
+We enabled it for the browser client, where the IP is what lets us tell "one user hit this 500 times" from "500 users hit this once". Decide this consciously per project though. It's a privacy setting first and a debugging convenience second.
+
+## Locking Behavior Down With Tests
+
+Our `tracesSampler` throttles high-traffic sale pages to a much lower sample rate than regular pages, and `beforeSend` drops errors that originate inside third-party tag-manager scripts. Both survived the upgrade untouched (v9 removed `transactionContext` and `request` from the sampling context, but we were already reading `samplingContext.name`).
+
+"Survived untouched" is exactly the kind of claim that deserves tests, so this PR added them: table-driven cases asserting the sampler returns the right rate per environment and path pattern, and that `beforeSend` filters events whose stack frames point into the tag-manager script but passes through app-code errors. Next time a major version shuffles these APIs, a red test tells us instead of a quiet gap in the error feed.
+
+## One More Thing to Watch: dd-trace
+
+v10 upgrades Sentry's internal OpenTelemetry to v2. Our production process also runs dd-trace (`NODE_OPTIONS=--require dd-trace/init`) in the same process, and both instrument the runtime. Nothing broke, but this combination is worth an explicit check in a pre-production environment after any Sentry major bump: confirm traces still arrive on both sides before shipping.
+
+## TL;DR
+
+- Align every `@sentry/*` package to the same exact version, including ones hiding inside shared libraries (use `overrides` if a library pins its own).
+- v9+ loads `sentry.server.config.ts` only via `instrumentation.ts`. If you don't have that file, your server config may already be dead today.
+- Audit `withSentryConfig` options against the current `SentryBuildOptions` type. Removed options are ignored, not rejected.
+- v9 deletes source maps after upload by default. Opt out if your build pipeline handles them itself.
+- Decide on `sendDefaultPii` explicitly; user IPs stop flowing without it.
+- An upgrade PR is the best moment to add tests around the behavior you're claiming is unchanged.
