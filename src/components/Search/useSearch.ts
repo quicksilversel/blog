@@ -32,23 +32,28 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
   const pathname = usePathname()
 
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([])
-      return
-    }
+    const trimmedQuery = query.trim()
 
-    const debounceTimer = setTimeout(() => {
-      startTransition(async () => {
-        try {
-          const index = await loadIndex()
-          setResults(index.search(query))
-          setSelectedIndex(0)
-        } catch (error) {
-          console.warn('Search error:', error)
-          setResults([])
-        }
-      })
-    }, 300)
+    const debounceTimer = setTimeout(
+      () => {
+        startTransition(async () => {
+          if (!trimmedQuery) {
+            setResults([])
+            return
+          }
+
+          try {
+            const index = await loadIndex()
+            setResults(index.search(query))
+            setSelectedIndex(0)
+          } catch (error) {
+            console.warn('Search error:', error)
+            setResults([])
+          }
+        })
+      },
+      trimmedQuery ? 300 : 0,
+    )
 
     return () => clearTimeout(debounceTimer)
   }, [query])
@@ -87,11 +92,11 @@ export function useSearch(isOpen: boolean, onClose: () => void) {
           scrollPositionRef.current.x,
           scrollPositionRef.current.y,
         )
-      })
 
-      setQuery('')
-      setResults([])
-      setSelectedIndex(0)
+        setQuery('')
+        setResults([])
+        setSelectedIndex(0)
+      })
     }
 
     return () => {
