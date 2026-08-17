@@ -1,0 +1,187 @@
+---
+title: 'Automating Full-Page Screenshots with Playwright in CI'
+description: 'How I replaced manual landing-page screenshots with a weekly Playwright job that captures desktop and mobile views, then bundles them into a static archive site'
+topics: ['Python', 'Playwright', 'GHA', 'CI/CD']
+published: true
+date: '2026-08-14'
+---
+
+## Intro
+
+We run an internal archive site that catalogs every landing page we ship. For each page it shows the metadata (title, dates, category) and, more importantly, full-page screenshots at a couple of viewports: desktop and mobile. Those screenshots were captured by hand. Someone opened each page in each form factor, scrolled, took a full-page screenshot, renamed the files, and uploaded them. For a handful of pages a week, every week, that adds up.
+
+I automated the whole thing with a Python and Playwright job that runs in GitHub Actions. This post is about the capture side: the parts that were more fiddly than I expected (fonts, timing, and making a headless Linux runner render Japanese text like a real browser), and how the images end up on the site.
+
+## The shape of the system
+
+The data and the images travel on two separate paths.
+
+The metadata comes from a planning spreadsheet. A weekly job reads the sheet, transforms it into a single JSON file, and writes that JSON to a cloud storage bucket. The archive site is a statically exported Next.js app that reads the JSON at build time.
+
+The images live in a storage bucket. When someone (or now, the capture job) adds a screenshot, it lands in the bucket, and the site's build step pulls the bucket into `public/` so the images are bundled into the static export. The link between an entry and its images is pure convention: every entry has a numeric ID, and a file named `1234-capture-image-pc.jpg` is the desktop screenshot for entry `1234`.
+
+That naming rule is the whole integration. The capture job's only job is to produce correctly named JPEGs in the bucket.
+
+## Multiple viewports from one browser
+
+Each page needs a capture at a couple of viewports. Desktop is a normal viewport; mobile uses a phone device profile that Playwright ships with.
+
+Playwright makes the device part easy with its built-in descriptors. The interesting decision was to run the viewports concurrently. They are independent, so there is no reason to load them one after another:
+
+```python
+async def capture_entry(browser, phone, devices, lp_id, path, time_param):
+    results = await asyncio.gather(
+        *[
+            capture_device(browser, phone, device, lp_id, path, time_param)
+            for device in devices
+        ],
+        return_exceptions=True,
+    )
+    captures = [r for r in results if r is not None and not isinstance(r, BaseException)]
+    written = [file for file, _ in captures]
+    return written
+```
+
+Each entry still runs one at a time (so it is roughly one page's worth of requests at any moment, not a fan-out over the whole batch), but within an entry the contexts load in parallel. That alone cut the capture step by about two thirds.
+
+## Waiting for the page to actually be ready
+
+A full-page screenshot is only as good as the moment you take it. Two things bit me here.
+
+The first was lazy content. The page loads sections as you scroll, so a screenshot taken right after `load` shows empty placeholders below the fold. The fix is to make every element think it is already on screen by stubbing `IntersectionObserver` before any script runs:
+
+```python
+await page.add_init_script(
+    """
+    class AllVisibleObserver extends window.IntersectionObserver {
+      constructor(cb, opts) {
+        super((entries, obs) => {
+          cb(entries.map((e) => ({ ...e, isIntersecting: true })), obs)
+        }, opts)
+      }
+    }
+    window.IntersectionObserver = AllVisibleObserver
+    """
+)
+```
+
+The second was web fonts. Most of the site rendered fine, but one weight of the brand font kept coming out in a fallback. Web fonts load asynchronously and can swap in after the `load` event, so the screenshot was racing the font. Waiting for the browser's font set to settle fixed it:
+
+```python
+await page.wait_for_timeout(5000)
+await page.evaluate(
+    "() => Promise.race(["
+    "  document.fonts.ready,"
+    "  new Promise((r) => setTimeout(r, 8000)),"
+    "]).then(() => true)"
+)
+```
+
+The `Promise.race` matters. `document.fonts.ready` usually resolves quickly, but I did not want a single stuck font to hang the whole job, so it gives up after eight seconds and captures anyway.
+
+## Making a Linux runner render like a Mac
+
+This was the surprise. Locally on macOS the captures looked great. The same job on the GitHub-hosted Linux runner produced text in an odd, slightly-off font. Three issues were stacked on top of each other, and the last one was the real culprit.
+
+First, the site picks its font stack based on the platform it detects from the user agent. A headless browser on Linux was getting served a font family that the runner did not even have. Sending a desktop macOS user agent for the desktop view made the site request the font stack I wanted (the mobile view already sends a mobile user agent through the device profile, so it was fine):
+
+```python
+def context_options(phone, device):
+    if device == "sp":
+        return dict(phone)
+    return {"user_agent": MACOS_USER_AGENT}
+```
+
+Second, even with the right font stack requested, the runner had no good Japanese font installed, so the browser fell back to whatever it could find, often with Chinese glyph variants for shared characters. The fix is to install a proper CJK font and tell fontconfig to prefer the Japanese variant:
+
+```yaml
+- name: Install Japanese fonts
+  run: |
+    sudo apt-get install -y -qq fonts-noto-cjk
+    sudo tee /etc/fonts/local.conf >/dev/null <<'EOF'
+    <?xml version="1.0"?>
+    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+    <fontconfig>
+      <match target="pattern">
+        <test name="family"><string>sans-serif</string></test>
+        <edit name="family" mode="prepend" binding="strong">
+          <string>Noto Sans CJK JP</string>
+        </edit>
+      </match>
+    </fontconfig>
+    EOF
+    fc-cache -f
+```
+
+The proprietary macOS font itself cannot be shipped to CI, but Noto Sans CJK JP is a clean, freely redistributable match, and forcing the JP variant gives a correct fallback.
+
+Third, and this was the real fix: even with the right user agent and the font installed, a _headless_ browser still rendered the text subtly wrong. Headless Chromium uses a different rendering path than a browser with a real display, and it was not applying the fonts the way an actual browser does. Fixing it meant not running headless at all. I launch Chromium in headed mode and give it a virtual display with Xvfb, so it renders exactly like a browser on a desktop:
+
+```python
+browser = await playwright.chromium.launch(headless=False)
+```
+
+```yaml
+- name: Install Xvfb
+  run: sudo apt-get install -y -qq xvfb
+
+- name: Capture
+  run: xvfb-run -a python scripts/capture.py ...
+```
+
+One wrinkle: the browser cache restores the Chromium binary but not its system libraries, so I reinstall those on every run (`playwright install --with-deps`). Headed Chromium needs them, and a cache hit would otherwise skip them.
+
+The user agent and the font install were both necessary, but headed rendering under Xvfb was the piece that made the captures finally match the real page. If you are screenshotting anything with non-Latin text or web fonts in CI and it looks slightly off, try headed-under-Xvfb before you spend a day fighting fontconfig.
+
+## Compressing the output
+
+A full-page screenshot of a long landing page is enormous. Some pages are 40,000 pixels tall, which is a 45 megapixel image. As lossless PNGs they ran past 20MB each. Since these are photographic marketing pages, JPEG at quality 90 is visually indistinguishable and lands around 2 to 4MB, so I screenshot to a temporary PNG and re-encode once:
+
+```python
+def finalize_capture(png_path, jpg_path, content_width):
+    with Image.open(png_path) as img:
+        result = img.crop((0, 0, content_width, img.height)) if content_width else img
+        result.convert("RGB").save(jpg_path, quality=90, optimize=True, progressive=True)
+    png_path.unlink()
+```
+
+The `content_width` crop trims a thin scrollbar gutter that headless Chromium reserves on the right edge of full-page shots. I read the real content width from the page and crop to it so there is no white strip.
+
+## Not capturing error pages
+
+Depending on the environment, some URLs return an access-restricted or not-found response instead of the page. Early on, the job cheerfully screenshotted that error page and uploaded it. Now it checks the navigation response and skips anything that is not a real page, without failing the run:
+
+```python
+response = await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+if response is not None and response.status >= 400:
+    print(f"  {device}: HTTP {response.status}; skipping")
+    return None
+```
+
+A skipped entry is logged and counted separately from a genuine failure, so an entire run of skips still exits green, while a real crash is surfaced.
+
+## Auth without keys
+
+The job needs to read the metadata JSON and write images to storage. There are no service account key files anywhere. In CI it authenticates through OIDC (workload identity federation), and locally it uses application default credentials. The Python side does not know or care which one it got:
+
+```python
+import google.auth
+
+credentials, _ = google.auth.default(
+    scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+)
+```
+
+No long-lived secret to rotate, and the CI identity is scoped to just the storage it needs.
+
+## Key lessons
+
+1. **Parallelize what is independent.** Loading the device views concurrently was the single biggest speedup, and it is bounded to one page at a time so it stays polite to the origin.
+2. **Screenshots race the page.** Stub `IntersectionObserver` for lazy content and wait on `document.fonts.ready` for web fonts, with a timeout so nothing hangs.
+3. **CI runners are not your laptop.** Fonts that exist on macOS do not exist on a Linux runner, so install the font explicitly and pin the language variant. And if text still renders wrong, run the browser headed under a virtual display (Xvfb) instead of headless. Headless can apply fonts differently, and that turned out to be the actual fix.
+4. **Full-page screenshots are huge.** Re-encode to JPEG. The quality loss is invisible and the size drop is an order of magnitude.
+5. **Skip, do not fail.** An unreachable environment should produce a clean skip and a green run, not a red one that someone has to investigate.
+
+## Wrapping up
+
+The capture job is a small Python script and a GitHub Actions workflow, but most of the value is in the boring details: waiting for the right moment, installing the right font, and re-encoding the output. The result is that a task that used to be manual now runs on a schedule, produces consistent images, and drops them into a bucket where a static site picks them up on its next build. The data path (spreadsheet to JSON to site) and the image path (bucket to site) stay completely decoupled, which makes each side easy to reason about on its own.

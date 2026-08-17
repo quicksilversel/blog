@@ -1,0 +1,71 @@
+---
+title: 'Turning Ended Landing Pages into Data to Stop Build Times from Piling Up'
+description: 'How to stop a site full of short-lived pages from accumulating near-identical "this page has ended" entrypoints, using a data registry, one shared page, and a middleware rewrite.'
+topics: ['Next.js', 'TypeScript']
+published: true
+date: '2026-08-06'
+---
+
+## The Problem
+
+Some codebases accumulate temporary pages by design: time-limited features, one-off tie-ins, seasonal content. Each one gets its own route, its own components, its own `getServerSideProps`, and a schedule that decides what state to render.
+
+The pages are temporary, but their URLs are not. External links and search results keep pointing at them long after they end, so each one keeps serving a simple closed notice with an image and a link to somewhere more useful.
+
+Here's the thing: those closed pages are all nearly identical. They render the same shared component and differ only in a handful of strings. Yet each one remains a full Next.js entrypoint that every single `next build` compiles and type-checks. With well over a hundred such routes and more added every week, build time wasn't spiking. It was quietly piling up.
+
+There was a second annoyance too. The switch to the closed state was baked into each page's code, so getting the timing right meant having the right dates deployed in advance, and cleaning up afterwards meant hand-editing every retired page.
+
+## The Observation
+
+A closed page is not code. It's a handful of data: a title, an image, where to send the visitor next, and when it closed. Once you see it that way, the fix is obvious: one typed registry, one shared page, and something that routes retired slugs to it without changing their URLs.
+
+```ts
+export const CLOSED_PAGES = {
+  'some-slug': {
+    title: 'This page has closed',
+    image: 'some-slug/og.png',
+    closed: { from: { date: '2026-08-31' } },
+  },
+} satisfies Record<string, ClosedPageData>
+```
+
+## The Design
+
+Routing is handled by middleware. It watches the relevant route prefix, and when the slug is registered and the closed window is active, it internally rewrites the request to one shared page. The browser URL never changes:
+
+```ts
+export const middleware = (request: NextRequest) => {
+  const slug = getSlug(request.nextUrl.pathname)
+
+  if (slug && shouldShowClosedPage(slug, getCurrentTime(request))) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/closed'
+    url.searchParams.set('slug', slug)
+    return NextResponse.rewrite(url)
+  }
+
+  return NextResponse.next()
+}
+```
+
+The shared page's `getServerSideProps` looks the slug up in the registry, builds the meta tags (with the original path as canonical), and renders the shared component with the resolved props. Unknown slugs get a 404.
+
+I considered two alternatives before landing on middleware. A catch-all dynamic route was off the table because one already existed at that level for CMS-driven pages. Generated `rewrites()` in the Next config almost worked, but rewrites are static at boot, and I wanted the switch to depend on the current time. Middleware runs per request, so it can check a date. It also runs before filesystem routing, which gives a free safety property: while a page is live, its real route wins, and the rewrite only takes over inside the closed window.
+
+## Endings Without Deploys
+
+That per-request time check is where this really pays off. The closed window is a range, not just a timestamp:
+
+- `from`: after this moment, the shared page takes over, even if the original page's code still exists
+- `until` (optional): after this moment, requests pass through to the real page again, which covers pages that come back for a second run
+
+So the workflow becomes: register the closing configuration up front, deploy once, and the flip happens automatically at the right moment. No end-day deploy, no manual switch. Deleting the retired page becomes a leisurely cleanup task instead of a scheduled one, and every deletion permanently removes an entrypoint from the build.
+
+QA still works the same way as before, because the middleware honors the same time-override parameter the rest of the site uses for previewing scheduled changes (outside production only).
+
+## Wrapping Up
+
+Retiring a page used to mean keeping five to seven files alive forever. Now it's a handful of lines in a data file, and the old files get deleted. Each migration removes an entrypoint from `next build`, so build time scales with the number of live pages instead of every page that has ever existed.
+
+The general lesson: when a pile of pages differ only in their data, stop paying the per-page cost. Move the data into a registry, render it through one route, and let something request-aware (here, middleware) keep the URLs stable. The build gets faster every time you delete something, which is a pleasant reversal of the usual trend.
