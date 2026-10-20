@@ -1,0 +1,92 @@
+---
+title: 'Upgrading to Next.js 16 with Turbopack: Three Upstream Bugs I Hit (and Filed)'
+description: 'Next.js 16 makes Turbopack the default bundler. The build is genuinely faster, but the edges show. Three real upstream bugs I ran into upgrading a Pages Router app: a runtime assetPrefix that never hydrates, pino breaking the build, and a dev-only hydration regression.'
+topics: ['Next.js', 'Turbopack']
+published: true
+date: '2026-10-20'
+---
+
+## TL;DR
+
+Next.js 16 promotes Turbopack to the default bundler for both `next dev` and `next build`. The build speedup is real (my compile dropped from around 39s on webpack to under 12s). But Turbopack is newer than webpack, and the rough edges are concentrated exactly where build time and runtime disagree, or where a package does something too dynamic to trace statically.
+
+Here are the three genuine upstream bugs I hit, each with the issue tracking it. Two were already reported. One was not, so I filed it with a minimal reproduction.
+
+## Problem 1: Turbopack ignores a runtime `assetPrefix`
+
+This one cost me the most time because it fails completely silently.
+
+A very common deployment pattern is to build the app once into an immutable image, then inject the CDN URL at deploy time through an environment variable:
+
+```ts
+// next.config.ts
+const assetPrefix = process.env.CDN_URL ?? ''
+
+export default { assetPrefix }
+```
+
+On webpack this works: the client runtime reads the prefix at runtime and loads chunks from the CDN. On Turbopack it does not. Turbopack bakes the `assetPrefix` into the client bundle at **build** time and ignores a different value supplied only at **runtime**.
+
+The failure mode is nasty because nothing looks broken:
+
+- The page server-renders fine.
+- Every chunk loads with HTTP 200.
+- There are no console errors, no CORS errors, no "module factory" errors.
+- But React never hydrates. `useEffect` never runs, buttons are dead, lazy images never load.
+
+Under the hood, webpack's client runtime reassigns `__webpack_public_path__` from the runtime value, so it honors it. Turbopack's equivalent hook is effectively a no-op, so the runtime value is dropped and the chunk loader keeps using the build-time prefix.
+
+The fix is to make the prefix known at **build** time (pass `CDN_URL` to `next build`, not only to the running container), so the baked value and the runtime value match. If you cannot do that, `next build --webpack` still works the old way.
+
+I could not find this reported, so I built a minimal reproduction and filed [vercel/next.js#100303](https://github.com/vercel/next.js/issues/100303), plus a PR ([#100306](https://github.com/vercel/next.js/pull/100306)) that at least makes the mismatch fail loudly instead of silently.
+
+## Problem 2: pino breaks the Turbopack build
+
+My production build failed with:
+
+```
+Error: Cannot find module './transport-stream'
+    at .../node_modules/pino/lib/worker.js
+```
+
+The culprit was [pino](https://github.com/pinojs/pino), pulled into the server bundle transitively through a logger. pino starts a worker thread and resolves its transport through a dynamic `require` whose path Turbopack's static tracer cannot follow. webpack tolerated the same pattern; Turbopack does not.
+
+This is not pino-specific. It is a whole class of "externalized package does a dynamic require at runtime" failures that also hits OpenTelemetry, styled-components, and next-auth under Turbopack. The practical workarounds are to force Turbopack to include the missing file explicitly, or, if you do not actually depend on that logger's real transports in the bundled path, alias it to a lighter build:
+
+```ts
+// next.config.ts
+export default {
+  turbopack: {
+    resolveAlias: { pino: 'pino/browser' },
+  },
+}
+```
+
+That second option is a trade-off, not a fix: it swaps real structured logging for console output in the bundle, so only reach for it when the bundled copy of the logger is something you do not consume.
+
+Tracked upstream in [vercel/next.js#87342](https://github.com/vercel/next.js/issues/87342), with the root cause filed against the library itself in [pinojs/thread-stream#184](https://github.com/pinojs/thread-stream/issues/184).
+
+## Problem 3: Turbopack dev breaks Pages Router hydration
+
+In development specifically, Turbopack 16.4 has a Pages Router regression. When `_app` and a page share a dependency, hydration fails with:
+
+```
+module factory is not available
+```
+
+Production builds are unaffected, so this is a dev-only annoyance rather than a shipping blocker. Until the fix lands in a stable release, the simplest path is to keep `next dev` on webpack while leaving production on Turbopack. If you run a custom server, that is a one-line conditional:
+
+```ts
+const app = next({
+  dev,
+  ...(dev && { webpack: true }),
+})
+```
+
+Tracked in [vercel/next.js#99789](https://github.com/vercel/next.js/issues/99789); the fix ([#98823](https://github.com/vercel/next.js/pull/98823)) is merged for 16.5.
+
+## References
+
+- Runtime `assetPrefix` ignored by Turbopack: [vercel/next.js#100303](https://github.com/vercel/next.js/issues/100303) (and the fail-loud PR, [#100306](https://github.com/vercel/next.js/pull/100306))
+- pino / dynamic require under Turbopack: [vercel/next.js#87342](https://github.com/vercel/next.js/issues/87342), [pinojs/thread-stream#184](https://github.com/pinojs/thread-stream/issues/184)
+- Turbopack dev Pages Router hydration regression: [vercel/next.js#99789](https://github.com/vercel/next.js/issues/99789), fix [#98823](https://github.com/vercel/next.js/pull/98823)
