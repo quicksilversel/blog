@@ -38,7 +38,11 @@ Under the hood, webpack's client runtime reassigns `__webpack_public_path__` fro
 
 The fix is to make the prefix known at **build** time (pass `CDN_URL` to `next build`, not only to the running container), so the baked value and the runtime value match. If you cannot do that, `next build --webpack` still works the old way.
 
-I could not find this reported, so I built a minimal reproduction and filed [vercel/next.js#100303](https://github.com/vercel/next.js/issues/100303), plus a PR ([#100306](https://github.com/vercel/next.js/pull/100306)) that at least makes the mismatch fail loudly instead of silently.
+I could not find this reported, so I built a minimal reproduction and filed an issue, plus a PR that at least makes the mismatch fail loudly instead of silently.
+
+https://github.com/vercel/next.js/issues/100303
+
+https://github.com/vercel/next.js/pull/100306
 
 ## Problem 2: pino breaks the Turbopack build
 
@@ -64,7 +68,11 @@ export default {
 
 That second option is a trade-off, not a fix: it swaps real structured logging for console output in the bundle, so only reach for it when the bundled copy of the logger is something you do not consume.
 
-Tracked upstream in [vercel/next.js#87342](https://github.com/vercel/next.js/issues/87342), with the root cause filed against the library itself in [pinojs/thread-stream#184](https://github.com/pinojs/thread-stream/issues/184).
+Tracked upstream in the Next.js repo, with the root cause filed against the library itself:
+
+https://github.com/vercel/next.js/issues/87342
+
+https://github.com/pinojs/thread-stream/issues/184
 
 ## Problem 3: Turbopack dev breaks Pages Router hydration
 
@@ -83,7 +91,11 @@ const app = next({
 })
 ```
 
-Tracked in [vercel/next.js#99789](https://github.com/vercel/next.js/issues/99789); the fix ([#98823](https://github.com/vercel/next.js/pull/98823)) is merged for 16.5.
+Tracked upstream; the fix is merged for 16.5:
+
+https://github.com/vercel/next.js/issues/99789
+
+https://github.com/vercel/next.js/pull/98823
 
 ## References
 

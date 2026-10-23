@@ -1,0 +1,1 @@
+export { GitHubCard } from './GitHubCard'
