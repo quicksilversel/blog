@@ -3,6 +3,9 @@ import type { AnchorHTMLAttributes, ReactNode } from 'react'
 import styled from '@emotion/styled'
 import Link from 'next/link'
 
+import { GitHubCard } from '@/components/UI/GitHubCard'
+import { parseGitHubReference } from '@/libs/utils'
+
 type AnchorProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
   children?: ReactNode
 }
@@ -17,11 +20,23 @@ const isAbsoluteUrl = (url: string | undefined): boolean => {
   }
 }
 
+const getPlainText = (children: ReactNode): string | null => {
+  if (typeof children === 'string') return children
+  if (
+    Array.isArray(children) &&
+    children.length === 1 &&
+    typeof children[0] === 'string'
+  ) {
+    return children[0]
+  }
+  return null
+}
+
 export const Anchor = ({ children, href, ...rest }: AnchorProps) => {
   if (!href) return null
 
   if (isAbsoluteUrl(href)) {
-    return (
+    const externalAnchor = (
       <StyledAnchor
         href={href}
         target="_blank"
@@ -31,6 +46,19 @@ export const Anchor = ({ children, href, ...rest }: AnchorProps) => {
         {children}
       </StyledAnchor>
     )
+
+    const reference = parseGitHubReference(href)
+    if (reference && getPlainText(children) === href) {
+      return (
+        <GitHubCard
+          url={href}
+          reference={reference}
+          fallback={externalAnchor}
+        />
+      )
+    }
+
+    return externalAnchor
   }
 
   return (
