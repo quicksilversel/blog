@@ -4,6 +4,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 import * as Markup from '@/components/Pages/Article/ArticleDetail/Markup'
+import { remarkCallouts } from '@/libs/markdown/remarkCallouts'
+
+import { ArticleCodeBlock } from './ArticleCodeBlock'
 
 type Props = {
   content: string
@@ -12,13 +15,13 @@ type Props = {
 export const MarkdownRenderer = ({ content }: Props) => {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkCallouts]}
       components={{
         h1: Markup.H1,
         h2: Markup.H2,
         h3: Markup.H3,
         p: Markup.P,
-        pre: Markup.HighlightedCode,
+        pre: ArticleCodeBlock,
         code: Markup.Code,
         blockquote: Markup.Blockquote,
         ol: Markup.Ol,

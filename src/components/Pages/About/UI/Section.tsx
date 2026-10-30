@@ -4,65 +4,42 @@ import styled from '@emotion/styled'
 
 type Props = {
   id: string
+  title: string
   children: ReactNode
-  className?: string
 }
 
-export const Section = ({ id, children, className }: Props) => {
+export const Section = ({ id, title, children }: Props) => {
   return (
-    <Container {...(className && { className })} id={id}>
+    <Container id={id}>
+      <Title>{title}</Title>
       {children}
     </Container>
   )
 }
 
-export const Container = styled.section`
+const Container = styled.section`
+  margin-top: 3.5rem;
+
+  @media (width <= 768px) {
+    margin-top: 2.5rem;
+  }
+`
+
+const Title = styled.h2`
   display: flex;
-  gap: 3rem;
-  align-items: flex-start;
-  justify-content: space-around;
-  margin-bottom: 6rem;
-
-  @media (width <= 768px) {
-    gap: 1.5rem;
-    margin-bottom: 4rem;
-  }
-`
-
-const SectionNumber = styled.div`
-  position: sticky;
-  top: 68px;
-  font-size: 4rem;
-  font-weight: 700;
-  line-height: 1;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
+  font-weight: bold;
   color: ${({ theme }) => theme.colors.primary};
-  opacity: 0.2;
+  text-transform: uppercase;
+  letter-spacing: 2px;
 
-  @media (width <= 768px) {
-    font-size: 2.5rem;
+  &::after {
+    flex: 1;
+    height: 1px;
+    content: '';
+    background-color: ${({ theme }) => theme.colors.muted};
   }
 `
-
-const SectionContent = styled.div`
-  flex: 1;
-  max-width: 800px;
-`
-
-const SectionTitle = styled.h2`
-  margin: 0 0 2rem;
-  font-size: ${({ theme }) => theme.fontSize.extraLarge};
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.text};
-`
-
-const Paragraph = styled.p`
-  margin-bottom: 1.5rem;
-  font-size: ${({ theme }) => theme.fontSize.small};
-  line-height: 1.8;
-  color: ${({ theme }) => theme.colors.text};
-`
-
-Section.Number = SectionNumber
-Section.Content = SectionContent
-Section.Title = SectionTitle
-Section.Paragraph = Paragraph

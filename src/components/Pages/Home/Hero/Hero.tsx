@@ -14,8 +14,9 @@ export const Hero = () => {
         <Wrapper>
           <Name>Zoe</Name>
           <Description>
-            Frontend engineer with SRE experience. Learning in public, debugging
-            in private.
+            Frontend and SRE, now in developer tooling.
+            <br />
+            Learning in public, debugging in private.
           </Description>
           <Links>
             <Link
