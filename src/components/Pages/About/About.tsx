@@ -2,35 +2,34 @@
 
 import styled from '@emotion/styled'
 
-import { AboutMe } from './Sections/AboutMe'
-import { Experience } from './Sections/Experience/Experience'
-import { Skills } from './Sections/Skills'
+import type { TopicSummary } from '@/libs/getTopics'
 
-export const About = () => {
+import { Contact } from './Sections/Contact'
+import { Experience } from './Sections/Experience'
+import { Intro } from './Sections/Intro'
+import { Writing } from './Sections/Writing'
+
+type Props = {
+  topics: TopicSummary[]
+}
+
+export const About = ({ topics }: Props) => {
   return (
     <Container>
-      <Content>
-        <AboutMe />
-        <Experience />
-        <Skills />
-      </Content>
+      <Intro />
+      <Experience />
+      <Writing topics={topics} />
+      <Contact />
     </Container>
   )
 }
 
 const Container = styled.main`
-  position: relative;
-  display: flex;
-  min-height: calc(100vh - 68px);
+  max-width: 720px;
+  padding: 3rem 0 4rem;
   margin: 0 auto;
-`
 
-const Content = styled.div`
-  flex: 1;
-  padding: 4rem 0;
-
-  @media (width <= 1024px) {
-    padding: 2rem 1rem;
-    margin-left: 0;
+  @media (width <= 768px) {
+    padding: 2rem 1rem 3rem;
   }
 `

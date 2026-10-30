@@ -52,6 +52,14 @@ When asked to write or edit an article:
    - Quote the `date` (and `updated`) value. An unquoted `date: 2024-01-01` is parsed by YAML as a Date object instead of a string.
 
 6. **Internal links** use the path form `/articles/<category>/<slug>`. If you move an article between categories, grep for its slug and update every cross-reference.
+7. **Callouts** use the GitHub alert syntax, handled by `src/libs/markdown/remarkCallouts.ts`. Types are `note`, `tip`, `important`, `warning`, `caution`, `memo`, and `disclosure`; unknown types fall back to the `note` style. Text after the marker replaces the default label.
+
+   ```
+   > [!TIP] Prior art
+   > The idea came from a teammate.
+   ```
+
+   A blockquote without a marker keeps the plain quote styling, so use a bare `>` for actual quotes.
 
 # Writing projects
 

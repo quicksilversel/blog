@@ -8,8 +8,22 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { SearchModal } from '@/components/Search'
+import { CONTACT_EMAIL } from '@/utils/constants'
 
 import { Drawer } from '../Drawer'
+
+type NavItem = {
+  href: string
+  label: string
+  title?: string
+}
+
+const navItems: NavItem[] = [
+  { href: '/about', label: 'About' },
+  { href: '/archive', label: 'Archive' },
+  { href: '/topics', label: 'Topics' },
+  { href: `mailto:${CONTACT_EMAIL}`, label: 'Contact', title: CONTACT_EMAIL },
+]
 
 export const Header = () => {
   const pathname = usePathname()
@@ -24,13 +38,6 @@ export const Header = () => {
     setIsDrawerOpen(false)
   }
 
-  const navItems = [
-    { href: '/about', label: 'About' },
-    { href: '/archive', label: 'Archive' },
-    { href: '/snippets', label: 'Snippets' },
-    { href: '/topics', label: 'Topics' },
-  ]
-
   return (
     <>
       <Container>
@@ -43,6 +50,7 @@ export const Header = () => {
               <NavLink
                 key={item.href}
                 href={item.href}
+                title={item.title}
                 isActive={pathname === item.href}
               >
                 {item.label}
@@ -84,6 +92,7 @@ export const Header = () => {
               <DrawerNavLink
                 key={item.href}
                 href={item.href}
+                title={item.title}
                 isActive={pathname === item.href}
                 onClick={handleNavClick}
               >

@@ -1,138 +1,81 @@
 import styled from '@emotion/styled'
 
-import { TableWrapper } from '@/components/Pages/Article/ArticleDetail/Markup/Table'
-
 import { EXPERIENCE_LIST } from './data'
 
 import { Section } from '../../UI/Section'
 
 export const Experience = () => {
   return (
-    <Section id="experience">
-      <Section.Number>02</Section.Number>
-      <Section.Content>
-        <Section.Title>Experience</Section.Title>
-        <ExperienceItem>
-          <JobTitle>Frontend Engineer & SRE</JobTitle>
-          <Company>ZOZO, Inc • 2023 - Present</Company>
-          <Description as="div">
-            <TableWrapper>
-              <Table>
-                <Thead>
-                  <Tr>
-                    <Th>Area</Th>
-                    <Th>Responsibilities</Th>
-                  </Tr>
-                </Thead>
-                <tbody>
-                  {EXPERIENCE_LIST.map((item) => (
-                    <Tr key={item.title}>
-                      <TitleCell>{item.title}</TitleCell>
-                      <DescriptionCell>{item.description}</DescriptionCell>
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            </TableWrapper>
-          </Description>
-        </ExperienceItem>
-        <ExperienceItem>
-          <JobTitle>BSc. Computer Science </JobTitle>
-          <Company>KAIST • 2018 - 2022</Company>
-        </ExperienceItem>
-      </Section.Content>
+    <Section id="experience" title="Experience">
+      <List>
+        {EXPERIENCE_LIST.map((item) => (
+          <Item key={`${item.org}-${item.role}`}>
+            <Period>{item.period}</Period>
+            <Details>
+              <Role>
+                {item.role} <Org>{item.org}</Org>
+              </Role>
+              {item.description && (
+                <Description>{item.description}</Description>
+              )}
+            </Details>
+          </Item>
+        ))}
+      </List>
     </Section>
   )
 }
 
-const ExperienceItem = styled.div`
-  padding-bottom: 2rem;
-  margin-bottom: 3rem;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
+const List = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+`
 
-  &:last-child {
-    border-bottom: none;
+const Item = styled.div`
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+
+  @media (width <= 768px) {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
   }
 `
 
-const JobTitle = styled.h3`
-  margin: 0 0 0.5rem;
-  font-size: ${({ theme }) => theme.fontSize.large};
-  font-weight: bold;
-  color: ${({ theme }) => theme.colors.text};
+const Period = styled.span`
+  font-family: ${({ theme }) => theme.fontFamily.mono};
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
+  color: ${({ theme }) => theme.colors.mutedText};
 `
 
-const Company = styled.p`
-  margin: 0 0 1rem;
+const Details = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+`
+
+const Role = styled.h3`
+  margin: 0;
   font-size: ${({ theme }) => theme.fontSize.small};
-  font-weight: 500;
-  color: ${({ theme }) => theme.colors.primary};
+  font-weight: bold;
+`
+
+const Org = styled.span`
+  font-weight: normal;
+  color: ${({ theme }) => theme.colors.secondary};
+
+  &::before {
+    margin-right: 0.35rem;
+    color: ${({ theme }) => theme.colors.mutedText};
+    content: '·';
+  }
 `
 
 const Description = styled.p`
-  margin-bottom: 1rem;
-  font-size: ${({ theme }) => theme.fontSize.small};
-  line-height: 1.6;
-  color: ${({ theme }) => theme.colors.text};
-`
-
-const Table = styled.table`
-  width: 100%;
+  margin: 0;
   font-size: ${({ theme }) => theme.fontSize.extraSmall};
-  border-collapse: collapse;
-`
-
-const Thead = styled.thead`
-  border-bottom: 1px solid ${({ theme }) => theme.colors.primary};
-
-  @media (width <= 35.1875rem) {
-    display: none;
-  }
-`
-
-const Th = styled.th`
-  padding: 0.75rem;
-  font-size: ${({ theme }) => theme.fontSize.extraSmall};
-  font-weight: bold;
-  color: ${({ theme }) => theme.colors.primary};
-  text-align: left;
-`
-
-const Tr = styled.tr`
-  cursor: pointer;
-  border-radius: 8px;
-  transition: background 0.2s ease;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.muted};
-  }
-
-  @media (width <= 35.1875rem) {
-    display: block;
-    margin-bottom: 1.5rem;
-    overflow: hidden;
-    border: 1px solid ${({ theme }) => theme.colors.muted};
-  }
-`
-
-const Td = styled.td`
-  padding: 0.75rem;
-
-  @media (width <= 35.1875rem) {
-    display: block;
-    width: 100%;
-  }
-`
-
-const TitleCell = styled(Td)`
-  flex: 0 0 30%;
-  font-weight: bold;
-`
-
-const DescriptionCell = styled(Td)`
-  flex: 1;
-
-  @media (width <= 35.1875rem) {
-    border-top: 1px solid ${({ theme }) => theme.colors.muted};
-  }
+  line-height: 1.7;
+  color: ${({ theme }) => theme.colors.mutedText};
 `

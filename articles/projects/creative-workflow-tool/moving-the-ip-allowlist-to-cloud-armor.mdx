@@ -1,0 +1,210 @@
+---
+title: 'Moving an IP Allowlist to Cloud Armor: When the Deferred Upgrade Comes Due'
+description: 'Migrating an app-layer IP check to Cloud Armor on an external load balancer: why the ingress lock is the part that actually matters, the carve-out a task queue forces, and an X-Forwarded-For reversal that 403s every user at cutover.'
+topics: ['GCP', 'Cloud Armor', 'Cloud Run', 'Security']
+category: 'infrastructure'
+published: true
+date: '2026-10-29'
+---
+
+## Intro
+
+Back when the app [first shipped to Cloud Run](/projects/creative-workflow-tool/shipping-to-cloud-run), I priced an app-layer IP check against Cloud Armor on a load balancer and picked the cheap one on purpose, staging the upgrade rather than skipping it: app-layer enforcement was right for a deployment serving mock data behind SSO, and edge enforcement would go in before the app carried anything real.
+
+That second half now has a date on it. Real data starts flowing at the beginning of next year, which makes the current quiet period the last comfortable moment to change anything load-bearing. Hardening after the real records arrive means doing it under traffic, with users to notify and a rollback that matters. So I went back to re-read the decision, expecting to confirm the plan still worked as written.
+
+It didn't. Re-reading my own `proxy.ts` with fresh eyes turned up three things I had not accounted for when I wrote that tradeoff table, one of which meant the allowlist had never covered the part of the app I'd most wanted it to cover. This article is the migration that followed: why the cheap option was weaker than I'd documented it as, the handful of edges between "create a load balancer" and "it works," and the one change that is actually load-bearing.
+
+## Why the app-layer check was weaker than advertised
+
+The original tradeoff table called app-layer enforcement "best-effort (forwarded-for header)" versus "edge-grade, unspoofable." That was accurate but too abstract. Three concrete problems:
+
+**The route matcher had a hole.** Next.js middleware runs on a path matcher, and mine excluded the auth routes so the SSO callback could function:
+
+```ts
+export const config = {
+  matcher: ['/((?!api/auth|api/jobs|_next/static|…).*)'],
+}
+```
+
+Which means the entire Auth.js surface (sign-in, OAuth callback, CSRF token, session endpoints) had **no IP restriction at all**. That's the most attack-worthy surface in the app, and the gate skipped it. I had written the allowlist up as covering the app. It covered most of the app.
+
+**It ran inside the process it protected.** An app-layer check is defeated by anything that compromises the runtime: a dependency with a malicious postinstall, an RCE, or a framework-level bypass. Next.js middleware specifically has had authorization-bypass CVEs where a crafted header skips middleware entirely, and the IP check _is_ middleware. Edge enforcement never executes your code in the first place.
+
+**It was one environment variable from failing open.** The check keyed off a single `=== '1'` environment-variable comparison, set in a long `--set-env-vars` line in the deploy workflow. Drop it in a refactor and the service is globally reachable, silently, with no alert and no diff that looks dangerous.
+
+There's a fourth one specific to this deployment: the service runs `--min-instances 1 --max-instances 1`. A publicly reachable single-instance service is trivially exhausted, and no amount of application code helps, because the request has already consumed the instance by the time your code rejects it.
+
+## The part that's actually load-bearing
+
+Cloud Armor policies attach to a **backend service** on a Google Cloud load balancer. The app had none. It was served by a Cloud Run domain mapping, which is DNS plus a managed cert and no LB at all (the whole point of [the custom-domain article](/projects/creative-workflow-tool/a-custom-domain-for-cloud-run)).
+
+So the migration is: build an external Application Load Balancer, point a serverless NEG at the Cloud Run service, attach a Cloud Armor policy with the allowlist, move DNS. Fine. But here's the piece that's easy to miss:
+
+> Cloud Armor without an ingress restriction is decorative.
+
+Cloud Run services carry an ingress setting, and mine was `all`. The auto-generated `https://<service>-<hash>.<region>.run.app` URL stays publicly reachable no matter what you put in front of the custom domain. You can build a perfect WAF, route the domain through it, and an attacker just uses the other hostname.
+
+The actual security change is one flag:
+
+```bash
+gcloud run services update workflow-tool \
+  --region=asia-northeast1 \
+  --ingress=internal-and-cloud-load-balancing
+```
+
+Everything else is plumbing to make that flag survivable. Worth noting the previous article called the always-live `.run.app` URL "a permanent fallback if DNS or the cert ever misbehaves" and judged it harmless "because every gate lives in the app and applies to both hostnames equally." That reasoning was sound while the gate was in the app. It stops being sound the moment the gate moves to the edge: the fallback becomes the bypass.
+
+One counterintuitive consequence: `--allow-unauthenticated` **stays**. It controls Cloud Run IAM (granting `allUsers` the invoker role), not network reachability. A serverless NEG does not attach an identity token when it forwards a request, so removing it makes the load balancer itself get rejected and takes the site down for everyone. Two different layers that both sound like "is this public?"
+
+## Building it, and the four things that bit
+
+The resource list is roughly what I'd estimated 4 months earlier: static IP, certificate, security policy, serverless NEG, backend service, URL map, target proxy, forwarding rule, SSL policy. The ~$25–30/mo estimate held, too.
+
+**A flag that exists on `update` but not `create`.** This fails:
+
+```bash
+gcloud compute backend-services create workflow-backend --global \
+  --load-balancing-scheme=EXTERNAL_MANAGED \
+  --security-policy=workflow-policy        # ERROR: unrecognized arguments
+```
+
+The policy attaches afterward, as a separate call. Which matters more than a typo normally would, because a backend service with no policy attached is a _working load balancer with no access control_. Verify it explicitly rather than trusting that the command ran:
+
+```bash
+gcloud compute backend-services describe workflow-backend --global \
+  --format='value(securityPolicy)'   # must not be empty
+```
+
+**An org policy requiring an explicit SSL policy.** Creating the HTTPS proxy was rejected by `constraints/compute.requireSslPolicy`. The platform forbids the _default_ TLS configuration, so you must create and attach your own:
+
+```bash
+gcloud compute ssl-policies create workflow-ssl-policy \
+  --profile=MODERN --min-tls-version=1.2
+```
+
+A nice reminder that in a governed org, the blockers aren't just IAM; constraints shape resource shape too.
+
+**A cap of 10 source ranges per rule.** An allowlist of more than ten entries doesn't fit in one rule and splits across several. Nothing deep, but it silently changes your rule numbering plan.
+
+**A certificate that provisions before cutover.** The last article's memorable failure was a managed cert that was _issued_ but not _propagated_, producing a 502 that looked like a broken deploy. A domain-mapping cert can only validate after DNS already points at Google, so that window is unavoidable. Certificate Manager with **DNS authorization** removes it entirely: you prove control with a CNAME, the cert reaches `ACTIVE` while all traffic is still on the old path, and the cutover becomes an instant DNS swap against an already-live certificate.
+
+```bash
+gcloud certificate-manager dns-authorizations create workflow-dnsauth \
+  --domain=tool.company.example
+# → returns a CNAME to add to the zone; then:
+gcloud certificate-manager certificates create workflow-cert \
+  --domains=tool.company.example \
+  --dns-authorizations=workflow-dnsauth
+```
+
+That's the same "keep your DNS records in a zone your team can write to" property paying out a third time.
+
+## The carve-out a task queue forces
+
+The app's [scheduled reminder pipeline](/projects/creative-workflow-tool/scheduled-reminders-without-locking-out-users) calls back into the app over the public internet from a managed queue service. That traffic does **not** originate from allowlisted IPs, and the provider doesn't publish a stable egress range to allowlist. A default-deny IP policy breaks it immediately.
+
+So the task routes get an explicit higher-priority allow, above the IP rules:
+
+```bash
+gcloud compute security-policies rules create 900 \
+  --security-policy=workflow-policy --action=allow \
+  --expression="request.path.startsWith('/api/jobs/')"
+```
+
+This is only acceptable because those routes were already designed not to trust the network. Every one of them verifies an OIDC token (checking both the `audience` claim and the calling service account's email) before doing any work. The IP allowlist was never what protected them; it never applied to them in the first place (they were excluded from the middleware matcher too).
+
+Still, "I've opened a path to the internet" deserves a test rather than a shrug. The test I like here costs nothing and has zero side effects: **send an unauthenticated request from a non-allowlisted IP and assert the status code tells you which layer answered.**
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://tool.company.example/api/jobs/scan
+```
+
+| result | meaning                                                                       |
+| ------ | ----------------------------------------------------------------------------- |
+| `401`  | ✅ edge allowed the path, app rejected the missing token, both layers correct |
+| `403`  | ❌ edge blocked it, the queue is about to start failing                       |
+
+A 401 is the _good_ answer, which is worth internalizing before you see it and panic. No token means the handler rejects before any work happens, so nothing is scanned, enqueued, or sent.
+
+## The cutover: ingress last
+
+The ordering falls out of asking which step breaks what:
+
+1. **Build the whole LB.** No DNS involved, no traffic affected. Smoke-test it by forcing resolution: `curl --resolve tool.company.example:443:<lb-ip> …`
+2. **Flip the A record**, delete the AAAA. (An orphaned AAAA is a real trap: IPv6-capable clients would keep resolving to the old anycast addresses and hit a path you're about to dismantle.)
+3. **Then** restrict ingress.
+4. **Then** delete the old domain mapping.
+
+Steps 1–2 are zero-downtime, because the LB and the domain mapping can both serve correctly at the same time, and only DNS decides who gets the traffic. Only step 3 closes the bypass, and by then the domain already works through the LB. No maintenance window, and no "please use this other URL for a while" message to users.
+
+Rollback at any point is a DNS change. Drop the record TTL to 60s beforehand and reverting is about a minute.
+
+## The X-Forwarded-For reversal
+
+Here's the one I'd flag hardest for anyone doing this migration.
+
+The app resolved the client IP by taking the **last** entry of `x-forwarded-for`:
+
+```ts
+const parts = (req.headers.get('x-forwarded-for') ?? '')
+  .split(',')
+  .map((s) => s.trim())
+return parts[parts.length - 1] ?? ''
+```
+
+That was correct behind a domain mapping, where the last entry is the real client. Behind an external ALB it is **not**, because the load balancer appends its own address, so the last entry is the LB. The app-layer check therefore evaluates the load balancer's IP against the allowlist, finds no match, and **403s every single user** the instant DNS cuts over.
+
+So the app-layer check must be disabled _as part of_ the cutover, not cleaned up afterward at leisure. With Cloud Armor now enforcing the same list one layer out, this is pure deletion rather than a rewrite, but it has to land in the same change window.
+
+The trap inside the trap: my pre-cutover smoke test through the LB returned a healthy `307`, which I read as "the app check survives the LB." It didn't. The request had succeeded for an unrelated reason, and the real behavior only showed up in the Cloud Run request logs after cutover: `403`s that had reached the container, which is itself the tell. A Cloud Armor denial never reaches Cloud Run at all, so **a 403 in your application logs is by definition your application's 403**, not the edge's. That one distinction resolved the whole thing.
+
+## Two failure modes worth telling apart
+
+The cutover produced two errors in a row that look similar and mean completely different things.
+
+**`no healthy upstream`.** The LB answered, so TLS and Cloud Armor worked, but there was nothing to route to. The cause was mundane: the serverless NEG was never actually attached to the backend service, because the `add-backend` call had failed earlier in a copy-pasted block and I'd verified the _policy_ attachment without verifying the _backend_ attachment. This error means routing configuration, never application health.
+
+**`504`.** This appeared right after fixing that, and resolved itself in a couple of minutes. Load balancer configuration changes propagate to frontends on their own schedule, and a backend that was just attached isn't attached everywhere yet.
+
+Which is the previous article's lesson arriving in new clothing: **a control-plane success is a statement about configuration, not about global data-plane convergence.** Last time it was a certificate; this time a backend attachment. The remedy is the same: distinguish "misconfigured" from "not yet converged" before you start changing things, or you'll fix something that wasn't broken and attribute the recovery to your fix.
+
+## Verifying with logs instead of vibes
+
+Load balancer request logging is **off by default**, which is why neither failure above had any edge-side evidence to look at. Turning it on is one flag and immediately worth it:
+
+```bash
+gcloud compute backend-services update workflow-backend --global \
+  --enable-logging --logging-sample-rate=1.0
+```
+
+What you get back is the whole policy, proven on real traffic rather than inspected in config:
+
+| status | rule    | outcome | path              |
+| ------ | ------- | ------- | ----------------- |
+| `200`  | 900     | ACCEPT  | `/api/jobs/sync`  |
+| `401`  | 900     | ACCEPT  | `/api/jobs/scan`  |
+| `403`  | default | DENY    | `/`, `/dashboard` |
+
+Every branch confirmed in one view: the queue's authenticated call succeeds, an unauthenticated probe to the same path is rejected by the app rather than the edge, and ordinary pages from non-allowlisted addresses never reach the container.
+
+The logs also answered a question I hadn't asked. Within forty minutes of the LB going live, two commodity VPS hosts had probed `/` and been denied at the edge. Under the old setup those requests would have reached the Next.js runtime before being rejected, on a single-instance service. Nothing dramatic, just background noise from the internet. But it's the difference between believing the exposure was theoretical and watching it get turned away with a timestamp on it.
+
+## Wrapping Up
+
+The deferral held up. The cheap option was genuinely right for a dev deployment serving mock data, and the work landed in the quiet window before the condition I'd written down actually arrives, which is the easiest version of this migration there will ever be. What I'd fix in hindsight isn't the decision; it's the write-up. I described the app-layer check as covering the app when the route matcher meant it demonstrably didn't, and that sentence sat in my notes for four months reassuring me about a gate that had a hole in it.
+
+That's the part I'd generalize. A deferred tradeoff is only as good as the description you leave behind, because the description is what future-you audits against instead of the code. Mine was accurate about cost and architecture and subtly wrong about coverage, which is exactly the kind of error that survives review, since nobody re-reads a decision they already agree with.
+
+Key takeaways:
+
+1. **Write down the condition for revisiting a deferred tradeoff, then act just before it arrives.** "Cheap now, upgrade when X" is a real engineering decision; "cheap now" alone is a liability you'll re-derive under pressure. Doing the upgrade while X is still approaching buys you an empty change window, no users to notify, and a rollback nobody would have noticed.
+2. **Edge access control means nothing until ingress is locked.** A load balancer with a perfect policy is decorative while the default service URL is still reachable. The flag is the change; the rest is plumbing.
+3. **`--allow-unauthenticated` is IAM, not networking.** It stays on behind a load balancer, because a serverless NEG forwards no identity. Two layers, both of which sound like "is this public?"
+4. **A path your queue calls can't be IP-restricted.** Allow it explicitly at the edge and let token verification carry the weight. Then prove it: an unauthenticated probe from outside should return **401, not 403**, and the difference tells you which layer answered.
+5. **`X-Forwarded-For` semantics change when you add a load balancer.** The entry that was the client becomes the LB. Any app-layer IP check must be disabled _during_ the cutover, not after it.
+6. **A 403 in your application logs is your application's 403.** Edge denials never reach the container, so the presence of the log line already tells you which layer to look at.
+7. **Turn on load balancer logging before you need it.** It's off by default, it's one flag, and it converts "I believe the policy is correct" into a table of real requests with the matched rule next to each one.
+8. **Distinguish "misconfigured" from "not yet converged."** `no healthy upstream` is routing; a transient `504` right after a change is propagation. Fixing the wrong one teaches you a false lesson about what fixed it.
+9. **Verify each attachment separately.** A backend service can have a security policy and no backends, or backends and no policy. Both are "created successfully," and one of them is an open door.

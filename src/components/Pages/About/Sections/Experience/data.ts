@@ -1,27 +1,28 @@
-export const EXPERIENCE_LIST = [
+export type ExperienceItem = {
+  role: string
+  org: string
+  period: string
+  description?: string
+}
+
+export const EXPERIENCE_LIST: ExperienceItem[] = [
   {
-    title: 'Frontend',
+    role: 'Developer',
+    org: 'ZOZO, Inc.',
+    period: 'Oct 2026 to present',
     description:
-      'Developed and maintained customer-facing features in Next.js, improving page speed and UX for high-traffic campaigns.',
+      'Developer productivity: tooling and workflows for engineering teams.',
   },
   {
-    title: 'SRE/Infrastructure',
+    role: 'Frontend Engineer & SRE',
+    org: 'ZOZO, Inc.',
+    period: '2023 to Sep 2026',
     description:
-      'Operated microservices on AWS EKS (Kubernetes) with Istio, Flux, Flagger, and KEDA.',
+      'Built customer-facing Next.js features, operated AWS and Kubernetes services, and improved observability and operational tooling.',
   },
   {
-    title: 'Automation & Tooling',
-    description:
-      'Created Datadog dashboards, monitors, and PagerDuty schedules using Terraform.',
+    role: 'BSc in Computer Science',
+    org: 'KAIST',
+    period: '2018 to 2022',
   },
-  {
-    title: 'Databases & Caching',
-    description:
-      'Maintained Aurora MySQL, Redis (ElastiCache), and legacy IIS services.',
-  },
-  {
-    title: 'Observability & Reliability',
-    description:
-      'Enhanced logging/monitoring practices with structured logs, correlation IDs, and alert tuning.',
-  },
-] as const
+]

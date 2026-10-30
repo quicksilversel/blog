@@ -7,6 +7,7 @@ describe('parseGitHubReference', () => {
     expect(
       parseGitHubReference('https://github.com/vercel/next.js/issues/12345'),
     ).toEqual({
+      kind: 'issue',
       owner: 'vercel',
       repo: 'next.js',
       type: 'issues',
@@ -18,6 +19,7 @@ describe('parseGitHubReference', () => {
     expect(
       parseGitHubReference('https://github.com/facebook/react/pull/42'),
     ).toEqual({
+      kind: 'issue',
       owner: 'facebook',
       repo: 'react',
       type: 'pull',
@@ -25,15 +27,33 @@ describe('parseGitHubReference', () => {
     })
   })
 
+  it('parses a repository url', () => {
+    expect(parseGitHubReference('https://github.com/vercel/next.js')).toEqual({
+      kind: 'repo',
+      owner: 'vercel',
+      repo: 'next.js',
+    })
+  })
+
   it('allows a trailing slash', () => {
     expect(
       parseGitHubReference('https://github.com/facebook/react/pull/42/'),
     ).not.toBeNull()
+    expect(
+      parseGitHubReference('https://github.com/facebook/react/'),
+    ).not.toBeNull()
   })
 
-  it('rejects non-github and non-issue urls', () => {
+  it('rejects github pages that are not repositories', () => {
+    expect(parseGitHubReference('https://github.com/vercel')).toBeNull()
+    expect(parseGitHubReference('https://github.com/orgs/vercel')).toBeNull()
+    expect(
+      parseGitHubReference('https://github.com/topics/typescript'),
+    ).toBeNull()
+  })
+
+  it('rejects non-github and unsupported urls', () => {
     expect(parseGitHubReference('https://example.com/a/b/issues/1')).toBeNull()
-    expect(parseGitHubReference('https://github.com/vercel/next.js')).toBeNull()
     expect(
       parseGitHubReference('https://github.com/vercel/next.js/discussions/1'),
     ).toBeNull()

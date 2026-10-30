@@ -1,21 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import styled from '@emotion/styled'
 import {
+  Archive,
+  BookMarked,
   CircleCheck,
   CircleDot,
   CircleSlash,
+  GitFork,
   GitMerge,
   GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
   MessageSquare,
+  Star,
 } from 'lucide-react'
 
-import type { GitHubReference } from '@/libs/utils'
+import type {
+  GitHubIssueReference,
+  GitHubReference,
+  GitHubRepoReference,
+} from '@/libs/utils'
 
 import { formatDate } from '@/libs/utils'
 
@@ -30,6 +38,15 @@ type GitHubIssue = {
   created_at: string
 }
 
+type GitHubRepo = {
+  description: string | null
+  language: string | null
+  stargazers_count: number
+  forks_count: number
+  archived: boolean
+  fork: boolean
+}
+
 type Props = {
   url: string
   reference: GitHubReference
@@ -42,7 +59,16 @@ type Status = {
   Icon: typeof CircleDot
 }
 
-const getStatus = (issue: GitHubIssue): Status => {
+type CardProps<T extends GitHubReference> = Omit<Props, 'reference'> & {
+  reference: T
+}
+
+type MetaEntry = {
+  key: string
+  node: ReactNode
+}
+
+const getIssueStatus = (issue: GitHubIssue): Status => {
   if (issue.pull_request) {
     if (issue.pull_request.merged_at)
       return { label: 'Merged', tone: 'done', Icon: GitMerge }
@@ -60,37 +86,46 @@ const getStatus = (issue: GitHubIssue): Status => {
   return { label: 'Open', tone: 'open', Icon: CircleDot }
 }
 
-const issueCache = new Map<string, Promise<GitHubIssue>>()
+const getRepoStatus = (repo: GitHubRepo): Status => {
+  if (repo.archived) return { label: 'Archived', tone: 'muted', Icon: Archive }
+  if (repo.fork) return { label: 'Fork', tone: 'muted', Icon: GitFork }
+  return { label: 'Repository', tone: 'muted', Icon: BookMarked }
+}
 
-const fetchIssue = (apiUrl: string): Promise<GitHubIssue> => {
-  const cached = issueCache.get(apiUrl)
-  if (cached) return cached
+const formatCount = (count: number): string =>
+  count >= 1000
+    ? `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`
+    : `${count}`
+
+const resourceCache = new Map<string, Promise<unknown>>()
+
+const fetchResource = <T,>(apiUrl: string): Promise<T> => {
+  const cached = resourceCache.get(apiUrl)
+  if (cached) return cached as Promise<T>
 
   const request = fetch(apiUrl, {
     headers: { Accept: 'application/vnd.github+json' },
   }).then((response) => {
     if (!response.ok) {
-      issueCache.delete(apiUrl)
+      resourceCache.delete(apiUrl)
       throw new Error(`GitHub API responded with ${response.status}`)
     }
-    return response.json() as Promise<GitHubIssue>
+    return response.json() as Promise<T>
   })
 
-  issueCache.set(apiUrl, request)
+  resourceCache.set(apiUrl, request)
   return request
 }
 
-export const GitHubCard = ({ url, reference, fallback }: Props) => {
-  const [issue, setIssue] = useState<GitHubIssue | null>(null)
+const useGitHubResource = <T,>(apiUrl: string) => {
+  const [data, setData] = useState<T | null>(null)
   const [failed, setFailed] = useState(false)
-
-  const apiUrl = `https://api.github.com/repos/${reference.owner}/${reference.repo}/issues/${reference.number}`
 
   useEffect(() => {
     let active = true
-    fetchIssue(apiUrl)
-      .then((data) => {
-        if (active) setIssue(data)
+    fetchResource<T>(apiUrl)
+      .then((resource) => {
+        if (active) setData(resource)
       })
       .catch(() => {
         if (active) setFailed(true)
@@ -100,44 +135,154 @@ export const GitHubCard = ({ url, reference, fallback }: Props) => {
     }
   }, [apiUrl])
 
+  return { data, failed }
+}
+
+export const GitHubCard = ({ url, reference, fallback }: Props) =>
+  reference.kind === 'repo' ? (
+    <RepoCard url={url} reference={reference} fallback={fallback} />
+  ) : (
+    <IssueCard url={url} reference={reference} fallback={fallback} />
+  )
+
+const IssueCard = ({
+  url,
+  reference,
+  fallback,
+}: CardProps<GitHubIssueReference>) => {
+  const { data: issue, failed } = useGitHubResource<GitHubIssue>(
+    `https://api.github.com/repos/${reference.owner}/${reference.repo}/issues/${reference.number}`,
+  )
+
   if (failed) return <>{fallback}</>
 
-  if (!issue) {
-    return (
-      <CardLink href={url} target="_blank" rel="noopener noreferrer">
-        <Repo>
-          {reference.owner}/{reference.repo} #{reference.number}
-        </Repo>
-        <SkeletonTitle aria-hidden />
-      </CardLink>
-    )
-  }
+  const context = `${reference.owner}/${reference.repo} #${reference.number}`
 
-  const status = getStatus(issue)
+  if (!issue) return <CardSkeleton url={url} context={context} />
+
+  const status = getIssueStatus(issue)
+  const meta: MetaEntry[] = [
+    {
+      key: 'status',
+      node: <StatusLabel tone={status.tone}>{status.label}</StatusLabel>,
+    },
+    ...(issue.user ? [{ key: 'user', node: `by ${issue.user.login}` }] : []),
+    { key: 'created', node: formatDate(issue.created_at) },
+    ...(issue.comments > 0
+      ? [
+          {
+            key: 'comments',
+            node: (
+              <MetaCount>
+                <MessageSquare size={13} aria-hidden />
+                {formatCount(issue.comments)}
+              </MetaCount>
+            ),
+          },
+        ]
+      : []),
+  ]
 
   return (
     <CardLink href={url} target="_blank" rel="noopener noreferrer">
-      <Repo>
-        {reference.owner}/{reference.repo} #{reference.number}
-      </Repo>
+      <Context>{context}</Context>
       <TitleRow>
         <StatusIcon tone={status.tone}>
           <status.Icon size={18} aria-label={status.label} />
         </StatusIcon>
         <Title>{issue.title}</Title>
       </TitleRow>
-      <Meta>
-        <StatusLabel tone={status.tone}>{status.label}</StatusLabel>
-        {issue.user && <MetaItem>by {issue.user.login}</MetaItem>}
-        <MetaItem>{formatDate(issue.created_at)}</MetaItem>
-        {issue.comments > 0 && (
-          <Comments>
-            <MessageSquare size={13} aria-hidden />
-            {issue.comments}
-          </Comments>
-        )}
-      </Meta>
+      <MetaList entries={meta} />
     </CardLink>
+  )
+}
+
+const RepoCard = ({
+  url,
+  reference,
+  fallback,
+}: CardProps<GitHubRepoReference>) => {
+  const { data: repo, failed } = useGitHubResource<GitHubRepo>(
+    `https://api.github.com/repos/${reference.owner}/${reference.repo}`,
+  )
+
+  if (failed) return <>{fallback}</>
+
+  if (!repo) return <CardSkeleton url={url} context={reference.owner} />
+
+  const status = getRepoStatus(repo)
+  const meta: MetaEntry[] = [
+    ...(repo.archived || repo.fork
+      ? [
+          {
+            key: 'status',
+            node: <StatusLabel tone={status.tone}>{status.label}</StatusLabel>,
+          },
+        ]
+      : []),
+    ...(repo.language ? [{ key: 'language', node: repo.language }] : []),
+    ...(repo.stargazers_count > 0
+      ? [
+          {
+            key: 'stars',
+            node: (
+              <MetaCount>
+                <Star size={13} aria-hidden />
+                {formatCount(repo.stargazers_count)}
+              </MetaCount>
+            ),
+          },
+        ]
+      : []),
+    ...(repo.forks_count > 0
+      ? [
+          {
+            key: 'forks',
+            node: (
+              <MetaCount>
+                <GitFork size={13} aria-hidden />
+                {formatCount(repo.forks_count)}
+              </MetaCount>
+            ),
+          },
+        ]
+      : []),
+  ]
+
+  return (
+    <CardLink href={url} target="_blank" rel="noopener noreferrer">
+      <Context>{reference.owner}</Context>
+      <TitleRow>
+        <StatusIcon tone={status.tone}>
+          <status.Icon size={18} aria-label={status.label} />
+        </StatusIcon>
+        <Title>{reference.repo}</Title>
+      </TitleRow>
+      {repo.description && <Description>{repo.description}</Description>}
+      <MetaList entries={meta} />
+    </CardLink>
+  )
+}
+
+const CardSkeleton = ({ url, context }: { url: string; context: string }) => (
+  <CardLink href={url} target="_blank" rel="noopener noreferrer">
+    <Context>{context}</Context>
+    <SkeletonTitle aria-hidden />
+  </CardLink>
+)
+
+const MetaList = ({ entries }: { entries: MetaEntry[] }) => {
+  if (entries.length === 0) return null
+
+  return (
+    <Meta>
+      {entries.map((entry, index) => (
+        <Fragment key={entry.key}>
+          {index > 0 && <Separator aria-hidden>·</Separator>}
+          {entry.node}
+        </Fragment>
+      ))}
+    </Meta>
   )
 }
 
@@ -162,7 +307,7 @@ const CardLink = styled.a`
   }
 `
 
-const Repo = styled.span`
+const Context = styled.span`
   display: block;
   font-family: ${({ theme }) => theme.fontFamily.mono};
   font-size: ${({ theme }) => theme.fontSize.extraSmall};
@@ -189,6 +334,14 @@ const Title = styled.span`
   color: ${({ theme }) => theme.colors.text};
 `
 
+const Description = styled.span`
+  display: block;
+  margin-top: 6px;
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
+  line-height: 1.5;
+  color: ${({ theme }) => theme.colors.mutedText};
+`
+
 const Meta = styled.span`
   display: flex;
   flex-wrap: wrap;
@@ -199,19 +352,16 @@ const Meta = styled.span`
   color: ${({ theme }) => theme.colors.mutedText};
 `
 
+const Separator = styled.span`
+  color: ${({ theme }) => theme.colors.mutedText};
+`
+
 const StatusLabel = styled.span<{ tone: keyof typeof toneColors }>`
   font-weight: bold;
   color: ${({ theme, tone }) => toneColors[tone] || theme.colors.mutedText};
 `
 
-const MetaItem = styled.span`
-  &::before {
-    margin-right: 6px;
-    content: '·';
-  }
-`
-
-const Comments = styled.span`
+const MetaCount = styled.span`
   display: inline-flex;
   gap: 4px;
   align-items: center;

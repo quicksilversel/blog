@@ -14,6 +14,9 @@ const source = [
   '```',
   '',
   'A [link label](https://example.com) at the end.',
+  '',
+  '> [!TIP] Callout title',
+  '> Callout body.',
 ].join('\n')
 
 describe('toPlainText', () => {
@@ -34,6 +37,12 @@ describe('toPlainText', () => {
     expect(result).toContain('Real Heading')
     expect(result).toContain('bold')
     expect(result).toContain('link label')
+  })
+
+  it('strips callout markers but keeps their text', () => {
+    expect(result).not.toContain('[!TIP]')
+    expect(result).toContain('Callout title')
+    expect(result).toContain('Callout body')
   })
 
   it('collapses whitespace into single spaces', () => {
