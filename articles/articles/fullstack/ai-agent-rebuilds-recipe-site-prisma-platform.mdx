@@ -1,0 +1,240 @@
+---
+title: 'Letting an AI Agent Rebuild My App on the Prisma Platform'
+description: 'Claude Code migrated my recipe app to Prisma ORM, Prisma Postgres, and Prisma Compute. The query port needed no human fixes. Onboarding and deployment were another story.'
+topics: ['Prisma', 'Claude Code', 'Next.js', 'Postgres', 'AI']
+published: true
+date: '2026-10-29'
+---
+
+> [!Disclosure]
+> This is an unpaid collaboration with Prisma, who invited me to try the migration and reviewed the draft for factual accuracy.
+
+## TL;DR
+
+I asked Claude Code to move my recipe app from Drizzle and Neon to Prisma ORM, Prisma Postgres, and Prisma Compute. It migrated the schema and queries without me writing or fixing the code. Setup and deployment took much more help: the Console hid install logs, and a Composer version bug blocked the first deploy. I came away impressed by the migration work and frustrated by the path to a working deployment.
+
+## The tech stack
+
+```tech-stack
+[
+  { "name": "Prisma ORM 8 RC", "role": "Data access", "detail": "@prisma/orm-postgres", "group": "Moved to Prisma" },
+  { "name": "Prisma Postgres", "role": "Database", "detail": "Managed PostgreSQL", "group": "Moved to Prisma" },
+  { "name": "Prisma Compute", "role": "Hosting and deployment", "detail": "@prisma/composer + @prisma/composer-prisma-cloud", "group": "Moved to Prisma" },
+  { "name": "Next.js 16 + React 19", "role": "Application", "detail": "next + react", "group": "Kept in place" },
+  { "name": "Auth.js", "role": "Authentication", "detail": "next-auth", "group": "Kept in place" },
+  { "name": "Vercel Blob", "role": "Image storage", "detail": "@vercel/blob", "group": "Kept in place" },
+  { "name": "Claude Code", "role": "Agent tool", "detail": "Human-reviewed PRs", "group": "Migration tooling" },
+  { "name": "Fable 5", "role": "AI model", "group": "Migration tooling" }
+]
+```
+
+## The experiment, and what it can tell us
+
+This is the same tiny recipe site from my [previous migration off Supabase](/articles/frontend/migrating-supabase-to-neon-authjs-vercel-blob). Back then, I recovered a backup after the project could no longer be restored through the dashboard, then rebuilt the app on Neon, Drizzle, Auth.js, and Vercel Blob by hand.
+
+Prisma read that post and asked whether I would try their platform. I said yes because handing the migration to an AI agent sounded like a fun experiment. I wanted to see how far it could get on its own and where it would still need my help.
+
+This is a small hobby app with fewer than 100 recipes. Claude Code would replace Drizzle and Neon with Prisma ORM and Prisma Postgres, and move hosting from Vercel to Prisma Compute. Auth.js and Vercel Blob would stay. The existing Zod schemas and component contracts had to keep working.
+
+The work happened in a separate public repo and deployment, leaving the original Vercel site and Neon database alone:
+
+https://github.com/quicksilversel/yumyumyumi-prisma
+
+I reviewed PRs, completed the authentication steps myself and told the agent when they were done. I also checked the authenticated flows in the browser at the end. Calling that fully autonomous would leave out quite a lot of my job.
+
+The migration ran from October 26 to 29, 2026. I kept a migration log recording the incidents, decisions, and verification checks:
+
+https://github.com/quicksilversel/yumyumyumi-prisma/blob/main/MIGRATION_LOG.md
+
+This was one run on a small app with an existing data export and tests. It does not test scale, and it is not a controlled comparison with the previous migration, which also had to recover data and replace auth and storage. The question here is narrower: could the agent preserve this app's behavior, and where would the platform make that easier or harder?
+
+One deliberate complication: I chose the Prisma ORM 8 release candidate. On October 27, the log records `prisma`'s `latest` tag as `8.0.0-rc.27`, while `@prisma/client`'s was `7.10.1`. The setup skill recommended ORM 8 for new applications, and I told the agent to follow it. That was my decision. These findings describe that release-candidate path, with Composer packages initially at 0.35.0 and later pinned to 0.34.0 (to work around a deployment bug, explained below).
+
+## Initial setup took the most manual work
+
+Connecting GitHub in the Prisma Console started a setup job that failed with this:
+
+```text
+Setup job failed at step 'install': install_failed : npm error
+/home/user/.npm/_logs/2026-10-26T06_25_47_515Z-eresolve-report.txt
+```
+
+The Console pointed to a report on its build machine, but gave me no way to open it. The agent could not see the Console either, so I copied over the message and asked it to investigate.
+
+### The first failure had a reproducible cause
+
+Turns out, there was a real problem in my dependencies. A fresh install could pick a newer Storybook addon that required Vitest 4 or 5, while my app used Vitest 3. Installing with the committed lockfile worked; resolving dependencies without it reproduced the conflict.
+
+That suggested the setup job was resolving dependencies differently, although I could not inspect its install log to confirm how. The agent pinned the addon to a compatible version. Fresh installs passed locally, but the Console setup failed again.
+
+### The retries turned into guesswork
+
+The agent then proposed `legacy-peer-deps=true` to suppress peer checks across the repo. I vetoed that: I wanted the dependency conflict fixed, not the checks disabled. It upgraded the Vitest and Storybook packages instead.
+
+The setup job still failed. That made three failures over roughly 70 minutes, all with the same error shape. By then, fresh installs passed both locally and in clean Linux CI jobs on Node 22 and Node 24. I suspected the Console might be retrying an old checkout, but could not prove it.
+
+This was the frustrating part. I had fixes that passed everywhere I could test them, but no useful feedback from the place that kept failing. I would have appreciated the actual install logs, even as plain text. Without them, I could not tell whether the fixes were being tested or whether the builder was hitting an entirely different problem.
+
+### The next status message was misleading too
+
+Eventually, the integration stopped showing the install error. I still don't know why. The Console then showed:
+
+> Waiting for GitHub to start the first deployment. Push to the default branch to retry if it does not start.
+
+I pushed, and nothing happened. My repo had no deploy workflow.
+
+Only later did the agent find the explanation in the deploy action's README: connecting a repo was supposed to generate a workflow PR, and the failed setup job had blocked it. The [official deploy-on-push guide](https://www.prisma.io/docs/compute/deploy-on-push) explains that GitHub Actions runs the deployment. Connecting the repo alone does not deploy anything.
+
+I like having the workflow in my own repo. The Console just needed to tell me that it was missing, rather than ask me to push again.
+
+With dependency installs passing locally and in CI, I moved on to the database migration. The agent would add the deployment workflow when the app was ready.
+
+## The agent handled the database migration on its own
+
+Once dependencies were sorted out, I let the agent handle the database work: defining tables, importing data, and replacing Drizzle queries with Prisma queries. I reviewed the PRs but did not write or fix the migration code. The app's components and validation schemas stayed unchanged. After the setup problems, this part was a relief.
+
+### It had the right docs next to the code
+
+Prisma ORM 8 has a different API from the classic `@prisma/client` workflow. The agent needed instructions for the version it was using, and Prisma supplied them through [skills bundled with the installed packages](https://www.prisma.io/docs/ai/tools/skills). Running `prisma skills sync` made those references available to Claude Code.
+
+The first attempt at defining the database schema passed Prisma's generation step. The log records no visits to the docs site during that step: the bundled references were enough. This is the single feature I most want other platforms to copy. I did not have to find the right documentation and feed it to the agent myself.
+
+The CLI also caught a mistake. The agent repeated a migration-planning command just to capture its output, even though the first run had already written the migration. Prisma refused to create another one and explained why. That was a useful guardrail for an agent working without me watching every command.
+
+### The app kept working, and the database gained protections
+
+Before changing the queries, the agent wrote 24 tests against the old implementation to capture its behavior. The same assertions passed after the switch to Prisma, including checks on authentication and which records a logged-in user could change. Only the mocks needed adapting to the new client. The full unit suite finished with 127 passing tests.
+
+A separate script read the migrated recipes and bookmarks through Prisma and checked their shapes against the existing Zod schemas. I later checked the authenticated flows in the deployed app, including editing recipes and uploading images. Those checks gave me confidence that the migration preserved the behavior I cared about.
+
+The new schema also put protections in the database that my old schema lacked. Foreign keys enforced the relationships between tables, and a unique constraint prevented duplicate bookmarks for the same recipe and account. Those changes became committed migrations that later ran against the development, preview, and production databases.
+
+Drizzle could have expressed those constraints too. They were gaps in my implementation that the agent addressed during this migration. The useful outcome was a more complete schema, with a repeatable way to deploy it.
+
+There were smaller code improvements as well. The schema handled update timestamps automatically, and writes to the JSON columns no longer needed the `as never` casts in my old code. I appreciated that cleanup, especially alongside a schema I could now deploy and verify consistently.
+
+## Getting the migrated app onto Compute
+
+At this point, the migrated app built and passed its checks locally. The next job was getting it running on Prisma Compute. That meant adding the hosting configuration and a GitHub Actions workflow, then testing a preview deployment before deploying the Prisma project's production stage.
+
+The agent used Composer to declare the app and the database it needed. The [Composer deployment docs](https://www.prisma.io/docs/composer/deploying) explain how deploying that declaration creates the resources and records their state. My GitHub workflow used OIDC authentication, so I did not need a stored Prisma deploy token. I still had to configure the application secrets for Auth.js and Vercel Blob.
+
+### The existing app needed a configuration bridge
+
+The first adjustment was how the app received its settings. Composer supplies database connections and secrets through typed service bindings. My existing database client, Auth.js, and Vercel Blob integration expected environment variables instead.
+
+The agent added startup code that reads the Composer bindings and sets the environment variables those modules expect. That let the auth and upload modules stay unchanged. The first version put Node-only error handlers in a file Next.js also compiles for its edge runtime, which produced build warnings. The agent fixed that by moving the Node-only code into a separate file.
+
+I would tighten this bridge before reusing it in a more demanding app. It handles idle database connection errors by logging uncaught exceptions and unhandled rejections, but those handlers also catch unrelated failures. Its startup catch treats any initialization error as a local-development fallback. The app passed the browser checks, but startup failures need more precise handling.
+
+### A version bump broke the first deploy
+
+The first two deployment attempts failed with `DEPLOY.PREFLIGHT_FAILED`. The error said a service address was outside the app, and its docs link led to a reference with no matching error namespace.
+
+With the docs exhausted, the agent read the installed package source. It traced the exception to a compatibility shim in `@prisma/composer-prisma-cloud` 0.35.0. Pinning that package and `@prisma/composer` to 0.34.0 made the next deploy succeed. That was also the version recorded in the shipped Composer skill.
+
+That got a preview version running in Tokyo. Composer created a fresh database for it and applied the committed schema migration. The database started empty, so this preview let the agent check that the app could connect and run queries before any production data was imported.
+
+That pin is a demonstrated workaround for this failure. It does not prove that every package must always match a skill's frontmatter version. My practical lesson is to record the working package set, keep the references in sync, and treat upgrades as something to verify. Here, even a minor version change needed that care.
+
+### The production stage hit a different problem
+
+With the preview working, merging the deployment PR triggered a deploy to the Prisma project's production stage. That branch already contained the database I had created manually during setup. Composer refused to deploy resources into a branch where it had no state describing that existing database.
+
+This error was useful. `HostedStateBootstrapError` named the resource, explained why deploying could recreate it, and listed the ways out. I deleted the temporary database, whose contents were reproducible from the export, then reran the deployment and seeded the replacement.
+
+That was a conflict in my setup. The platform was right to stop. Compared with the unreadable install report, the difference was enormous: I could understand the risk and authorize a specific action without guessing.
+
+## What it was like to run on Compute
+
+After resolving the deployment failures, I had a working Prisma deployment in Tokyo. I checked login, recipe editing, bookmarks, and image uploads in the browser. The existing Vercel site stayed in place for its users; this was the separate deployment used for the evaluation.
+
+The successful deploys were reasonably short:
+
+| Operation                       | Reported duration |
+| ------------------------------- | ----------------- |
+| First successful preview deploy | 1m 11s            |
+| Successful production deploy    | 58.6s             |
+| Unchanged redeploy              | About 40s         |
+
+These are deployment-command timings, not push-to-live measurements. They exclude whatever time GitHub spent starting the job, installing dependencies, and building the app.
+
+### I traded prerendered recipes for request-time rendering
+
+The old home page used ISR, and recipe pages were generated ahead of time. The Compute setup made both routes dynamic because the service bindings used to reach the database were unavailable during the build.
+
+That was a regression in this migration's rendering setup. It is not enough evidence to claim that Compute cannot support any database-backed static rendering or ISR configuration. It did mean my CI build could run without database access, because it no longer queried the database to generate those pages.
+
+The production check recorded **8.4 seconds to first byte on the first request after idle**, with warm requests around **0.9 seconds**. Those are spot observations, not a benchmark: the log does not record a sample count or enough measurement conditions to isolate app startup, connection setup, and query time. I also did not collect an equivalent baseline on Vercel and Neon.
+
+Still, eight seconds is noticeable when you want to open a recipe. I can accept it for this site. I would measure repeated idle-to-first-request behavior before making the same choice for a public-facing app.
+
+### The free tier felt generous for a hobby app
+
+I appreciated the free allowance, so I compared selected free and entry-level paid plans for the services involved in these migrations. Figures were checked on October 30, 2026, in USD. Hosting and databases are separate because their usage units differ; allowances are monthly unless stated otherwise.
+
+**App hosting**
+
+| Service                                                                 | Free plan                                                                                | First paid option                                                                                                                                         |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Prisma Compute](https://www.prisma.io/docs/compute/pricing)            | 1 million requests; 4 active CPU-hours; 360 GB-hours of memory; 10 GB outbound bandwidth | Starter: $10/month platform base, plus metered CPU, memory, and bandwidth. Includes 5 million requests, then $1 per million                               |
+| [Vercel Functions](https://vercel.com/docs/functions/usage-and-pricing) | Hobby: 1 million function invocations; 4 active CPU-hours; 360 GB-hours of memory        | [Pro](https://vercel.com/docs/plans/pro-plan): from $20/month, with $20 usage credit. Invocations cost $0.60 per million; CPU and memory are also metered |
+
+This compares server-side requests with function invocations. Vercel's CDN traffic has its own pricing, and the CPU, memory, and bandwidth limits can matter before an app reaches its request allowance.
+
+**Databases**
+
+| Service                                          | Free plan                                                 | First paid option                                                                                                                                                     |
+| ------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Prisma Postgres](https://www.prisma.io/pricing) | 200,000 database operations; 2 GB storage                 | Starter: the same $10/month platform base as Compute. Includes 1 million operations and 10 GB storage, then $8 per million extra operations and $2 per extra GB-month |
+| [Neon Postgres](https://neon.com/pricing)        | 100 compute-unit hours and 1 GB storage per project       | Launch: usage-based, with no monthly minimum. $0.106 per compute-unit hour and $0.35 per GB-month of storage                                                          |
+| [Supabase](https://supabase.com/pricing)         | Unlimited API requests; 500 MB database size; 5 GB egress | Pro: from $25/month, including the first project, 8 GB disk, and 250 GB egress. Additional usage and projects cost extra                                              |
+
+These units are not directly comparable: a page load can run several queries, while compute and bandwidth limits still apply even when there is no request-count cap. The Prisma Starter price covers both Prisma rows, and Supabase bundles auth and storage. This is a selected allowance comparison, not an all-in bill estimate.
+
+For this recipe app, the free hosting allowance and database give me room to experiment. Vercel also has a similar free function allowance. Idle Prisma Compute apps scale to zero without Compute charges, while Vercel Blob remains a separate service in my setup.
+
+Data recovery still matters. Prisma's [backup documentation](https://www.prisma.io/docs/postgres/database/backups) describes automatic snapshots on paid plans, and the [Compute FAQ](https://www.prisma.io/docs/compute/faq) explicitly says the Free plan has no backups. After recovering this app from a dump once, I would not mistake free hosting for a backup strategy.
+
+I also found two unresolved issues. The deploy action's destroy mode failed, while current docs describe cleanup on branch deletion, which I did not verify. A missing recipe returned HTTP 200 with the not-found page. [Next.js documents this behavior for streamed responses](https://nextjs.org/docs/app/api-reference/file-conventions/not-found), so I cannot attribute it to Compute without testing elsewhere.
+
+I removed Vercel Analytics and Speed Insights during the move and did not add replacements. Service logs are available through the [Prisma CLI](https://www.prisma.io/docs/compute/limitations#logs), but this experiment did not evaluate a complete monitoring setup. The custom domain was also outside the migration scope.
+
+## How it went, at a glance
+
+The ORM migration went smoothly. Most of my help went to setup and deployment.
+
+| Result         | Area                     | What happened                                                                                                  |
+| -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| ✅ Smooth      | Database migration       | The agent ported the schema and queries; all 24 behavior tests still passed.                                   |
+| ✅ Helpful     | Package-shipped skills   | The installed-version references were enough to generate the schema on the first attempt.                     |
+| ✅ Repeatable  | Deployments               | Preview and production each got a database with the committed migration applied.                               |
+| ❌ Frustrating | Initial setup             | A real dependency conflict was hard to diagnose because the Console hid the install logs.                       |
+| ❌ Blocked     | Composer version bug      | Version 0.35.0 failed twice; pinning both packages to 0.34.0 unblocked deployment.                             |
+| ⚠️ Tradeoffs   | Running the existing app  | This setup needed a configuration bridge, lost prerendering, and had a slow first request after idle.          |
+
+## How much help the agent needed
+
+The migration log counts **14 human assists**: six for setup and credentials, four Console message relays, three decisions or vetoes, and one destructive deletion. That count excludes PR reviews, browser checks, and other time spent supervising. Some tasks, such as cloning the repo outside the agent's sandbox, came from the agent environment rather than Prisma. By this accounting, the ORM implementation needed no execution-time intervention after the version decision. Most of my help went to access, onboarding, and deployment.
+
+## What I reported upstream
+
+I followed up on the deployment bug and documentation gaps with a bug report and two docs PRs. These links record the feedback from this migration; they do not mean the fixes have shipped.
+
+Composer bug report:
+
+https://github.com/prisma/composer/issues/394
+
+CLI error-reference docs PR:
+
+https://github.com/prisma/prisma-cli/pull/377
+
+Deploy-action troubleshooting PR:
+
+https://github.com/prisma/cloud-deploy-action/pull/21
+
+## Would I use it again?
+
+Yes. I’d try Prisma again for a new TypeScript app where deploying the application and database together is useful. The ORM migration went smoothly, and the preview stage gave me a fresh database to verify.
+
+Before moving an existing Next.js app, I’d test database-backed prerendering and measure cold-start latency. I’d also decide on a backup plan before relying on the free tier. The ORM work gave me confidence, but I’d want clearer setup logs before recommending the same migration to someone else.
