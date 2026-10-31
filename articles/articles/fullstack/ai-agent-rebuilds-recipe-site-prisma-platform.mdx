@@ -204,14 +204,14 @@ I removed Vercel Analytics and Speed Insights during the move and did not add re
 
 The ORM migration went smoothly. Most of my help went to setup and deployment.
 
-| Result         | Area                     | What happened                                                                                                  |
-| -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| ✅ Smooth      | Database migration       | The agent ported the schema and queries; all 24 behavior tests still passed.                                   |
-| ✅ Helpful     | Package-shipped skills   | The installed-version references were enough to generate the schema on the first attempt.                     |
-| ✅ Repeatable  | Deployments               | Preview and production each got a database with the committed migration applied.                               |
-| ❌ Frustrating | Initial setup             | A real dependency conflict was hard to diagnose because the Console hid the install logs.                       |
-| ❌ Blocked     | Composer version bug      | Version 0.35.0 failed twice; pinning both packages to 0.34.0 unblocked deployment.                             |
-| ⚠️ Tradeoffs   | Running the existing app  | This setup needed a configuration bridge, lost prerendering, and had a slow first request after idle.          |
+| Result         | Area                     | What happened                                                                                         |
+| -------------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| ✅ Smooth      | Database migration       | The agent ported the schema and queries; all 24 behavior tests still passed.                          |
+| ✅ Helpful     | Package-shipped skills   | The installed-version references were enough to generate the schema on the first attempt.             |
+| ✅ Repeatable  | Deployments              | Preview and production each got a database with the committed migration applied.                      |
+| ❌ Frustrating | Initial setup            | A real dependency conflict was hard to diagnose because the Console hid the install logs.             |
+| ❌ Blocked     | Composer version bug     | Version 0.35.0 failed twice; pinning both packages to 0.34.0 unblocked deployment.                    |
+| ⚠️ Tradeoffs   | Running the existing app | This setup needed a configuration bridge, lost prerendering, and had a slow first request after idle. |
 
 ## How much help the agent needed
 
