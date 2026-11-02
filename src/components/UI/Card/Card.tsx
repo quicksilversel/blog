@@ -39,7 +39,7 @@ export const Card = ({
           {subtitle && <Subtitle>{subtitle}</Subtitle>}
           {description && <Description>{description}</Description>}
           {topics?.length && (
-            <TopicList>
+            <TopicList hasImage={showImage} size={size}>
               {topics.map((topic) => (
                 <Topic key={topic}>{topic}</Topic>
               ))}
@@ -48,15 +48,11 @@ export const Card = ({
         </Contents>
         {showImage && (
           <ImageContainer>
-            <Image
+            <CatImage
               src="/cat-black.png"
               alt=""
               width={size === 'large' ? 80 : 60}
               height={0}
-              style={{
-                width: 'auto',
-                height: 'auto',
-              }}
               aria-hidden
               priority
               loading="eager"
@@ -102,9 +98,14 @@ const Description = styled.p`
   white-space: preserve pretty;
 `
 
-const TopicList = styled.div`
+const TopicList = styled.div<{ hasImage: boolean; size: Props['size'] }>`
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  padding-right: ${({ hasImage, size }) => {
+    if (!hasImage) return '0'
+    return size === 'large' ? '6.5rem' : '5.5rem'
+  }};
   margin-top: 16px;
 `
 
@@ -124,4 +125,9 @@ const ImageContainer = styled.div`
   @media (width <= 35.1875rem) {
     max-width: 80px;
   }
+`
+
+const CatImage = styled(Image)`
+  width: auto;
+  height: auto;
 `

@@ -1,19 +1,7 @@
-import type { Blockquote, Nodes, Paragraph, Root } from 'mdast'
+import type { Paragraph, Root } from 'mdast'
 
-/**
- * Turns GitHub style alerts into callouts:
- *
- *     > [!NOTE]
- *     > Body text.
- *
- *     > [!TIP] Custom title
- *     > Body text.
- *
- * The marker is stripped from the content and the blockquote is tagged with
- * `data-callout` (and `data-callout-title`), which the Blockquote markup
- * component renders as a Callout. Unknown types fall back to the default
- * callout style, so no list of types is duplicated here.
- */
+import { visitNodes } from './visitNodes'
+
 const MARKER_PATTERN = /^\[!(\w+)\]\s*(.*)$/
 
 type Marker = {
@@ -21,11 +9,6 @@ type Marker = {
   title?: string
 }
 
-/**
- * Remark keeps a soft line break inside the text node, so the marker and the
- * first line of the body share one value: `"[!NOTE] Title\nBody"`. Strips the
- * marker line off that node and returns what it held.
- */
 const takeMarker = (paragraph: Paragraph): Marker | null => {
   const [first] = paragraph.children
   if (first?.type !== 'text') return null
@@ -46,18 +29,8 @@ const takeMarker = (paragraph: Paragraph): Marker | null => {
   return { type: type.toLowerCase(), title: title.trim() || undefined }
 }
 
-const forEachBlockquote = (
-  node: Nodes,
-  visitor: (blockquote: Blockquote) => void,
-): void => {
-  if (node.type === 'blockquote') visitor(node)
-  if ('children' in node) {
-    node.children.forEach((child) => forEachBlockquote(child, visitor))
-  }
-}
-
 export const remarkCallouts = () => (tree: Root) => {
-  forEachBlockquote(tree, (blockquote) => {
+  visitNodes(tree, 'blockquote', (blockquote) => {
     const [first] = blockquote.children
     if (first?.type !== 'paragraph') return
 

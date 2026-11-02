@@ -3,11 +3,18 @@ import { promises as fs } from 'fs'
 import matter from 'gray-matter'
 import readingTime from 'reading-time'
 
+export type { Heading } from './getHeadings'
+export { getHeadings } from './getHeadings'
+export type { CodeMeta } from './parseCodeMeta'
+export { parseCodeMeta } from './parseCodeMeta'
+export { rehypeImageSize } from './rehypeImageSize'
+export { remarkCallouts } from './remarkCallouts'
+export { remarkCodeMeta } from './remarkCodeMeta'
+
 type ParsedMarkdown = {
   frontmatter: Record<string, unknown>
   content: string
   readingTime: string
-  rawSource: string
 }
 
 export async function parseMarkdownFile(
@@ -20,7 +27,6 @@ export async function parseMarkdownFile(
     frontmatter,
     content,
     readingTime: readingTime(source).text,
-    rawSource: source,
   }
 }
 

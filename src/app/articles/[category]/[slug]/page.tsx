@@ -6,9 +6,10 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
+import { MdxRenderer } from '@/components/Pages/Article/ArticleDetail/MdxRenderer'
 import { getArticles } from '@/libs/getArticles'
 import { getRelatedArticles } from '@/libs/getRelatedArticles'
-import { parseMarkdownFile } from '@/libs/markdown'
+import { getHeadings, parseMarkdownFile } from '@/libs/markdown'
 import { ARTICLE_PATH } from '@/utils/constants'
 
 type Props = {
@@ -91,7 +92,7 @@ export default async function ArticlePage({ params }: Props) {
     notFound()
   }
 
-  const { frontmatter, content, readingTime, rawSource } =
+  const { frontmatter, content, readingTime } =
     await parseMarkdownFile(filePath)
 
   const relatedArticles = await getRelatedArticles(
@@ -132,7 +133,6 @@ export default async function ArticlePage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <ArticleDetail
-        content={content}
         frontmatter={{
           title: String(frontmatter.title),
           date: frontmatter.date ? String(frontmatter.date) : undefined,
@@ -141,7 +141,7 @@ export default async function ArticlePage({ params }: Props) {
             : undefined,
           topics: frontmatter.topics as string[] | undefined,
         }}
-        rawContent={rawSource}
+        headings={getHeadings(content)}
         relatedArticles={relatedArticles}
         readingTime={readingTime}
         breadcrumbItems={[
@@ -153,7 +153,9 @@ export default async function ArticlePage({ params }: Props) {
           },
           { label: String(frontmatter.title) },
         ]}
-      />
+      >
+        <MdxRenderer content={content} />
+      </ArticleDetail>
     </>
   )
 }

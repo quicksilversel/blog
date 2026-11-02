@@ -6,8 +6,9 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
+import { MdxRenderer } from '@/components/Pages/Article/ArticleDetail/MdxRenderer'
 import { getArticles } from '@/libs/getArticles'
-import { parseMarkdownFile } from '@/libs/markdown'
+import { getHeadings, parseMarkdownFile } from '@/libs/markdown'
 import { SNIPPETS_PATH } from '@/utils/constants'
 
 type Props = {
@@ -88,7 +89,6 @@ export default async function SnippetPage({ params }: Props) {
     <main>
       <article>
         <ArticleDetail
-          content={content}
           frontmatter={{
             title: String(frontmatter.title),
             date: frontmatter.date ? String(frontmatter.date) : undefined,
@@ -102,7 +102,10 @@ export default async function SnippetPage({ params }: Props) {
             { label: 'Snippets', href: '/snippets' },
             { label: String(frontmatter.title) },
           ]}
-        />
+          headings={getHeadings(content)}
+        >
+          <MdxRenderer content={content} />
+        </ArticleDetail>
       </article>
     </main>
   )

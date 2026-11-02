@@ -1,0 +1,1 @@
+export { HeadingAnchor } from './HeadingAnchor'

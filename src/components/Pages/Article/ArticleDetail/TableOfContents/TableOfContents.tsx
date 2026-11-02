@@ -1,39 +1,16 @@
-import { useMemo } from 'react'
+'use client'
 
 import styled from '@emotion/styled'
 import { ChevronDown } from 'lucide-react'
 import Link from 'next/link'
 
-type TocItem = {
-  id: string
-  text: string
-  level: number
-}
+import type { Heading } from '@/libs/markdown'
 
 type Props = {
-  content: string
+  headings: Heading[]
 }
 
-export function TableOfContents({ content }: Props) {
-  const headings = useMemo(() => {
-    const headingRegex = /^(#{2,3})\s+(.+)$/gm
-    const extractedHeadings: TocItem[] = []
-    let match
-
-    while ((match = headingRegex.exec(content)) !== null) {
-      const level = match[1].length
-      const text = match[2].replace(/[*_`]/g, '')
-      const id = text
-        .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/\s+/g, '-')
-
-      extractedHeadings.push({ id, text, level })
-    }
-
-    return extractedHeadings
-  }, [content])
-
+export function TableOfContents({ headings }: Props) {
   if (headings.length === 0) {
     return null
   }
