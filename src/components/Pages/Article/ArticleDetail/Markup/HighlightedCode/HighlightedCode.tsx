@@ -5,6 +5,7 @@ import { ReactNode, isValidElement, useMemo, useState } from 'react'
 import styled from '@emotion/styled'
 import { Clipboard, ClipboardCheck } from 'lucide-react'
 
+import { parseCodeMeta } from '@/libs/markdown/parseCodeMeta'
 import { highlightCode } from '@/libs/shiki'
 
 type Props = {
@@ -14,6 +15,7 @@ type Props = {
 type CodeProps = {
   children?: string
   className?: string
+  'data-meta'?: string
 }
 
 export const HighlightedCode = ({ children }: Props) => {
@@ -24,6 +26,11 @@ export const HighlightedCode = ({ children }: Props) => {
   const code = typeof codeContent === 'string' ? codeContent.trim() : ''
   const language =
     codeElement?.props.className?.replace('language-', '').trim() || 'text'
+
+  const { title, highlightedLines, showLineNumbers } = useMemo(
+    () => parseCodeMeta(codeElement?.props['data-meta']),
+    [codeElement],
+  )
 
   const tokens = useMemo(
     () => (code ? highlightCode(code, language) : []),
@@ -40,15 +47,23 @@ export const HighlightedCode = ({ children }: Props) => {
 
   return (
     <CodeContainer>
-      <CopyButton onClick={handleCopy} title={copied ? 'Copied!' : 'Copy code'}>
+      {title && <TitleBar>{title}</TitleBar>}
+      <CopyButton
+        onClick={handleCopy}
+        hasTitle={Boolean(title)}
+        title={copied ? 'Copied!' : 'Copy code'}
+      >
         {copied ? <ClipboardCheck /> : <Clipboard />}
       </CopyButton>
-      <Pre>
+      <Pre hasTitle={Boolean(title)}>
         <CodeWrapper>
           {tokens.map((line, lineIndex) => (
-            <Line key={`line-${lineIndex}`}>
-              <LineNumber>{lineIndex + 1}</LineNumber>
-              <LineContent>
+            <Line
+              key={`line-${lineIndex}`}
+              highlighted={highlightedLines.has(lineIndex + 1)}
+            >
+              {showLineNumbers && <LineNumber>{lineIndex + 1}</LineNumber>}
+              <LineContent indented={!showLineNumbers}>
                 {line.map((token, tokenIndex) => (
                   <span
                     key={`token-${tokenIndex}`}
@@ -74,9 +89,19 @@ const CodeContainer = styled.div`
   margin: 16px 0;
 `
 
-const CopyButton = styled.button`
+const TitleBar = styled.div`
+  padding: 8px 16px;
+  font-family: ${({ theme }) => theme.fontFamily.mono};
+  font-size: ${({ theme }) => theme.fontSize.extraSmall};
+  color: ${({ theme }) => theme.colors.mutedText};
+  background-color: ${({ theme }) => theme.colors.floating};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.muted};
+  border-radius: 8px 8px 0 0;
+`
+
+const CopyButton = styled.button<{ hasTitle: boolean }>`
   position: absolute;
-  top: 8px;
+  top: ${({ hasTitle }) => (hasTitle ? '2px' : '8px')};
   right: 8px;
   z-index: 1;
   padding: 8px;
@@ -98,16 +123,20 @@ const CopyButton = styled.button`
   svg {
     font-size: 18px;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
 `
 
-const Pre = styled.pre`
+const Pre = styled.pre<{ hasTitle: boolean }>`
   margin: 0;
   overflow-x: auto;
   font-family: ${({ theme }) => theme.fontFamily.mono};
   font-size: ${({ theme }) => theme.fontSize.extraSmall};
   line-height: 1.6;
   background-color: ${({ theme }) => theme.colors.syntaxBackground};
-  border-radius: 8px;
+  border-radius: ${({ hasTitle }) => (hasTitle ? '0 0 8px 8px' : '8px')};
 `
 
 const CodeWrapper = styled.div`
@@ -116,11 +145,19 @@ const CodeWrapper = styled.div`
   padding: 16px 0;
 `
 
-const Line = styled.div`
+const Line = styled.div<{ highlighted: boolean }>`
   display: table-row;
+  background-color: ${({ highlighted }) =>
+    highlighted ? 'rgb(255, 255, 255, 0.08)' : 'transparent'};
+
+  & > :first-of-type {
+    box-shadow: ${({ highlighted, theme }) =>
+      highlighted ? `inset 3px 0 0 ${theme.colors.primary}` : 'none'};
+  }
 
   &:hover {
-    background-color: rgb(255, 255, 255, 0.05);
+    background-color: ${({ highlighted }) =>
+      highlighted ? 'rgb(255, 255, 255, 0.12)' : 'rgb(255, 255, 255, 0.05)'};
   }
 `
 
@@ -136,11 +173,11 @@ const LineNumber = styled.span`
   opacity: 0.5;
 `
 
-const LineContent = styled.span`
+const LineContent = styled.span<{ indented: boolean }>`
   display: table-cell;
   width: 100%;
   padding-right: 16px;
-  padding-left: 0;
+  padding-left: ${({ indented }) => (indented ? '16px' : '0')};
   font-size: inherit;
   overflow-wrap: break-word;
   white-space: pre-wrap;

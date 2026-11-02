@@ -48,4 +48,17 @@ describe('toPlainText', () => {
   it('collapses whitespace into single spaces', () => {
     expect(result).not.toMatch(/\s{2,}/)
   })
+
+  it('strips MDX component tags but indexes what they wrap', () => {
+    const mdx = toPlainText(
+      ['<Sidenote>', 'An aside worth finding.', '</Sidenote>'].join('\n'),
+    )
+
+    expect(mdx).not.toContain('Sidenote')
+    expect(mdx).toContain('An aside worth finding.')
+  })
+
+  it('leaves self-closing components out of the indexed text', () => {
+    expect(toPlainText('Before <Demo rows={10} /> after')).toBe('Before after')
+  })
 })

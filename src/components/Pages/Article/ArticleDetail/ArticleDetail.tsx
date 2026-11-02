@@ -1,15 +1,15 @@
 'use client'
 
-import type { ComponentProps } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 
 import styled from '@emotion/styled'
 
 import type { Article } from '@/libs/getArticles/types'
 import type { ProjectArticle } from '@/libs/getProjects'
+import type { Heading } from '@/libs/markdown'
 
 import { ArticleBody } from '@/components/Pages/Article/ArticleDetail/Body'
 import { ArticleHeader } from '@/components/Pages/Article/ArticleDetail/Header'
-import { MarkdownRenderer } from '@/components/Pages/Article/ArticleDetail/MarkdownRenderer'
 import { TableOfContents } from '@/components/Pages/Article/ArticleDetail/TableOfContents'
 import { RelatedArticles } from '@/components/Pages/Article/RelatedArticles'
 import { Breadcrumb } from '@/components/UI/Breadcrumb'
@@ -39,18 +39,18 @@ type ArticleProps =
     }
 
 type Props = {
-  content: string
+  children: ReactNode
   frontmatter: ArticleFrontmatter
-  rawContent?: string
+  headings?: Heading[]
   breadcrumbItems?: ComponentProps<typeof Breadcrumb>['items']
   relatedArticles?: Article[]
   readingTime?: string
 } & ArticleProps
 
 export const ArticleDetail = ({
-  content,
+  children,
   frontmatter,
-  rawContent,
+  headings,
   isProject,
   project,
   breadcrumbItems,
@@ -69,10 +69,8 @@ export const ArticleDetail = ({
           topics={frontmatter.topics}
           readingTime={readingTime}
         />
-        {rawContent && <TableOfContents content={rawContent} />}
-        <ArticleBody>
-          <MarkdownRenderer content={content} />
-        </ArticleBody>
+        {headings && <TableOfContents headings={headings} />}
+        <ArticleBody>{children}</ArticleBody>
         {isProject && project && <ProjectNavigation {...project} />}
         {!isProject && relatedArticles && relatedArticles.length > 0 && (
           <RelatedArticles articles={relatedArticles} />

@@ -1,3 +1,5 @@
+'use client'
+
 import type { AnchorHTMLAttributes, ReactNode } from 'react'
 
 import styled from '@emotion/styled'

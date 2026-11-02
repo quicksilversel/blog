@@ -6,8 +6,9 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 
 import { ArticleDetail } from '@/components/Pages/Article/ArticleDetail'
+import { MdxRenderer } from '@/components/Pages/Article/ArticleDetail/MdxRenderer'
 import { getProjects } from '@/libs/getProjects'
-import { parseMarkdownFile } from '@/libs/markdown'
+import { getHeadings, parseMarkdownFile } from '@/libs/markdown'
 import { PROJECTS_PATH } from '@/utils/constants'
 
 type Props = {
@@ -93,7 +94,7 @@ export default async function ProjectArticlePage({ params }: Props) {
     notFound()
   }
 
-  const { frontmatter, content, readingTime, rawSource } =
+  const { frontmatter, content, readingTime } =
     await parseMarkdownFile(filePath)
 
   const projects = await getProjects()
@@ -107,14 +108,13 @@ export default async function ProjectArticlePage({ params }: Props) {
 
   return (
     <ArticleDetail
-      content={content}
       frontmatter={{
         title: String(frontmatter.title),
         date: frontmatter.date ? String(frontmatter.date) : undefined,
         updated: frontmatter.updated ? String(frontmatter.updated) : undefined,
         topics: frontmatter.topics as string[] | undefined,
       }}
-      rawContent={rawSource}
+      headings={getHeadings(content)}
       isProject
       readingTime={readingTime}
       project={{
@@ -128,6 +128,8 @@ export default async function ProjectArticlePage({ params }: Props) {
         { label: project.title, href: `/projects/${project.slug}` },
         { label: String(frontmatter.title) },
       ]}
-    />
+    >
+      <MdxRenderer content={content} />
+    </ArticleDetail>
   )
 }

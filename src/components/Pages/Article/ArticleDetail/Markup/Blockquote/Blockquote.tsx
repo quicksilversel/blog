@@ -1,3 +1,5 @@
+'use client'
+
 import type { ReactNode } from 'react'
 
 import styled from '@emotion/styled'
@@ -6,7 +8,6 @@ import { Callout } from '@/components/UI/Callout'
 
 type Props = {
   children?: ReactNode
-  /** Set by the remarkCallouts plugin for `> [!NOTE]` style blockquotes. */
   'data-callout'?: string
   'data-callout-title'?: string
 }

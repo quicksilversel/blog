@@ -14,6 +14,7 @@ export function toPlainText(source: string): string {
     .replace(/```[\s\S]*?```/g, ' ') // fenced code blocks
     .replace(/`[^`]*`/g, ' ') // inline code
     .replace(/^(\s*>\s*)\[!\w+\]\s*/gm, '$1') // callout markers, keeping any title
+    .replace(/<\/?[A-Z][\w.]*(?:\s[^>]*?)?\/?>/g, ' ') // MDX component tags, keeping any children
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // links/images keep their text
     .replace(/[#>*_~|>-]/g, ' ') // markdown punctuation
     .replace(/\s+/g, ' ') // collapse whitespace

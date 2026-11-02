@@ -1,3 +1,5 @@
+'use client'
+
 import type { ReactNode } from 'react'
 
 import styled from '@emotion/styled'
@@ -9,7 +11,7 @@ export const Li = ({ children }: { children?: ReactNode }) => {
 const StyledLi = styled.li`
   position: relative;
   margin-top: 0.5rem;
-  font-size: ${({ theme }) => theme.fontSize.small};
+  font-size: ${({ theme }) => theme.fontSize.medium};
   list-style: none;
   counter-increment: ol-counter;
 

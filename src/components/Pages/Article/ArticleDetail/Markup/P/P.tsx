@@ -1,3 +1,5 @@
+'use client'
+
 import type { ReactNode } from 'react'
 
 import styled from '@emotion/styled'
@@ -8,5 +10,5 @@ export const P = ({ children }: { children?: ReactNode }) => {
 
 const StyledP = styled.p`
   margin-block: 1rem;
-  font-size: ${({ theme }) => theme.fontSize.small};
+  font-size: ${({ theme }) => theme.fontSize.medium};
 `
