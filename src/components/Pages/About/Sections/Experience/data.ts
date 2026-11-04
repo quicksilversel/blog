@@ -7,18 +7,11 @@ export type ExperienceItem = {
 
 export const EXPERIENCE_LIST: ExperienceItem[] = [
   {
-    role: 'Developer',
+    role: 'Frontend, SRE and Developer Productivity',
     org: 'ZOZO, Inc.',
-    period: 'Oct 2026 to present',
+    period: '2023 to present',
     description:
-      'Developer productivity: tooling and workflows for engineering teams.',
-  },
-  {
-    role: 'Frontend Engineer & SRE',
-    org: 'ZOZO, Inc.',
-    period: '2023 to Sep 2026',
-    description:
-      'Built customer-facing Next.js features, operated AWS and Kubernetes services, and improved observability and operational tooling.',
+      'Built customer-facing Next.js features, operated AWS and Kubernetes services, and improved observability and operational tooling. Now working on developer productivity: tooling and workflows for engineering teams.',
   },
   {
     role: 'BSc in Computer Science',
