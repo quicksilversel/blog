@@ -6,6 +6,7 @@ import type { TopicSummary } from '@/libs/getTopics'
 
 import { Contact } from './Sections/Contact'
 import { Experience } from './Sections/Experience'
+import { HowIWrite } from './Sections/HowIWrite'
 import { Intro } from './Sections/Intro'
 import { Writing } from './Sections/Writing'
 
@@ -19,6 +20,7 @@ export const About = ({ topics }: Props) => {
       <Intro />
       <Experience />
       <Writing topics={topics} />
+      <HowIWrite />
       <Contact />
     </Container>
   )

@@ -31,7 +31,10 @@ When asked to write or edit an article:
 
 1. **No em dashes.** Use commas, periods, or parentheses instead. This applies to all prose in articles and snippets, and is enforced: `npm run lint:content` (part of `npm run lint`) scans every `.mdx` file, skipping code blocks, and fails on an em dash. Run it after editing prose.
 2. **No confidential or personal information.** Strip company names, internal project codenames, real coworker names, internal URLs, ticket IDs, customer data, etc. Replace with generic equivalents (e.g., "a recipe app", "the analytics service", "a teammate") so the story still reads naturally without losing context. The terms themselves are confidential, so they are NOT hardcoded in the repo. For real enforcement, create a local, gitignored `.confidential-words` file at the repo root (one term per line, `#` for comments); `npm run lint:content` reads it if present and fails on any match, scanning code blocks too. Without that file the check is inactive. Note: violations print the matched term, so treat CI logs accordingly if you wire the file in via a secret.
-3. **Match the existing tone.** Before drafting, read 3 to 4 existing articles in the same category to absorb voice, structure, code-example density, and headline style. Do not invent a new format.
+3. **Match the existing tone.** Before drafting, read 3 to 4 existing articles in the same category to absorb the voice, clarity, and level of technical detail. Choose a structure and supporting formats that fit the article's subject.
+
+   The reference article for voice is `articles/articles/fullstack/claude-code-migrates-recipe-app-to-prisma.mdx`. Use it for its personal perspective, plain explanations, readable progression, and care with evidence. Its structure, length, tables, and code density are specific to that story. Choose those for each article's purpose and source material. The `write-article` skill explains how to apply the voice across different kinds of posts.
+
 4. **Keep code snippets short and focused.** Show the minimal interesting code, not exhaustive listings. (See memory.)
 5. **Frontmatter shape** (see any existing article for reference):
 
@@ -61,6 +64,34 @@ When asked to write or edit an article:
 
    A blockquote without a marker keeps the plain quote styling, so use a bare `>` for actual quotes.
 
+8. **Articles are real MDX.** They are compiled on the server by `MdxRenderer` (`next-mdx-remote/rsc`), so a post can use React components inline. The ones available by name are registered in `src/components/Pages/Article/ArticleDetail/mdxComponents.ts`; add a component there to make it usable in prose. Currently `<Callout>` and `<Sidenote>`.
+
+   Prefer plain markdown. Reach for a component only when the thing you want to show cannot be shown as prose, a code block, or an image.
+
+9. **Code fences take options** after the language, parsed by `src/libs/markdown/parseCodeMeta.ts`:
+
+   ````
+   ```ts title="src/server.ts" {2,4-5} noLineNumbers
+   ````
+
+   - `title="..."` (or `filename="..."`) renders a filename bar above the block.
+   - `{2,4-5}` highlights those 1-based lines.
+   - `noLineNumbers` hides the gutter, which suits one or two line snippets.
+
+   A malformed range is ignored rather than failing the build, so check the rendered output if a highlight does not appear.
+
+10. **Images** are measured at compile time by `rehypeImageSize`, which reads local files out of `public/` and hands real dimensions to `next/image`. Nothing is needed in the article beyond normal markdown. Add a caption with the markdown title slot:
+
+    ```
+    ![Alt text for screen readers](/folder/shot.png 'Caption shown under the image')
+    ```
+
+    Remote images cannot be measured and fall back to a plain lazy `<img>`, so prefer committing images to `public/`.
+
+11. **Footnotes** use the standard GFM syntax (`text[^1]` plus `[^1]: the note`). Use them for citations and tangents that belong at the end. Use `<Sidenote>` instead when the aside belongs beside the paragraph it relates to; on wide screens it floats into the right of the text column.
+
+12. **Heading ids** come from `rehype-slug`. The table of contents derives the same ids via `getHeadings`, which shares github-slugger's dedupe counter, so the two stay in sync automatically. Do not hand-write heading anchors.
+
 # Writing projects
 
 A project is a multi-part series living in its own folder under `articles/projects/<project-slug>/`. The folder name is NOT a category (unlike articles and snippets).
@@ -80,6 +111,7 @@ Conventions to follow when touching `src/`:
 - **Emotion `styled` blocks go at the bottom of the file**, below the React component. Never define them above the component or inline within JSX.
 - **No `any`. No `@ts-expect-error`, no `@ts-ignore`.** If the types are wrong, fix the types. If you genuinely cannot, surface the problem rather than suppressing it.
 - **Read `node_modules/next/dist/docs/` before using Next.js APIs.** This repo is on a non-trained Next.js version (see top of file).
+- **Do not write comments unless they are genuinely necessary.** Default to none. Names and structure should carry the meaning; if a comment is explaining what the code does, rewrite the code instead. The narrow cases that earn one: a non-obvious external constraint (a browser quirk, an upstream bug, a spec requirement), a deliberate choice whose alternative looks more obvious, or a value whose origin is not recoverable from the code (why a magic number is that number). Keep those to one line where possible. No JSDoc blocks on internal functions, no section banners, no restating the signature.
 
 # After making code changes
 
